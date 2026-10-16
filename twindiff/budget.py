@@ -49,12 +49,15 @@ class Budget:
         daily_cap_usd: float,
         sandbox_run_cap: int,
         prices: dict[str, Price] | None = None,
+        sandbox_run_usd: float = 0.05,
         default_price: Price = DEFAULT_PRICE,
     ) -> None:
         self.ledger = Path(ledger)
         self.total_cap_usd = total_cap_usd
         self.daily_cap_usd = daily_cap_usd
         self.sandbox_run_cap = sandbox_run_cap
+        # VERIFY: per-run sandbox price is not documented; this conservative guess counts toward the money caps.
+        self.sandbox_run_usd = sandbox_run_usd
         self.prices = prices or {}
         self.default_price = default_price
 
@@ -68,6 +71,7 @@ class Budget:
             daily_cap_usd=float(os.environ.get("DAILY_CAP_USD", "4")),
             sandbox_run_cap=int(os.environ.get("SANDBOX_RUN_CAP", "250")),
             prices=prices,
+            sandbox_run_usd=float(os.environ.get("SANDBOX_RUN_USD", "0.05")),
         )
 
     def price(self, model: str) -> Price:
@@ -90,7 +94,9 @@ class Budget:
         return {"total_usd": 0.0, "days": {}, "sandbox_runs": 0, "halted": None}
 
     def reserve(self, model: str, input_tokens: int, max_output_tokens: int) -> Hold:
-        worst = self.price(model).cost(input_tokens, max_output_tokens)
+        return self._reserve_usd(model, self.price(model).cost(input_tokens, max_output_tokens))
+
+    def _reserve_usd(self, model: str, worst: float) -> Hold:
         day = date.today().isoformat()
         with self._locked() as s:
             if s["halted"]:
@@ -116,10 +122,11 @@ class Budget:
 
     def reserve_sandbox_run(self) -> None:
         with self._locked() as s:
-            if s["halted"]:
-                raise BudgetExceeded(f"budget halted: {s['halted']}")
             if s["sandbox_runs"] >= self.sandbox_run_cap:
                 raise BudgetExceeded(f"sandbox run cap {self.sandbox_run_cap} reached")
+        # Money caps and the halt flag are checked in _reserve_usd; the run's cost stays booked.
+        self._reserve_usd("sandbox-run", self.sandbox_run_usd)
+        with self._locked() as s:
             s["sandbox_runs"] += 1
 
     def halt(self, reason: str) -> None:

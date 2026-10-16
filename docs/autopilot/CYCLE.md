@@ -17,6 +17,10 @@ Worktrees: `../twin-diff-wt/<branch>`.
 - Never end the turn while a workflow or background agent runs; block on it.
 - Never `git restore`, `git checkout -- <file>`, force-push or push to `main` except queue claims and logs.
 
+## 0.1 Wake gate (done by the routine prompt before this file is read)
+The routine's first tool call is `python3 docs/autopilot/next_run.py --gate ~/.twin-diff-autopilot/next-wake`; exit 3
+means stop with no other tool call. This file is only reached on exit 0.
+
 ## 1. Lock (heartbeat limit 170 min)
 Read `lock` (`<start ISO> <heartbeat ISO>`). If it is non-empty and the heartbeat is under 170 minutes old: append
 `SKIP: previous cycle still running` to `runs.log` and stop without touching the lock or the wake file. Otherwise
@@ -44,6 +48,10 @@ it). If usage is unreadable, do one size S task only. Last step of a run that re
 Merge only when tests, lint and format pass locally, the reviewer's critical and high findings are fixed, and CI checks
 exist and are all green (wait for checks to appear; never merge on pending or zero checks). Order: `git worktree remove
 <path>`, then `gh pr merge <n> --merge --delete-branch`, then `git pull`. Mark the task `done #<PR>`.
+**Owner-merge paths:** a PR touching `twindiff/budget.py`, `twindiff/llm.py`, `.github/workflows/`, `.claude/`,
+`.gitignore` or `CYCLE.md` is never merged by a routine. Open it, get the top-tier review, then add a `## USER` item
+asking the owner to merge. A skipped CodeQL job (private repo) counts as passing; any other skipped or pending check
+does not.
 
 ## 5. Alerts
 Only when the owner must act (a key, an account, a blocker, the weekly cap, real breakage): one issue in the private

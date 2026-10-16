@@ -1,4 +1,4 @@
-"""Token Factory chat client that cannot call a model without passing the spend cap."""
+"""Token Factory client: every chat completion passes the spend cap first."""
 
 from __future__ import annotations
 
@@ -11,11 +11,13 @@ from .budget import Budget
 
 BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "4096"))
+# Options that would change what one reservation pays for (several outputs, or usage hidden in a stream).
+FORBIDDEN_KWARGS = {"stream", "n", "best_of"}
 
 
-def estimate_tokens(messages: list[dict]) -> int:
+def estimate_tokens(messages: list[dict], tools: list[dict] | None = None) -> int:
     # About 3 chars per token, which over-counts on purpose so reservations stay conservative.
-    return len(json.dumps(messages)) // 3 + 16
+    return len(json.dumps(messages)) // 3 + len(json.dumps(tools or [])) // 3 + 16
 
 
 class GuardedLLM:
@@ -26,7 +28,9 @@ class GuardedLLM:
     def chat(self, model: str, messages: list[dict], max_tokens: int, **kwargs):
         if not 0 < max_tokens <= MAX_OUTPUT_TOKENS:
             raise ValueError(f"max_tokens must be 1..{MAX_OUTPUT_TOKENS}")
-        est_input = estimate_tokens(messages)
+        if FORBIDDEN_KWARGS & kwargs.keys():
+            raise ValueError(f"unsupported options: {sorted(FORBIDDEN_KWARGS & kwargs.keys())}")
+        est_input = estimate_tokens(messages, kwargs.get("tools"))
         hold = self.budget.reserve(model, est_input, max_tokens)
         try:
             resp = self.client.chat.completions.create(
@@ -35,11 +39,13 @@ class GuardedLLM:
         except openai.APIStatusError as err:
             if err.status_code == 402:
                 self.budget.halt("HTTP 402 from Token Factory: balance exhausted")
-            # Assume the prompt may have been billed; never assume a failed call was free.
-            self.budget.settle(hold, est_input, 0)
+            if 400 <= err.status_code < 500:
+                # Rejected request: count the prompt only, never assume it was free.
+                self.budget.settle(hold, est_input, 0)
+            # 5xx: the server may have generated output, so keep the worst-case reservation.
             raise
         except Exception:
-            self.budget.settle(hold, est_input, 0)
+            # Timeouts or dropped connections may still be billed: keep the worst-case reservation.
             raise
         usage = resp.usage
         if usage is None:
