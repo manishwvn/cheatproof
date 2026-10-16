@@ -1,0 +1,14 @@
+# Secrets and local-only files: never committed
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+LEARNING.md
+# Runtime state (spend ledger, run traces)
+runs/
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
