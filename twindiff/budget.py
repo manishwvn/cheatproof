@@ -76,7 +76,7 @@ class Budget:
         prices = {model: Price(float(p[0]), float(p[1])) for model, p in raw.items()}
         return cls(
             ledger=_ledger_path(),
-            total_cap_usd=float(os.environ.get("SPEND_CAP_USD", "30")),
+            total_cap_usd=float(os.environ.get("SPEND_CAP_USD", "20")),
             daily_cap_usd=float(os.environ.get("DAILY_CAP_USD", "4")),
             sandbox_run_cap=int(os.environ.get("SANDBOX_RUN_CAP", "250")),
             prices=prices,
