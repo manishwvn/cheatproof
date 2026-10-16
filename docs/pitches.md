@@ -110,3 +110,44 @@ Move-in and move-out phone video, sampled frames, Nemotron 3.5 Super VL. Room-by
 
 ## Eval cost estimate (Nebius judge)
 About 180 sandbox runs (30 repos × 2 branches × 3 reps), about 2–3k Nano canary calls, about 30 Ultra verdicts. Cap spend in-app at about $40.
+
+---
+
+# Round 3: novelty-first search (3 researchers at xhigh, 2026-10-16)
+
+About 45 new candidates were screened with web prior-art checks. Only two scored 4/5 for novelty. Shortlist:
+
+### N1. ClimbTwin: photo-to-physics furniture tip-over test (Best Apps & Agents, or Physical AI)
+- **Problem:** CPSC (Feb 2024) counts 217 tip-over deaths from Jan 2013 to Jul 2023, 71% of them children.
+- **What it does:** takes 2–3 photos of a dresser or TV stand plus 2 tape measurements. Nemotron VL extracts the dimensions, drawers, contents, floor type and anchors. A MuJoCo rigid-body sim on CPU applies child-climb loads (UMTRI study forces) and an open-drawer pull. Physics decides the tip and restoring moments; Ultra writes the fix list (strap, move heavy items down). Cosmos3 Reasoner checks that the sim video matches the photo.
+- **Tavily:** looks up recall notices for the identified model and the current ASTM F2057 / STURDY Act rules, which changes the verdict.
+- **Wow moment:** a toddler-weight load climbs open drawers and the dresser pitches forward. Add one wall strap, re-run, and it holds.
+- **Prior art:** BabyProof and NestProof give qualitative photo flags; SOLIDWORKS needs CAD; UMTRI is lab-only. No photo-to-dynamic-sim product was found (6 searches). **Novelty 4/5.**
+- **Risks:** photo dimension and mass errors (mitigated by user measurements and a confidence band); liability ("risk estimate, not certification"); Physical-track fit, since there's no real robot.
+- **Engine reuse:** the same pipeline could do cargo securement (LashCheck, novelty 3) or ladder slide-out (novelty 3) as extra scenario packs.
+
+### N2. Sim Referee: differential testing of physics engines (Physical AI, or Coding & Agentic)
+- **What it does:** builds one scene (box stack, bounce, pendulum) in MuJoCo, PyBullet and Genesis on CPU. Analytic oracles (free fall, energy) decide which engine is wrong. A VLM judges rendered frames. An agent (Ultra) diagnoses the parameter (timestep, solver iterations, contact margin), fixes it and re-runs until the oracle passes. Runs go in parallel in Sandboxes.
+- **Wow moment:** in a three-panel render one ball tunnels through the floor. The VLM says "passes through solid surface"; the agent changes one parameter and the panels converge.
+- **Prior art:** PHYFU (2023) fuzzes engines; PhyCritic and Cosmos-Reason judge generated video, not engines. **Novelty 4/5.**
+- **Risks:** a niche audience (sim developers); NVIDIA's own engines (Isaac, Newton) need GPUs, so they're excluded; porting a scene can itself create the divergence.
+
+### Others (novelty 3/5, kept for reference)
+- **Ledger:** double-entry fact reconciliation for writers (EBU 2025: 45% of AI news answers had significant issues). Tavily is core, but the space is crowded.
+- **Interconnection pre-check:** grid-connection application deficiency checker (LBNL 2026: about 8,200 active requests, 5+ year medians). Niche; DOE AI4IX is funding the same job.
+- **Physics Bisect:** git-bisect for robot-policy regressions in sim.
+
+### Verified caveats for all
+- Nemotron 3.5 Super VL: listed in the Token Factory model catalog (read in this session on 2026-10-16: Vision, BF16, 1,024K ctx). Its API ID and price are unverified until the smoke test. Fallback: Nemotron-Nano-V2-12b (vision).
+- Cosmos3-Super-Reasoner: shown in the Token Factory catalog as Vision 33B; video input on Nebius is unverified.
+
+## Round 3 decision (2 judges at xhigh, 2026-10-16): KEEP R1
+
+| Judge | R1 | N1 ClimbTwin | N2 Sim Referee | Ledger | Verdict |
+|---|---|---|---|---|---|
+| NVIDIA + Nebius panel (official 4, /20) | 15 | 15 | 12 | 12 | KEEP R1 (the ideas tie; N1 is riskier) |
+| Video-only skeptic + Tavily (7 columns, /35) | 24 | **26** | 21 | 24 | KEEP R1 (N1 vetoed on build risk) |
+
+- N1 is the most memorable (5/5) and has a better Tavily fit, but photo-estimated mass and friction, liability, and 8 days solo make it riskier. If N1 is entered, it goes in Best Apps & Agents, not Physical AI.
+- N1 fallback scope, if chosen: user-entered dimensions plus a static tip-moment calculation, a working demo by day 4, "risk estimate, not certification" on screen, and a weight equivalent in place of a toddler.
+- Graft into R1: show the hijack moment as a visible timeline on screen.
