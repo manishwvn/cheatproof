@@ -9,3 +9,12 @@
   independent review of `CYCLE.md` and the guards.
 - Repo: github.com/manishwvn/twin-diff (private). CI and security green on main (448dddc).
 - Next task when unblocked: T01 smoke test against live Token Factory.
+
+## Audit 2026-10-16 (independent reviewer, in place of owner approval): APPROVE WITH CHANGES
+Do these first, before any live spend:
+1. `llm.py`: set `max_retries=0`, and switch kwargs to an allowlist (blocks `max_completion_tokens`, `extra_body`). Add tests for both.
+2. `SPEND_LEDGER` must be an absolute path under `~/.twin-diff-autopilot/`, required, fail closed, so worktrees share one cap.
+3. Sandbox run reservation in a single lock.
+4. One cap number everywhere: $30, with ~$50 credits.
+5. Scope cuts: T11 becomes a static replay page merged into T12; T14 becomes an owner screen capture; corpus 10+10. Add a T07 acceptance test: the verdict flips with vs without Tavily.
+6. Hero go/no-go on Oct 22: if the canary isn't hijacked in 2 runs, change the prompt or tool surface before the eval.
