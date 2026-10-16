@@ -11,8 +11,8 @@ from .budget import Budget
 
 BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "4096"))
-# Options that would change what one reservation pays for (several outputs, or usage hidden in a stream).
-FORBIDDEN_KWARGS = {"stream", "n", "best_of"}
+# Only options that cannot change what one reservation pays for.
+ALLOWED_KWARGS = {"temperature", "top_p", "tools", "tool_choice", "response_format", "stop", "seed"}
 
 
 def estimate_tokens(messages: list[dict], tools: list[dict] | None = None) -> int:
@@ -23,13 +23,18 @@ def estimate_tokens(messages: list[dict], tools: list[dict] | None = None) -> in
 class GuardedLLM:
     def __init__(self, budget: Budget, client=None) -> None:
         self.budget = budget
-        self.client = client or openai.OpenAI(base_url=BASE_URL, api_key=os.environ["NEBIUS_API_KEY"])
+        self.client = client or openai.OpenAI(
+            # No SDK retries: each retry could be billed while only one reservation is held.
+            base_url=BASE_URL,
+            api_key=os.environ["NEBIUS_API_KEY"],
+            max_retries=0,
+        )
 
     def chat(self, model: str, messages: list[dict], max_tokens: int, **kwargs):
         if not 0 < max_tokens <= MAX_OUTPUT_TOKENS:
             raise ValueError(f"max_tokens must be 1..{MAX_OUTPUT_TOKENS}")
-        if FORBIDDEN_KWARGS & kwargs.keys():
-            raise ValueError(f"unsupported options: {sorted(FORBIDDEN_KWARGS & kwargs.keys())}")
+        if kwargs.keys() - ALLOWED_KWARGS:
+            raise ValueError(f"unsupported options: {sorted(kwargs.keys() - ALLOWED_KWARGS)}")
         est_input = estimate_tokens(messages, kwargs.get("tools"))
         hold = self.budget.reserve(model, est_input, max_tokens)
         try:

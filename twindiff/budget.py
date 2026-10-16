@@ -41,6 +41,15 @@ class Hold:
     day: str
 
 
+def _ledger_path() -> Path:
+    # One shared ledger for every checkout and worktree, so caps cannot multiply. Fail closed.
+    raw = os.environ.get("SPEND_LEDGER", "")
+    path = Path(raw).expanduser()
+    if not raw or not path.is_absolute():
+        raise BudgetExceeded("SPEND_LEDGER must be set to an absolute path (see .env.example)")
+    return path
+
+
 class Budget:
     def __init__(
         self,
@@ -66,7 +75,7 @@ class Budget:
         raw = json.loads(os.environ.get("MODEL_PRICES_JSON", "{}"))
         prices = {model: Price(float(p[0]), float(p[1])) for model, p in raw.items()}
         return cls(
-            ledger=Path(os.environ.get("SPEND_LEDGER", "runs/ledger.json")),
+            ledger=_ledger_path(),
             total_cap_usd=float(os.environ.get("SPEND_CAP_USD", "30")),
             daily_cap_usd=float(os.environ.get("DAILY_CAP_USD", "4")),
             sandbox_run_cap=int(os.environ.get("SANDBOX_RUN_CAP", "250")),

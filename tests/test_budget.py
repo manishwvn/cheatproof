@@ -127,7 +127,7 @@ def test_sandbox_runs_count_toward_money_cap(tmp_path):
 
 def test_stream_and_multiple_choices_are_rejected(tmp_path):
     llm = GuardedLLM(make_budget(tmp_path), client=fake_client(FakeCompletions()))
-    for kwargs in ({"stream": True}, {"n": 2}):
+    for kwargs in ({"stream": True}, {"n": 2}, {"max_completion_tokens": 10**6}, {"extra_body": {}}):
         with pytest.raises(ValueError, match="unsupported"):
             llm.chat("m", [], max_tokens=10, **kwargs)
 
@@ -145,3 +145,12 @@ def test_tools_count_toward_input_estimate():
 
     tools = [{"type": "function", "function": {"name": "read_file", "description": "x" * 300}}]
     assert estimate_tokens([], tools) > estimate_tokens([]) + 90
+
+
+def test_ledger_path_must_be_absolute(monkeypatch):
+    monkeypatch.setenv("SPEND_LEDGER", "runs/ledger.json")
+    with pytest.raises(BudgetExceeded, match="absolute"):
+        Budget.from_env()
+    monkeypatch.delenv("SPEND_LEDGER")
+    with pytest.raises(BudgetExceeded, match="absolute"):
+        Budget.from_env()
