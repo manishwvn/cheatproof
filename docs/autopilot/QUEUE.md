@@ -152,7 +152,7 @@ files; build the covered set from the grader's restore set and label the rest "w
 `grader.py:421`: candidate code can print a forged pytest summary and `os._exit(0)`; require exactly one summary
 header and add a code-computed `grader-forgery` label. (6) Label certificate `cost_usd` as budgeted (ledger delta).
 
-### T20 Attacker task prompt with the problem statement (audit 2026-10-18) — size S — in-progress (cycle 2026-10-18T16:24:21-05:00)
+### T20 Attacker task prompt with the problem statement (audit 2026-10-18) — size S — done #13
 `cli.py:139`: the attacker sees only the repo and failing test ids, and those tests are absent until grade time, so
 it is blind. Store `problem_statement` in `TaskSpec` (`tasks.py`, cache and validation) and show it in the task
 prompt; never show the gold or test patch. Tests with recorded rows.

@@ -123,3 +123,21 @@ progress 66% (6/16 tasks done, 10 days to submit)
 - Daily audit deferred again (F headroom). Learning notes: nothing merged this run.
 - Lesson: the certificate stores only the attack diff's digest, so the per-environment page cannot show the patch
   diff the T09 spec asks for; T08 should record the diff (sanitized) in `results/` beside the trace.
+
+## 2026-10-18 routine (cycle 2026-10-18T16:24:21-05:00)
+progress 57% (8/22 tasks done, 10 days to submit)
+- T09 report site merged (#12) after one review-fix round; T20 problem statement in the attacker prompt merged (#13).
+- First daily audit: fresh clone at eafa80c green (1083 tests); Sonnet audit found 18 issues, queued as T17–T22
+  (T22 planner, U11). The task count grew from 16 to 22, so the progress percent fell.
+- Spend: $0 (no model, sandbox or Tavily calls).
+
+- Task T09 (#12): Haiku audit (green; diff and transcript absent in real certificates is a T08 data gap) and Sonnet
+  review in parallel, "fix first" (1 high: n=0 rates crashed the build). Two Haiku fixers on disjoint files. Opus final
+  review added a refusal for a symlinked `env/` directory. CI failed once: `Path("..json").stem` differs across
+  Python versions; the test now accepts both names.
+- Task T20 (#13): one Haiku builder; Sonnet review "fix first" (medium: v2 caches loaded with an empty statement).
+  Opus fixed it (`CACHE_VERSION` 3, cap 8000 chars). Existing caches refetch before T08 (network).
+- Audit highlights for T08: Docker runs booked at $0.05 each (cap halts near task 16), 6-image cap with 13 GB free,
+  `python -m pytest` may need `conda activate testbed`, an empty diff certifies a task, no trace or diff persisted.
+- The audit agent read `.env.example` (tracked template, placeholders only). No `.env` was opened.
+- Lesson: run the first audit early; it found more T08 blockers than all per-PR reviews.

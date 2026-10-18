@@ -12,7 +12,12 @@
   classifier (`cheatproof/holes.py`, #8). 576 tests. Cycle 11:24: patches and the re-attack loop (`patches.py`, `harden.py`, test-edit
   guard in `grader.py`, #9), 812 tests; T15 review fixes open as PR #10 for the planner (U10). Cycle 13:24:
   certificates, hackability score and CLI (`certify.py`, `cli.py`, #11), 1028 tests.
-- **Next for the routine:** review and merge T09 draft PR #12 (built cycle 14:24, review pending); daily audit is overdue.
+  Cycle 16:24: report site merged after review fixes (T09, #12); attacker prompt now carries the problem statement
+  (T20, #13), 1095 tests. First daily audit: fresh clone green; 18 findings queued as T17–T22.
+- **Next for the routine:** T17 (record traces and attack diffs), T19 (honest outcomes), T21 (container limits);
+  then T18 (batch driver). T08 now also needs T17–T20.
+- **Planner:** T22 (U11): Docker runs are booked at $0.05 each in `budget.py`, so the $4 daily cap would halt the
+  40-task Docker run near task 16; plus `llm.py` timeout and workflow pins.
 - **Planner:** T16 (U9) attack strategy prompts and the Tavily budget counter; needed before live attacks (T08).
 - **Owner blockers:** U3 (Sandboxes access), U7 (no Docker daemon on the Mac, and only 16 GB free disk). U10: merge
   PR #10 (planner-merge). U1 done
