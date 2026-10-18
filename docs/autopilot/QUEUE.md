@@ -20,7 +20,7 @@ runs (T08), only Nano or Super calls within the `.env` caps.
 
 Done 2026-10-18 (planner): model IDs and prices recorded in `.env.example`; one capped Nano call worked ($0.0000168,
 ledger shared). Left: the `.env` loader for worktrees, sanitized fixtures plus their test, and the sandbox run once
-`NEBIUS_PROJECT_ID` and U3 exist. Owner: copy the new `CLASSIFIER_MODEL` and `MODEL_PRICES_JSON` lines into `.env`.
+`NEBIUS_PROJECT_ID` and U3 exist. Promo applied 2026-10-18: `.env` now has caps 20/4 and the verified model lines.
 
 ### T02 Executor interface and Docker backend; Sandboxes recon — size M — todo
 Implement `cheatproof/executor.py` per `docs/adr/0002-execution-model.md`: one interface (`start(env)`,
@@ -119,7 +119,9 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
-- **U1 Nebius Token Factory account, credits and key** (ready 2026-10-16; status 2026-10-18: account exists, billing
+- ~~**U1 Nebius Token Factory account, credits and key**~~ Done 2026-10-18: promo applied, credit received, key in
+  `.env`, caps set to 20 and 4.
+  **U1 steps (kept)** (ready 2026-10-16; status 2026-10-18: account exists, billing
   active with a $1 trial for 29 days, promo form submitted, promo code pending by email for up to 24 h):
   1. ~~https://tokenfactory.nebius.com → sign up and log in.~~ Done.
   2. ~~Add the card when billing setup asks (activation only; the app's caps keep spend inside the credits).~~ Done.

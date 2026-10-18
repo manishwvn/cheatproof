@@ -1,6 +1,7 @@
 ---
 name: reviewer
 description: Independent read-only reviewer for a branch diff against main. Use before every merge.
+model: sonnet
 tools: Read, Grep, Glob, Bash
 ---
 
