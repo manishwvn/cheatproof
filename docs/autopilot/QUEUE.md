@@ -7,7 +7,7 @@ Check: `python3 docs/autopilot/progress.py` counts the same tasks as
 
 ## Milestone: live access and executor
 
-### T01 Smoke test, model IDs and prices — size S — in-progress (cycle 2026-10-18T05:42:00-05:00) [60%]
+### T01 Smoke test, model IDs and prices — size S — waiting: U3 (sandbox run) [85%]
 Run `uv run python scripts/smoke.py`. Live scripts load `.env` from the main checkout (the parent of `git rev-parse
 --git-common-dir`), so worktrees share one key file and never copy it. Record the exact Nemotron model IDs (Nano,
 Super, Ultra) from `/v1/models` and their per-1M prices from the public Token Factory price page into `.env.example`
@@ -22,7 +22,12 @@ Done 2026-10-18 (planner): model IDs and prices recorded in `.env.example`; one 
 ledger shared). Left: the `.env` loader for worktrees, sanitized fixtures plus their test, and the sandbox run once
 `NEBIUS_PROJECT_ID` and U3 exist. Promo applied 2026-10-18: `.env` now has caps 20/4 and the verified model lines.
 
-### T02 Executor interface and Docker backend; Sandboxes recon — size M — in-progress (cycle 2026-10-18T05:42:00-05:00)
+Done 2026-10-18 (routine, #5): `cheatproof/envfile.py` (worktrees load the main checkout's `.env`),
+`cheatproof/sanitize.py` with tests, `smoke.py --record`, fixtures in `tests/fixtures/token_factory/`. Left: the
+sandbox run once U3 and `NEBIUS_PROJECT_ID` exist (then flip to `todo`). Note: Nano spent all 64 output tokens on
+reasoning (`content` null); callers that need text from Nano must allow more output tokens.
+
+### T02 Executor interface and Docker backend; Sandboxes recon — size M — done #4
 Implement `cheatproof/executor.py` per `docs/adr/0002-execution-model.md`: one interface (`start(env)`,
 `run(cmd, timeout)`, `write_file`, `diff`, `reset`, `close`) with a `DockerExecutor` now and a `SandboxExecutor`
 (contree-sdk) once U3 is done. Config flag `EXECUTOR=docker|sandbox`. Docker backend: `docker run --rm`,
@@ -33,6 +38,11 @@ default 6); refuse and alert if either fails (routines cannot remove images). If
 fake runner; one opt-in live test (`-m docker`, skipped in CI) runs `echo ok` in `python:3.12-slim`. Sandbox part
 (after U3): confirm and record with fixtures the networking flag, file upload, checkpoint and branch, timeout,
 preloaded SWE-rebench image naming and per-run cost; update ADR 0002 and resolve its `VERIFY` notes.
+
+Done 2026-10-18 (routine, #4): interface, Docker backend (no mounts, `--network none`, `--cap-drop ALL`, bounded
+output, fresh-index `diff()`, named containers with label `cheatproof=1`), guards and a Sandbox stub. The live
+Docker test has not run: the Mac has the docker CLI but no daemon (U7). The Sandbox recon moves to T01's sandbox
+step and T03/T06 once U3 is done.
 
 ### T15 Routine review fixes (planner-merge PR) — size M — todo
 Apply the "Open, repo side" items 1–11 in `~/.cheatproof-autopilot/review-2026-10-18.md` (fail-closed caps and a
@@ -73,6 +83,8 @@ explanation; it never decides the label. Tests on hand-made traces.
 off; a grader check that fails when test files were touched. Apply only the patches the found holes need, then
 re-run the gold gate, the empty gate and the same attacker with the same budget. A patch that breaks the gold gate is
 rejected and reported. Sandboxes: one branch per patch from the task checkpoint (Docker: a fresh container).
+From the T02 review: the grader must clear `__pycache__` and stale `.pyc` before grading, and must not trust the
+sandbox's own git config, attributes or filter drivers (`diff()` excludes bytecode and cache dirs).
 
 ### T07 Certificates and hackability score — size M — todo — needs T06
 `cheatproof/certify.py` and `cheatproof/cli.py`: `cheatproof harden <env-id>` writes a JSON certificate (task, image
@@ -150,8 +162,11 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 - **U5 Final product name** (before any public asset): check that "Cheatproof" is not an existing product's
   trademark, or pick another name. The lead can propose options.
 - **U6 Video voice-over and submission** (2026-10-26 to 2026-10-28).
-- **U7 Disk space for the Docker fallback** (ready 2026-10-18; needed by 2026-10-20 if U3 is still pending): free at
-  least 30 GB on the Mac (16 GB free on Oct 18) and start Docker Desktop once. Routines cannot delete images or files.
+- **U7 Disk space and a Docker daemon for the fallback** (ready 2026-10-18; needed by 2026-10-20 if U3 is still
+  pending): free at least 30 GB on the Mac (16 GB free on Oct 18). The Mac has the docker CLI but no Docker Desktop
+  app (`open -a Docker` fails, found 2026-10-18), and routines cannot install software. Install Docker Desktop (or
+  colima: `brew install colima && colima start`), start it once, then run
+  `CHEATPROOF_DOCKER_TESTS=1 uv run pytest -q -m docker` in the repo. Routines cannot delete images or files.
 - **U8 (optional) Routine folder and permission mode** (ready 2026-10-18; runs are already guarded from the parent
   folder): Claude app → Scheduled → **Cheatproof autopilot** →
   edit: set the folder to `/Users/manish/Documents/Nebius_X_Nvidia/cheatproof` and the permission mode to **Bypass**,

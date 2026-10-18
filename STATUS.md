@@ -5,11 +5,11 @@
 
 - **Built:** the spend cap (`cheatproof/budget.py`, `cheatproof/llm.py`; one $20 total cap; sandbox runs reserved
   under one lock), CI and security workflows, autopilot scripts (`next_run.py`, `progress.py`, `lock.py`) with tests,
-  guards, docs, queue T01–T14, ADR 0001 (spend cap) and ADR 0002 (executor: Sandboxes, Docker fallback). No product
-  code yet.
-- **Next for the routine:** T02 executor with the Docker backend (no key needed), then T03 task loader and T04
-  attacker on fakes.
-- **Owner blockers:** U3 (Sandboxes access), U7 (disk space for the Docker fallback: 16 GB free). U1 done
+  guards, docs, queue T01–T14, ADR 0001 (spend cap) and ADR 0002 (executor: Sandboxes, Docker fallback).
+  2026-10-18 routine: executor with Docker backend (`cheatproof/executor.py`, #4), worktree `.env` loader and
+  sanitized Token Factory fixtures (#5). 155 tests.
+- **Next for the routine:** T03 task loader and T04 attacker on fakes (both unblocked), T15 review fixes.
+- **Owner blockers:** U3 (Sandboxes access), U7 (no Docker daemon on the Mac, and only 16 GB free disk). U1 done
   2026-10-18: promo applied, key in `.env`, caps 20/4.
 - **Risk:** the Oct 21 go/no-go needs live attacker runs; T02–T04 must land by Oct 20.
 - **Routine:** `cheatproof-autopilot`, hourly at about :23, state in `~/.cheatproof-autopilot/` (see
