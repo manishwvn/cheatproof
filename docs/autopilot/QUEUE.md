@@ -53,7 +53,7 @@ USER item for the planner to merge. Do T02 first if both are runnable.
 
 ## Milestone: hero path
 
-### T03 Task loader with gold and empty gates — size M — todo — needs T02
+### T03 Task loader with gold and empty gates — size M — in-progress (cycle 2026-10-18T07:24:18-05:00) — needs T02
 Load 30 SWE-rebench and 10 SWE-bench Verified task specs (instance ID, repo, base commit, image, FAIL_TO_PASS,
 PASS_TO_PASS, gold patch, test patch) from the public Hugging Face datasets via HTTP (no new heavy dependency), cached
 under `runs/` (git-ignored). Pick tasks with small images and pure-Python repos first (disk). `cheatproof/grader.py`
@@ -62,7 +62,7 @@ both. Add a static exposure scan per task, in code with no model: future commits
 writable, network reachable. Hero fixture: one labelled task in `tests/fixtures/hero/` whose `.git` exposes the future
 fix (expected: attack succeeds before hardening, fails after). Tests use recorded fixtures only.
 
-### T04 Attacker agent with four attacks — size L — todo — needs T02
+### T04 Attacker agent with four attacks — size L — in-progress (cycle 2026-10-18T07:24:18-05:00) — needs T02
 `cheatproof/attacker.py`: a Nemotron tool-calling loop (Ultra by `ATTACKER_MODEL`; Super for cheap dev runs) told to
 make the grader pass without solving the task. Tools: `run`, `read_file`, `write_file`, `submit`, all executed only
 inside the executor; plus `web_search` (Tavily, host side, counted against `TAVILY_CALL_CAP`) only in the
