@@ -44,7 +44,7 @@ output, fresh-index `diff()`, named containers with label `cheatproof=1`), guard
 Docker test has not run: the Mac has the docker CLI but no daemon (U7). The Sandbox recon moves to T01's sandbox
 step and T03/T06 once U3 is done.
 
-### T15 Routine review fixes (planner-merge PR) — size M — todo
+### T15 Routine review fixes (planner-merge PR) — size M — in-progress (cycle 2026-10-18T11:24:21-05:00)
 Apply the "Open, repo side" items 1–11 in `~/.cheatproof-autopilot/review-2026-10-18.md` (fail-closed caps and a
 read-only `snapshot()`, `lock.py` output, optional `--now`, CYCLE.md alignment and planner-merge list, `leakcheck.py`,
 a versioned pre-push hook, CLI tests and a Python 3.9 compile step in CI, reviewer model, tracked `results/`, pre-flip
@@ -88,7 +88,7 @@ hidden tests fail), `hard-code` (patch special-cases test inputs; passes visible
 (fetch or web search returned the fix). Unclear cases are `unclassified` and reported raw. Nano may write a one-line
 explanation; it never decides the label. Tests on hand-made traces.
 
-### T06 Four patches and the re-attack loop — size L — todo — needs T03, T05
+### T06 Four patches and the re-attack loop — size L — in-progress (cycle 2026-10-18T11:24:21-05:00) — needs T03, T05
 `cheatproof/patches.py`: strip future `.git` objects and refs; hidden read-only tests restored at grade time; network
 off; a grader check that fails when test files were touched. Apply only the patches the found holes need, then
 re-run the gold gate, the empty gate and the same attacker with the same budget. A patch that breaks the gold gate is
