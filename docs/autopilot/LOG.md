@@ -95,3 +95,19 @@ progress 56% (5/16 tasks done, 10 days to submit)
   Lesson: leakcheck also flags non-secret config values; fine, keeps the rule simple.
 - Learning notes caught up for #8 and #9. Daily audit deferred again (50-minute limit); next run should do it first.
 - `timeout` is missing on macOS; wait for PR checks with `gh pr checks <n> --watch` after checks appear.
+
+## 2026-10-18 routine (cycle 2026-10-18T13:24:20-05:00)
+progress 62% (6/16 tasks done, 10 days to submit)
+- T07 certificates, hackability score and CLI merged (#11). 1028 tests. T09 report page is now unblocked.
+- Spend: $0 (no model, sandbox or Tavily calls).
+
+- Task T07 (#11): two parallel Haiku builders (certify, cli). Sonnet review "fix first" (3 high: CLI rendered
+  `by_hole` in the wrong shape; `a/b` and `a_b` wrote one file; errors after the paid run lost the spend). One round of
+  two Haiku fixers, plus one fixture fix after certify started enforcing certified invariants. Opus final review:
+  merge.
+- Learning notes for #11 written (`learning-last-pr` 11). Daily audit deferred again: F 74 at the end of T07, too
+  close to the cap for a Sonnet audit; next run with F headroom should do it first.
+- The repo's `reviewer` agent type is not loaded when the run starts in the parent folder; the review ran as a
+  general-purpose Sonnet agent told to follow `.claude/agents/reviewer.md`.
+- Lesson: when two builders share a contract in parallel, the integration test only goes green after both land;
+  brief the second fixer with the other's final key names.

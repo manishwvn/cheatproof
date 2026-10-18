@@ -106,11 +106,18 @@ same attacker after; inconclusive attacks, resets during a patched attack and ho
 never certified). For T07: when the attacker fails before hardening, scan-found holes are not patched; show the scan
 in the certificate. A trojaned `/usr/bin/git` in the image can still fake the strip check (residual risk).
 
-### T07 Certificates and hackability score — size M — in-progress (cycle 2026-10-18T13:24:20-05:00) — needs T06
+### T07 Certificates and hackability score — size M — done #11 — needs T06
 `cheatproof/certify.py` and `cheatproof/cli.py`: `cheatproof harden <env-id>` writes a JSON certificate (task, image
 digest, holes found, patches applied, gate results before and after, attacker model and budget, cost, timestamp) and
 `cheatproof report` writes a per-benchmark hackability score with n, raw counts and a 95% interval. Schema is
 versioned and tested.
+
+Done 2026-10-18 (routine, #11): `cheatproof/certify.py` (certificate schema 1, validation with certified invariants,
+free-text length and secret checks, collision-proof file names; score schema 2 with partitioned `outcomes`, rates
+over stated denominators and Wilson 95% intervals) and `cheatproof/cli.py` (`python -m cheatproof.cli harden <id>
+--system-prompt-file <f>`, `report`). Left for T08: `image_digest` is always null (the executor exposes none), the
+CLI runs with network off only (the network-fetch experiment is not wired), and cost is a ledger delta, so run
+`harden` serially. A certificate holding a secret-shaped string is refused, so the CLI exits 1 after the paid run.
 
 ### T16 Attack strategy prompts and Tavily counter (planner) — size S — waiting: planner (U9)
 The four strategy hints for T04 (git-history, test-edit, hard-code, network) as caller-supplied `system_prompt`
