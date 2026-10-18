@@ -59,12 +59,15 @@ _IN_CONTAINER_TIMEOUT = (
 # Runs in the container. A fresh index file, read from the start commit, means a replace ref, an
 # assume-unchanged bit or a skip-worktree bit in the sandbox cannot hide a change. The index path must not
 # exist yet (git rejects an empty index file), so it lives in a new temp directory. Repo-level git config
-# and attributes are still untrusted: T05/T06 restore the hidden tests at grade time.
+# and attributes are still untrusted: T05/T06 restore the hidden tests at grade time. -f stages ignored
+# files too (an attacker can hide a file via .git/info/exclude); bytecode and cache dirs are left out to keep
+# the patch small, so the grader must clear __pycache__ before grading (stale .pyc is a hole of its own).
 _DIFF_SCRIPT = (
     'set -e; export GIT_CONFIG_NOSYSTEM=1; tmp=$(mktemp -d); export GIT_INDEX_FILE="$tmp/index"; '
     "trap 'rm -rf \"$tmp\"' EXIT; "
     "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null read-tree {base}; "
-    "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null add -A -f; "
+    "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null add -A -f -- . "
+    "':(exclude,glob)**/__pycache__/**' ':(exclude,glob)**/.pytest_cache/**' ':(exclude,glob)**/*.egg-info/**'; "
     "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null "
     "diff --cached --binary --no-color --no-ext-diff --no-textconv {base}"
 )
