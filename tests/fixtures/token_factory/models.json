@@ -1,0 +1,201 @@
+{
+  "data": [
+    {
+      "created": 1785110400,
+      "id": "moonshotai/Kimi-K3",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1792320426,
+      "id": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1792320426,
+      "id": "google/gemma-3-27b-it",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1792320426,
+      "id": "Qwen/Qwen3-Embedding-8B",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1792320426,
+      "id": "openai/gpt-oss-120b",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1792320426,
+      "id": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1792320426,
+      "id": "NousResearch/Hermes-4-405B",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1792320426,
+      "id": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1792320426,
+      "id": "zai-org/GLM-5.1",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1787845486,
+      "id": "nvidia/Nemotron-3_5-Lightning",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1780272000,
+      "id": "openbmb/MiniCPM-V-4_5",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1788458731,
+      "id": "Qwen/Qwen3.8-27B",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1786581299,
+      "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1785493267,
+      "id": "MiniMaxAI/MiniMax-M3",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1781740800,
+      "id": "moonshotai/Kimi-K2.7-Code",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1780531200,
+      "id": "nvidia/Nemotron-3-Ultra-550b-a55b",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1778544000,
+      "id": "moonshotai/Kimi-K2.6",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1773187200,
+      "id": "nvidia/nemotron-3-super-120b-a12b",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1771286400,
+      "id": "Qwen/Qwen3.5-397B-A17B",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1792320432,
+      "id": "deepseek-ai/DeepSeek-V4-Pro",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1791525427,
+      "id": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1781481600,
+      "id": "zai-org/GLM-5.2",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1792155600,
+      "id": "reflection/beam",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1791841710,
+      "id": "nvidia/Nemotron-3.5-Super-VL",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1791523446,
+      "id": "meta-models/muse-spark-open",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1789524983,
+      "id": "zai-org/GLM-5.3-Flash",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1789509523,
+      "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    },
+    {
+      "created": 1789085803,
+      "id": "zai-org/GLM-5.3",
+      "object": "model",
+      "owned_by": "system",
+      "shutdown_date": null
+    }
+  ],
+  "object": "list"
+}
