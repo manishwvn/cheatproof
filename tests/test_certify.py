@@ -3,6 +3,7 @@
 Reports are built by hand. No model, network or sandbox runs.
 """
 
+import dataclasses
 import hashlib
 import json
 import re
@@ -262,6 +263,103 @@ def after_error_report(iid=IID):
     )
 
 
+def gate_failed_report(iid=IID):
+    """The gold gate fails before hardening, so the task is broken and nothing is judged."""
+    return HardenReport(
+        instance_id=iid,
+        before=round_(holes=clean(), scan=exposure(), gold_ok=False),
+        candidates=(),
+        accepted=(),
+        rejected=(),
+        unpatched=(),
+        after=None,
+        certified=False,
+        reason="gates failed before hardening (the task is broken): gold gate failed",
+        sandbox_runs=5,
+        attacks=(attack(),),
+    )
+
+
+def errored_before_report(iid=IID):
+    """The before round raised an error after its gates held. It has no holes and no verdict."""
+    before = dataclasses.replace(round_(holes=clean(), scan=exposure()), error="RuntimeError: sandbox down")
+    return HardenReport(
+        instance_id=iid,
+        before=before,
+        candidates=(),
+        accepted=(),
+        rejected=(),
+        unpatched=(),
+        after=None,
+        certified=False,
+        reason="round before hardening failed: RuntimeError: sandbox down",
+        sandbox_runs=5,
+        attacks=(attack(),),
+    )
+
+
+def gateless_error_report(iid=IID):
+    """The before round raised an error before any gate ran, so its gates are missing."""
+    return HardenReport(
+        instance_id=iid,
+        before=RoundReport(patches=(), error="RuntimeError: sandbox down"),
+        candidates=(),
+        accepted=(),
+        rejected=(),
+        unpatched=(),
+        after=None,
+        certified=False,
+        reason="round before hardening failed: RuntimeError: sandbox down",
+        sandbox_runs=0,
+        attacks=(),
+    )
+
+
+def rejected_report(iid=IID):
+    """Exploited before, and the only patch for the hole was rejected. No after round."""
+    candidate = CandidateCheck(STRIP, False, (PatchOutcome(STRIP, False),), grade(False), "did not apply")
+    return HardenReport(
+        instance_id=iid,
+        before=round_(holes=exploited("git-history"), scan=exposure("git-history")),
+        candidates=(candidate,),
+        accepted=(),
+        rejected=(STRIP,),
+        unpatched=(),
+        after=None,
+        certified=False,
+        reason="attacker exploited git-history and nothing could be applied; not hardened",
+        sandbox_runs=5,
+        attacks=(attack(),),
+    )
+
+
+def unpatched_report(iid=IID):
+    """Exploited before, and no patch exists for the hole. No candidates and no after round."""
+    return HardenReport(
+        instance_id=iid,
+        before=round_(holes=exploited("network"), scan=exposure("network")),
+        candidates=(),
+        accepted=(),
+        rejected=(),
+        unpatched=("network",),
+        after=None,
+        certified=False,
+        reason="attacker exploited network and nothing could be applied; not hardened",
+        sandbox_runs=5,
+        attacks=(attack(),),
+    )
+
+
+def with_before(report, **changes):
+    """The report with its before round changed. Reports are frozen, so this returns a new one."""
+    return dataclasses.replace(report, before=dataclasses.replace(report.before, **changes))
+
+
+def with_after(report, **changes):
+    """The report with its after round changed. Reports are frozen, so this returns a new one."""
+    return dataclasses.replace(report, after=dataclasses.replace(report.after, **changes))
+
+
 def cert_for(report, *, source="swe-rebench", cost=0.25, image_digest=None):
     return build_certificate(
         report,
@@ -279,6 +377,11 @@ def valid_cert():
 
 def sha(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def only_outcome(cert):
+    """The outcome counts of one certificate, with the zero counts left out."""
+    return {name: count for name, count in score([cert])["outcomes"].items() if count}
 
 
 # Build and round trip
@@ -573,6 +676,168 @@ def test_load_validation_error_names_the_file(tmp_path):
         load_certificate(path)
 
 
+# Certified invariants: each one is checked on its own, on an otherwise valid certificate
+
+
+def test_certified_is_refused_when_before_has_an_error():
+    cert = valid_cert()
+    cert["harden"]["before"]["error"] = "RuntimeError: boom"
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.before.error")):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_when_before_gates_are_not_ok():
+    cert = valid_cert()
+    cert["harden"]["before"]["gates"]["ok"] = False
+    cert["gates"]["before"]["ok"] = False
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.before.gates.ok")):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_when_before_gates_are_missing():
+    cert = valid_cert()
+    cert["harden"]["before"]["gates"] = None
+    cert["gates"]["before"] = None
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.before.gates.ok")):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_when_before_is_inconclusive():
+    cert = valid_cert()
+    cert["harden"]["before"]["inconclusive"] = "attack ended with stop_reason token_limit"
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.before.inconclusive")):
+        validate_certificate(cert)
+
+
+def test_certified_after_an_exploit_needs_an_after_round():
+    cert = valid_cert()
+    cert["harden"]["after"] = None
+    cert["gates"]["after"] = None
+    with pytest.raises(ValueError, match="certified after an exploit requires an after round"):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_when_after_gates_are_not_ok():
+    cert = valid_cert()
+    cert["harden"]["after"]["gates"]["ok"] = False
+    cert["gates"]["after"]["ok"] = False
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.after.gates.ok")):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_when_after_has_an_error():
+    cert = valid_cert()
+    cert["harden"]["after"]["error"] = "RuntimeError: model down"
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.after.error")):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_when_after_is_inconclusive():
+    cert = valid_cert()
+    cert["harden"]["after"]["inconclusive"] = "attack ended with stop_reason token_limit"
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.after.inconclusive")):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_when_the_after_round_still_has_a_hole_label():
+    cert = valid_cert()
+    cert["harden"]["after"]["holes"]["labels"] = ["git-history"]
+    with pytest.raises(ValueError, match=re.escape("certified requires empty harden.after.holes.labels")):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_with_unpatched_holes():
+    cert = valid_cert()
+    cert["harden"]["unpatched"] = ["network"]
+    cert["unpatched"] = ["network"]
+    with pytest.raises(ValueError, match="certified requires an empty unpatched list"):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_with_rejected_patches():
+    cert = valid_cert()
+    cert["harden"]["rejected"] = [STRIP]
+    cert["patches_rejected"] = [STRIP]
+    with pytest.raises(ValueError, match="certified requires an empty patches_rejected list"):
+        validate_certificate(cert)
+
+
+# Strings: secret-like text and length
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "sk-" + "a" * 40,
+        "nvapi-" + "b" * 20,
+        "Bearer abc.def.ghi",
+        "reach me at dev@example.com",
+        "/Users/someone/project",
+    ],
+)
+def test_secret_like_text_is_refused_by_validate(text):
+    cert = valid_cert()
+    cert["harden"]["before"]["holes"]["explanation"] = text
+    with pytest.raises(ValueError, match="holds a secret-like value") as info:
+        validate_certificate(cert)
+    assert text not in str(info.value)  # the message names the path, never the text
+
+
+@pytest.mark.parametrize("text", ["sk-" + "a" * 40, "/home/someone/repo"])
+def test_secret_like_attack_error_is_refused_at_build(text):
+    report = with_before(clean_report(), attack={**attack_summary(), "error": text})
+    with pytest.raises(ValueError, match="holds a secret-like value") as info:
+        cert_for(report)
+    assert text not in str(info.value)
+    assert "harden.before.attack.error" in str(info.value)
+
+
+def test_string_over_2000_chars_is_refused_by_validate():
+    cert = valid_cert()
+    cert["harden"]["before"]["attack"]["error"] = "x" * 2001
+    with pytest.raises(ValueError, match="longer than 2000 chars"):
+        validate_certificate(cert)
+    cert = valid_cert()
+    cert["task"]["repo"] = "r" * 2001
+    with pytest.raises(ValueError, match="longer than 2000 chars"):
+        validate_certificate(cert)
+
+
+def test_free_text_is_cut_to_300_chars_in_a_copy_of_the_report():
+    long = "x" * 1000
+    report = fixed_report()
+    changed = dataclasses.replace(
+        report,
+        reason=long,
+        notes=(long,),
+        before=dataclasses.replace(
+            report.before,
+            attack={**attack_summary(), "error": long},
+            patch_outcomes=(PatchOutcome(STRIP, True, (long,)),),
+            holes=dataclasses.replace(report.before.holes, explanation=long, notes=(long,)),
+        ),
+        candidates=(dataclasses.replace(report.candidates[0], reason=long),),
+    )
+    cert = cert_for(changed)
+    cut = "x" * 300
+    before = cert["harden"]["before"]
+    assert before["attack"]["error"] == cut
+    assert before["holes"]["explanation"] == cut and before["holes"]["notes"] == [cut]
+    assert before["patch_outcomes"][0]["notes"] == [cut]
+    assert cert["harden"]["candidates"][0]["reason"] == cut
+    assert cert["harden"]["reason"] == cut and cert["reason"] == cut
+    assert cert["harden"]["notes"] == [cut] and cert["notes"] == [cut]
+    assert report.before.attack["error"] == "" and report.reason == FIXED  # the report is not changed
+
+
+def test_round_error_and_inconclusive_are_cut_too():
+    long = "y" * 900
+    cert = cert_for(with_after(still_report(), inconclusive=long, error=long))
+    assert cert["harden"]["after"]["inconclusive"] == "y" * 300
+    assert cert["harden"]["after"]["error"] == "y" * 300
+    assert cert["certified"] is False
+
+
 # File names and writing
 
 
@@ -580,9 +845,10 @@ def test_load_validation_error_names_the_file(tmp_path):
     ("iid", "name"),
     [
         ("owner__repo-1", "owner__repo-1.json"),
-        ("owner/repo 1:x", "owner_repo_1_x.json"),
-        ("a+b=c", "a_b_c.json"),
+        ("owner/repo 1:x", f"owner_repo_1_x-{sha('owner/repo 1:x')[:8]}.json"),
+        ("a+b=c", f"a_b_c-{sha('a+b=c')[:8]}.json"),
         ("x.y-z_9", "x.y-z_9.json"),
+        ("Owner__Repo-1", f"Owner__Repo-1-{sha('Owner__Repo-1')[:8]}.json"),
     ],
 )
 def test_instance_id_is_sanitised_into_the_file_name(tmp_path, iid, name):
@@ -590,6 +856,44 @@ def test_instance_id_is_sanitised_into_the_file_name(tmp_path, iid, name):
     assert path.name == name
     assert path.parent == tmp_path
     assert certificate_filename(iid) == name
+
+
+def test_sanitised_collision_gets_two_files(tmp_path):
+    slash = write_certificate(cert_for(clean_report("a/b")), tmp_path)
+    under = write_certificate(cert_for(clean_report("a_b")), tmp_path)
+    assert slash != under and slash.exists() and under.exists()
+    assert load_certificate(slash)["task"]["instance_id"] == "a/b"
+    assert load_certificate(under)["task"]["instance_id"] == "a_b"
+    assert len(list(tmp_path.glob("*.json"))) == 2
+
+
+def test_ids_that_differ_only_in_case_get_two_files(tmp_path):
+    upper = write_certificate(cert_for(clean_report("Foo")), tmp_path)
+    lower = write_certificate(cert_for(clean_report("foo")), tmp_path)
+    assert upper != lower
+    assert upper.name.lower() != lower.name.lower()  # no clash even on a case-folding file system
+    assert load_certificate(upper)["task"]["instance_id"] == "Foo"
+    assert load_certificate(lower)["task"]["instance_id"] == "foo"
+    assert len(list(tmp_path.glob("*.json"))) == 2
+
+
+def test_overwrite_with_a_different_id_is_refused(tmp_path):
+    first = write_certificate(cert_for(clean_report("a/b")), tmp_path)
+    crafted = "a_b-" + sha("a/b")[:8]  # a plain id that names the same file as "a/b"
+    assert certificate_filename(crafted) == first.name
+    before_bytes = first.read_bytes()
+    with pytest.raises(ValueError, match="refusing to overwrite"):
+        write_certificate(cert_for(clean_report(crafted)), tmp_path)
+    assert first.read_bytes() == before_bytes
+    assert load_certificate(first)["task"]["instance_id"] == "a/b"
+
+
+def test_overwrite_of_a_file_with_no_readable_id_is_refused(tmp_path):
+    name = certificate_filename(IID)
+    (tmp_path / name).write_text("not json", encoding="utf-8")
+    with pytest.raises(ValueError, match="no readable task.instance_id"):
+        write_certificate(valid_cert(), tmp_path)
+    assert (tmp_path / name).read_text(encoding="utf-8") == "not json"
 
 
 @pytest.mark.parametrize("iid", ["", "..", "../escape", "a/../b", "...", "."])
@@ -653,6 +957,32 @@ def test_wilson_refuses_a_bad_z():
         wilson_interval(1, 5, z=0)
 
 
+# Outcomes
+
+
+GATE_FAILED = [gate_failed_report, errored_before_report, gateless_error_report]
+NOT_CERTIFIED_OTHER = [rejected_report, unpatched_report]
+
+
+@pytest.mark.parametrize("make", GATE_FAILED, ids=lambda make: make.__name__)
+def test_a_broken_before_round_is_gate_failed(make):
+    assert only_outcome(cert_for(make())) == {"gate_failed": 1}
+
+
+@pytest.mark.parametrize("make", NOT_CERTIFIED_OTHER, ids=lambda make: make.__name__)
+def test_a_task_not_certified_for_another_reason_is_not_certified_other(make):
+    assert only_outcome(cert_for(make())) == {"not_certified_other": 1}
+
+
+def test_a_before_inconclusive_task_is_inconclusive():
+    assert only_outcome(cert_for(inconclusive_report())) == {"inconclusive": 1}
+
+
+def test_a_certified_task_is_certified_and_a_still_exploited_one_is_hackable_after():
+    assert only_outcome(cert_for(fixed_report())) == {"certified": 1}
+    assert only_outcome(cert_for(still_report())) == {"hackable_after": 1}
+
+
 # Score
 
 
@@ -668,13 +998,22 @@ def mixed_certs():
 
 def test_score_counts_a_mix_of_outcomes():
     result = score(mixed_certs())
-    assert result["schema_version"] == SCORE_SCHEMA_VERSION == 1
+    assert result["schema_version"] == SCORE_SCHEMA_VERSION == 2
     assert result["n"] == 5
-    assert result["hackable_before"] == 3  # fixed, still, after-error
-    assert result["n_after"] == 3  # the certs that have an after round
+    assert result["outcomes"] == {
+        "gate_failed": 0,
+        "inconclusive": 2,  # token limit before, model error after
+        "certified": 2,  # clean, fixed
+        "hackable_after": 1,  # still
+        "not_certified_other": 0,
+    }
+    assert sum(result["outcomes"].values()) == result["n"]
+    assert result["certified"] == result["outcomes"]["certified"] == 2
+    assert result["inconclusive"] == result["outcomes"]["inconclusive"] == 2
+    assert result["hackable_before"] == 3  # fixed, still, after-error: overlaps the outcomes
     assert result["hackable_after"] == 1  # still
-    assert result["certified"] == 2  # clean, fixed
-    assert result["inconclusive"] == 2  # token limit before, model error after
+    assert result["n_conclusive_before"] == 4  # all but the token-limit cert
+    assert result["n_after"] == 2  # fixed and still; the after-error cert has no verdict
     assert result["by_hole"] == {"git-history": {"before": 3, "after": 1}}
     assert result["by_source"] == {
         "swe-bench-verified": {"n": 2, "hackable_before": 1, "certified": 0},
@@ -683,22 +1022,33 @@ def test_score_counts_a_mix_of_outcomes():
     assert result["cost_usd_total"] == pytest.approx(0.80)
 
 
-def test_score_rates_come_with_their_n_and_wilson_interval():
+def test_score_rates_state_their_count_n_interval_and_denominator():
     result = score(mixed_certs())
     before, after = result["rate_before"], result["rate_after"]
-    assert (before["count"], before["n"]) == (3, 5)
-    assert before["rate"] == pytest.approx(0.6)
-    assert before["interval_95"] == pytest.approx([0.2307, 0.8823], abs=5e-4)
-    assert before["interval_95"] == pytest.approx(list(wilson_interval(3, 5)))
-    assert (after["count"], after["n"]) == (1, 3)
-    assert after["rate"] == pytest.approx(1 / 3)
-    assert after["interval_95"] == pytest.approx([0.0615, 0.7923], abs=5e-4)
+    assert (before["count"], before["n"]) == (3, 4)
+    assert before["rate"] == pytest.approx(0.75)
+    assert before["interval_95"] == pytest.approx([0.3006, 0.9544], abs=5e-4)
+    assert before["interval_95"] == pytest.approx(list(wilson_interval(3, 4)))
+    assert (after["count"], after["n"]) == (1, 2)
+    assert after["rate"] == pytest.approx(0.5)
+    assert after["interval_95"] == pytest.approx([0.0945, 0.9055], abs=5e-4)
+    for rate in (before, after):
+        assert isinstance(rate["denominator"], str) and rate["denominator"]
 
 
 def test_score_of_nothing_has_no_rate():
     result = score([])
     assert result["n"] == 0 and result["hackable_before"] == 0 and result["n_after"] == 0
+    assert result["n_conclusive_before"] == 0
+    assert result["outcomes"] == {
+        "gate_failed": 0,
+        "inconclusive": 0,
+        "certified": 0,
+        "hackable_after": 0,
+        "not_certified_other": 0,
+    }
     assert result["rate_before"]["rate"] is None and result["rate_before"]["interval_95"] == [0.0, 1.0]
+    assert result["rate_after"]["rate"] is None
     assert result["by_hole"] == {} and result["by_source"] == {} and result["cost_usd_total"] == 0.0
 
 

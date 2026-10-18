@@ -1,13 +1,16 @@
 """CLI tests: fakes only. No model, network, Docker or paid call, and no certify.py internals."""
 
+import dataclasses
 import json
+import re
 from pathlib import Path
 
 import pytest
 
-from cheatproof import cli
+from cheatproof import certify, cli
 from cheatproof.budget import BudgetExceeded
 from cheatproof.executor import ExecutorRefused, ExecutorUnavailable
+from cheatproof.grader import GateReport, GradeResult
 from cheatproof.harden import HardenReport, RoundReport
 from cheatproof.holes import HoleReport
 from cheatproof.tasks import CACHE_VERSION, TaskSpec
@@ -20,15 +23,40 @@ TEST_SENTINEL = "TEST_SENTINEL_91bc"
 SYSTEM_PROMPT = "Strategy prompt: look for shortcuts.\n"
 CLOCK = "2026-10-18T12:00:00+00:00"
 UPPER_BOUND = "Upper bound against this attacker, not proof."
+STRIP = "strip-future-git"
+ATTACKER_LIMITS = {"model": "fake-model", "max_steps": 4, "max_tokens": 9000}
+# The shape certify.score_directory returns. Intervals are Wilson 95% for 9 of 12 and 1 of 10.
 SCORE = {
+    "schema_version": 1,
     "n": 12,
     "n_after": 10,
     "hackable_before": 9,
     "hackable_after": 1,
     "certified": 7,
     "inconclusive": 2,
-    "by_hole": {"test-edit": 4, "git-history": 5},
+    "rate_before": {
+        "count": 9,
+        "n": 12,
+        "interval_95": [0.4677, 0.9111],
+        "denominator": "all certificates",
+        "method": "wilson",
+    },
+    "rate_after": {
+        "count": 1,
+        "n": 10,
+        "interval_95": [0.0179, 0.4042],
+        "denominator": "certificates with an after round",
+        "method": "wilson",
+    },
+    "outcomes": {
+        "certified": 7,
+        "exploited, not certified": 2,
+        "inconclusive": 2,
+        "still exploited after hardening": 1,
+    },
+    "by_hole": {"git-history": {"before": 5, "after": 1}, "test-edit": {"before": 4, "after": 0}},
     "by_source": {"swe-bench-verified": {"n": 12, "hackable_before": 9, "certified": 7}},
+    "cost_usd_total": 1.2345,
 }
 
 
@@ -328,22 +356,43 @@ def test_harden_stop_errors_exit_1_without_traceback(tmp_path, capsys, error):
     assert not out.exists()
 
 
-def test_report_text_shows_n_raw_counts_and_upper_bound(tmp_path, capsys):
+def test_report_text_shows_each_rate_with_n_counts_and_upper_bound(tmp_path, capsys):
     spy = Spy()
     certs = make_certs_dir(tmp_path)
     rc = cli.main(["report", "--certs", str(certs)], deps=make_deps(spy))
     out = capsys.readouterr().out
     assert rc == 0
     assert spy.score_calls == [certs]
-    assert "n=12" in out
-    assert "9 of 12" in out and "1 of 10" in out and "7 of 12" in out and "2 of 12" in out
-    assert "95% CI" in out
-    assert "test-edit: 4" in out
-    assert "swe-bench-verified: certified=7, hackable_before=9, n=12" in out
+    assert "n=12" in out and "n_after=10" in out
+    assert "9 of 12 = 75.0% (95% CI 46.8%–91.1%); denominator: all certificates" in out
+    assert "1 of 10 = 10.0% (95% CI 1.8%–40.4%); denominator: certificates with an after round" in out
+    assert "certified: 7 of 12" in out and "inconclusive: 2 of 12" in out
     assert UPPER_BOUND in out
 
 
-def test_report_json_is_sorted_and_written_to_out(tmp_path, capsys):
+def test_report_text_prints_outcomes_cost_schema_and_sources_from_the_score(tmp_path, capsys):
+    spy = Spy()
+    certs = make_certs_dir(tmp_path)
+    rc = cli.main(["report", "--certs", str(certs)], deps=make_deps(spy))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "  certified: 7" in out and "  inconclusive: 2" in out
+    assert "cost_usd_total: $1.2345" in out
+    assert "schema_version: 1" in out
+    assert "swe-bench-verified: certified=7, hackable_before=9, n=12" in out
+
+
+def test_report_text_holes_are_a_before_and_after_table(tmp_path, capsys):
+    spy = Spy()
+    certs = make_certs_dir(tmp_path)
+    cli.main(["report", "--certs", str(certs)], deps=make_deps(spy))
+    out = capsys.readouterr().out
+    assert re.search(r"^\s+hole\s+before\s+after$", out, re.MULTILINE)
+    assert re.search(r"^\s+git-history\s+5\s+1$", out, re.MULTILINE)
+    assert re.search(r"^\s+test-edit\s+4\s+0$", out, re.MULTILINE)
+
+
+def test_report_json_is_the_score_dict_sorted_and_written_to_out(tmp_path, capsys):
     spy = Spy()
     certs = make_certs_dir(tmp_path)
     target = tmp_path / "reports" / "score.json"
@@ -352,14 +401,9 @@ def test_report_json_is_sorted_and_written_to_out(tmp_path, capsys):
         deps=make_deps(spy),
     )
     assert rc == 0
-    printed = json.loads(capsys.readouterr().out)
-    assert target.read_text(encoding="utf-8") == json.dumps(printed, indent=2, sort_keys=True) + "\n"
-    assert printed["n"] == 12 and printed["n_after"] == 10
-    before = printed["rates"]["hackable_before"]
-    assert (before["k"], before["n"]) == (9, 12)
-    low, high = before["ci95"]
-    assert low < before["rate"] < high
-    assert printed["note"] == UPPER_BOUND
+    expected = json.dumps(SCORE, indent=2, sort_keys=True) + "\n"
+    assert capsys.readouterr().out == expected
+    assert target.read_text(encoding="utf-8") == expected
 
 
 def test_report_missing_directory_exits_2(tmp_path, capsys):
@@ -380,20 +424,152 @@ def test_report_empty_directory_exits_2(tmp_path, capsys):
     assert "no certificates" in capsys.readouterr().err
 
 
-def test_report_rejects_counts_that_do_not_add_up(tmp_path, capsys):
+def test_report_renders_a_sparse_score_without_crashing(tmp_path, capsys):
     spy = Spy()
     certs = make_certs_dir(tmp_path)
-    deps = make_deps(spy, score_directory=lambda directory: {**SCORE, "hackable_before": 13})
-    rc = cli.main(["report", "--certs", str(certs)], deps=deps)
+    sparse = {
+        "n": 2,
+        "rate_before": {"count": 1, "n": 2},  # no interval, no denominator, no rate key
+        "rate_after": {"count": 0, "n": 0},
+        "by_hole": {"x": {"before": 1}},  # no after count
+    }
+    rc = cli.main(["report", "--certs", str(certs)], deps=make_deps(spy, score_directory=lambda d: sparse))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "1 of 2 = 50.0%" in out
+    assert "0 of 0 (no rate: n is 0)" in out
+    assert re.search(r"^\s+x\s+1\s+-$", out, re.MULTILINE)
+    assert "outcomes" not in out and "cost_usd_total" not in out
+    assert UPPER_BOUND in out
+
+
+def test_report_score_without_a_count_n_exits_2(tmp_path, capsys):
+    spy = Spy()
+    certs = make_certs_dir(tmp_path)
+    rc = cli.main(["report", "--certs", str(certs)], deps=make_deps(spy, score_directory=lambda d: {}))
     assert rc == 2
-    assert "13 of 12" in capsys.readouterr().err
+    assert "could not score" in capsys.readouterr().err
 
 
-def test_wilson_interval_matches_known_values():
-    low, high = cli.wilson_interval(5, 10)
-    assert low == pytest.approx(0.2366, abs=1e-4)
-    assert high == pytest.approx(0.7634, abs=1e-4)
-    assert cli.wilson_interval(0, 0) is None
+# Real certificates: certify.build_certificate from HardenReport objects, certify.write_certificate, then
+# certify.score_directory. Nothing here calls a model, the network or a sandbox.
+
+
+def _holes(*labels):
+    if not labels:
+        return HoleReport(
+            primary="none",
+            labels=(),
+            attempted=(),
+            evidence={},
+            succeeded=False,
+            exploited=False,
+            skipped_records=0,
+        )
+    return HoleReport(
+        primary=labels[0],
+        labels=labels,
+        attempted=labels,
+        evidence={label: (f"snippet {label}",) for label in labels},
+        succeeded=True,
+        exploited=True,
+        skipped_records=0,
+    )
+
+
+def _grade(passed):
+    return GradeResult(passed, int(passed), 1, int(passed), 1, True, None, "LOG-TAIL pytest output")
+
+
+def _gates():
+    """Gold passes and the empty patch fails, so GateReport.ok is true for every round."""
+    return GateReport(gold=_grade(True), empty=_grade(False))
+
+
+def clean_harden(iid):
+    """The attacker fails before hardening: nothing is patched and there is no after round."""
+    return HardenReport(
+        instance_id=iid,
+        before=RoundReport(patches=(), gates=_gates(), holes=_holes()),
+        candidates=(),
+        accepted=(),
+        rejected=(),
+        unpatched=(),
+        after=None,
+        certified=True,
+        reason="attacker failed before hardening (not hackable by this attacker)",
+        sandbox_runs=2,
+    )
+
+
+def fixed_harden(iid):
+    """Exploited through git history, the strip patch is accepted and the after attack fails."""
+    return HardenReport(
+        instance_id=iid,
+        before=RoundReport(patches=(), gates=_gates(), holes=_holes("git-history")),
+        candidates=(),
+        accepted=(STRIP,),
+        rejected=(),
+        unpatched=(),
+        after=RoundReport(patches=(STRIP,), gates=_gates(), holes=_holes()),
+        certified=True,
+        reason=f"attacker failed after hardening with {STRIP} (not hackable by this attacker)",
+        sandbox_runs=4,
+    )
+
+
+def still_harden(iid):
+    """Exploited before, and still exploited after the strip patch."""
+    return HardenReport(
+        instance_id=iid,
+        before=RoundReport(patches=(), gates=_gates(), holes=_holes("git-history")),
+        candidates=(),
+        accepted=(STRIP,),
+        rejected=(),
+        unpatched=(),
+        after=RoundReport(patches=(STRIP,), gates=_gates(), holes=_holes("git-history")),
+        certified=False,
+        reason=f"attacker still exploits after hardening with {STRIP} (git-history)",
+        sandbox_runs=4,
+    )
+
+
+def test_report_scores_certificates_written_by_certify(tmp_path, capsys):
+    certs = tmp_path / "certs"
+    certs.mkdir()
+    cases = [
+        (clean_harden("a__a-1"), "swe-bench-verified"),
+        (fixed_harden("b__b-1"), "swe-bench-verified"),
+        (still_harden("c__c-1"), "swe-rebench"),
+    ]
+    for report, source in cases:
+        task = dataclasses.replace(make_task(), instance_id=report.instance_id, source=source)
+        cert = certify.build_certificate(
+            report,
+            task,
+            image_digest=None,
+            attacker=ATTACKER_LIMITS,
+            cost_usd=0.10,
+            timestamp=CLOCK,
+        )
+        certify.write_certificate(cert, certs)
+    assert sorted(path.name for path in certs.glob("*.json")) == ["a__a-1.json", "b__b-1.json", "c__c-1.json"]
+    deps = make_deps(Spy(), score_directory=certify.score_directory)
+
+    rc = cli.main(["report", "--certs", str(certs)], deps=deps)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "n=3" in out and "n_after=2" in out
+    assert "2 of 3 = 66.7%" in out  # hackable before: the fixed and the still-exploited task
+    assert "1 of 2 = 50.0%" in out  # hackable after, over the two that have an after round
+    assert "cost_usd_total: $0.3000" in out
+    assert re.search(r"^\s+git-history\s+2\s+1$", out, re.MULTILINE)
+    assert UPPER_BOUND in out
+
+    rc = cli.main(["report", "--certs", str(certs), "--format", "json"], deps=deps)
+    printed = capsys.readouterr().out
+    assert rc == 0
+    assert json.loads(printed) == json.loads(json.dumps(certify.score_directory(certs)))
 
 
 def test_find_cached_tasks_reads_only_the_cache(tmp_path):
@@ -435,3 +611,140 @@ def test_argparse_usage_error_returns_2(tmp_path):
     assert cli.main(["harden"], deps=make_deps(spy)) == 2  # missing instance id
     assert cli.main(["unknown-command"], deps=make_deps(spy)) == 2
     assert spy.harden_calls == [] and spy.score_calls == []
+
+
+def _harden_argv(tmp_path, out):
+    return [
+        "harden",
+        INSTANCE,
+        "--system-prompt-file",
+        str(prompt_file(tmp_path)),
+        "--attacker-model",
+        "fake-model",
+        "--out",
+        str(out),
+    ]
+
+
+def test_build_error_after_paid_run_prints_error_and_cost_and_exits_1(tmp_path, capsys):
+    spy = Spy()
+    out = tmp_path / "certs"
+
+    def refusing_build(report, task, **kwargs):
+        raise ValueError("timestamp is not ISO 8601")
+
+    deps = make_deps(spy, build_certificate=refusing_build, make_budget=lambda: FakeBudget(0.10, 0.25))
+    rc = cli.main(_harden_argv(tmp_path, out), deps=deps)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "certificate not written: ValueError: timestamp is not ISO 8601" in captured.err
+    assert "cost: $0.1500" in captured.err
+    assert "Traceback" not in captured.err and "Traceback" not in captured.out
+    assert not out.exists()
+
+
+def test_write_error_after_paid_run_prints_error_and_cost_and_exits_1(tmp_path, capsys):
+    spy = Spy()
+
+    def failing_write(cert, directory):
+        raise OSError("disk full")
+
+    deps = make_deps(spy, write_certificate=failing_write, make_budget=lambda: FakeBudget(0.10, 0.25))
+    rc = cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=deps)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "certificate not written: OSError: disk full" in captured.err
+    assert "cost: $0.1500" in captured.err
+    assert "Traceback" not in captured.err
+    assert "certificate:" not in captured.out
+
+
+def test_certificate_error_message_is_capped_at_300_chars(tmp_path, capsys):
+    message = " ".join(f"word{i}" for i in range(400))  # spaced, so sanitize leaves it alone
+    assert len(message) > 1000
+
+    def refusing_build(report, task, **kwargs):
+        raise ValueError(message)
+
+    deps = make_deps(Spy(), build_certificate=refusing_build)
+    assert cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=deps) == 1
+    err = capsys.readouterr().err
+    assert message[:300] + "\n" in err
+    assert message[:301] not in err
+
+
+def test_spend_that_went_down_during_the_run_writes_nothing(tmp_path, capsys):
+    spy = Spy()
+    out = tmp_path / "certs"
+    deps = make_deps(spy, make_budget=lambda: FakeBudget(0.25, 0.10))
+    rc = cli.main(_harden_argv(tmp_path, out), deps=deps)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "$0.2500" in captured.err and "$0.1000" in captured.err
+    assert spy.certs == [] and not out.exists()
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("totals", [(0.0, float("inf")), (float("nan"), 0.10)])
+def test_non_finite_spend_writes_nothing(tmp_path, capsys, totals):
+    spy = Spy()
+    out = tmp_path / "certs"
+    deps = make_deps(spy, make_budget=lambda: FakeBudget(*totals))
+    rc = cli.main(_harden_argv(tmp_path, out), deps=deps)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "cost check failed" in captured.err
+    assert spy.certs == [] and not out.exists()
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ExecutorRefused("no docker"), ExecutorUnavailable("docker down"), BudgetExceeded("total cap reached")],
+)
+@pytest.mark.parametrize("factory", ["make_executor", "make_budget"])
+def test_setup_stop_errors_exit_1_without_traceback(tmp_path, capsys, error, factory):
+    spy = Spy()
+
+    def raising():
+        raise error
+
+    out = tmp_path / "certs"
+    rc = cli.main(_harden_argv(tmp_path, out), deps=make_deps(spy, **{factory: raising}))
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert f"error: {type(error).__name__}: " in captured.err
+    assert "Traceback" not in captured.err and "Traceback" not in captured.out
+    assert spy.harden_calls == [] and spy.certs == [] and not out.exists()
+
+
+@pytest.mark.parametrize("key", ["NEBIUS_API_KEY", "SPEND_CAP_USD"])
+def test_missing_env_var_is_named(tmp_path, capsys, key):
+    spy = Spy()
+
+    def no_llm(budget):
+        raise KeyError(key)
+
+    rc = cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=make_deps(spy, make_llm=no_llm))
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert f"environment variable {key} is not set" in captured.err
+    assert "Traceback" not in captured.err
+    assert spy.harden_calls == []
+
+
+@pytest.mark.parametrize("key", ["lowercase_key", "Not An Env Name", 42, None])
+def test_other_key_errors_get_a_generic_message(tmp_path, capsys, key):
+    spy = Spy()
+
+    def no_llm(budget):
+        raise KeyError(key)
+
+    rc = cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=make_deps(spy, make_llm=no_llm))
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "a required setting is missing" in captured.err
+    assert "environment variable" not in captured.err
+    assert "lowercase_key" not in captured.err and "Not An Env Name" not in captured.err
+    assert "Traceback" not in captured.err
+    assert spy.harden_calls == []
