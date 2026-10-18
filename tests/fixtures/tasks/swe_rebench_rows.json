@@ -1,0 +1,68 @@
+{
+ "dataset": "nebius/SWE-rebench",
+ "config": "default",
+ "split": "test",
+ "num_rows_total": 21336,
+ "note": "Recorded from the datasets-server rows API on 2026-10-18, keys trimmed to the parsed set, then run through cheatproof.sanitize (the fixture guard). The sanitizer redacts base_commit (a 40-char hex run) in every row.",
+ "rows": [
+  {
+   "row_idx": 79,
+   "row": {
+    "instance_id": "ARMmbed__yotta-804",
+    "repo": "ARMmbed/yotta",
+    "base_commit": "REDACTED",
+    "patch": "diff --git a/yotta/lib/sourceparse.py b/yotta/lib/sourceparse.py\nindex 0f451ad..eb1f0b4 100644\n--- a/yotta/lib/sourceparse.py\n+++ b/yotta/lib/sourceparse.py\n@@ -57,7 +57,7 @@ def _getNonRegistryRef(source_url):\n     # something/something#spec = github\n     # something/something@spec = github\n     # something/something spec = github\n-    github_match = re.match('^([.a-z0-9_-]+/([.a-z0-9_-]+)) *[@#]?([.a-z0-9_\\-\\*\\^\\~\\>\\<\\=]*)$', source_url, re.I)\n+    github_match = re.match(r'^([.a-z0-9_-]+/([.a-z0-9_-]+)) *[@#]?([^/:\\?\\[\\\\]*)$', source_url, re.I)\n     if github_match:\n         return github_match.group(2), VersionSource('github', github_match.group(1), github_match.group(3))\n \n",
+    "test_patch": "diff --git a/yotta/test/test_sourceparse.py b/yotta/test/test_sourceparse.py\nindex 0b7af6f..2c421ba 100644\n--- a/yotta/test/test_sourceparse.py\n+++ b/yotta/test/test_sourceparse.py\n@@ -47,6 +47,7 @@ Git_Specs = [\n     '~1.2.3',\n     '-1.2.3',\n     'branch-or-tag-name',\n+    'branch+or+tag+name',\n     'd5f5049',\n ]\n \n",
+    "FAIL_TO_PASS": [
+     "yotta/test/test_sourceparse.py::TestParseSourceURL::test_shorthandURLs",
+     "yotta/test/test_sourceparse.py::TestParseModuleNameAndSpec::test_ShorthandRefs"
+    ],
+    "PASS_TO_PASS": [
+     "yotta/test/test_sourceparse.py::TestParseSourceURL::test_gitURLs",
+     "yotta/test/test_sourceparse.py::TestParseSourceURL::test_githubURLs",
+     "yotta/test/test_sourceparse.py::TestParseSourceURL::test_hgURLs",
+     "yotta/test/test_sourceparse.py::TestParseSourceURL::test_invalid",
+     "yotta/test/test_sourceparse.py::TestParseSourceURL::test_registryURLs",
+     "yotta/test/test_sourceparse.py::TestParseModuleNameAndSpec::test_GitRefs",
+     "yotta/test/test_sourceparse.py::TestParseModuleNameAndSpec::test_GithubRefs",
+     "yotta/test/test_sourceparse.py::TestParseModuleNameAndSpec::test_HGRefs",
+     "yotta/test/test_sourceparse.py::TestParseModuleNameAndSpec::test_atVersion",
+     "yotta/test/test_sourceparse.py::TestParseModuleNameAndSpec::test_validNames"
+    ],
+    "docker_image": "swerebench/sweb.eval.x86_64.armmbed_1776_yotta-804"
+   }
+  },
+  {
+   "row_idx": 10,
+   "row": {
+    "instance_id": "12rambau__sepal_ui-518",
+    "repo": "12rambau/sepal_ui",
+    "base_commit": "REDACTED",
+    "patch": "diff --git a/sepal_ui/mapping/aoi_control.py b/sepal_ui/mapping/aoi_control.py\nindex 01a6aa48..ae143d2c 100644\n--- a/sepal_ui/mapping/aoi_control.py\n+++ b/sepal_ui/mapping/aoi_control.py\n@@ -36,7 +36,7 @@ class AoiControl(WidgetControl):\n         kwargs[\"position\"] = kwargs.pop(\"position\", \"topright\")\n \n         # create a hoverable btn\n-        btn = MapBtn(logo=\"fas fa-search-location\", v_on=\"menu.on\")\n+        btn = MapBtn(content=\"fas fa-search-location\", v_on=\"menu.on\")\n         slot = {\"name\": \"activator\", \"variable\": \"menu\", \"children\": btn}\n         self.aoi_list = sw.ListItemGroup(children=[], v_model=\"\")\n         w_list = sw.List(\ndiff --git a/sepal_ui/mapping/fullscreen_control.py b/sepal_ui/mapping/fullscreen_control.py\nindex 5e23c1d6..2855fa72 100644\n--- a/sepal_ui/mapping/fullscreen_control.py\n+++ b/sepal_ui/mapping/fullscreen_control.py\n@@ -43,7 +43,7 @@ class FullScreenControl(WidgetControl):\n         self.zoomed = fullscreen\n \n         # create a btn\n-        self.w_btn = MapBtn(logo=self.ICONS[self.zoomed])\n+        self.w_btn = MapBtn(self.ICONS[self.zoomed])\n \n         # overwrite the widget set in the kwargs (if any)\n         kwargs[\"widget\"] = self.w_btn\n@@ -88,7 +88,7 @@ class FullScreenControl(WidgetControl):\n         self.zoomed = not self.zoomed\n \n         # change button icon\n-        self.w_btn.logo.children = [self.ICONS[self.zoomed]]\n+        self.w_btn.children[0].children = [self.ICONS[self.zoomed]]\n \n         # zoom\n         self.template.send({\"method\": self.METHODS[self.zoomed], \"args\": []})\ndiff --git a/sepal_ui/mapping/map_btn.py b/sepal_ui/mapping/map_btn.py\nindex ab55e1c8..0ea13364 100644\n--- a/sepal_ui/mapping/map_btn.py\n+++ b/sepal_ui/mapping/map_btn.py\n@@ -7,26 +7,26 @@ from sepal_ui.frontend.styles import map_btn_style\n class MapBtn(v.Btn, sw.SepalWidget):\n     \"\"\"\n     Btn specifically design to be displayed on a map. It matches all the characteristics of\n-    the classic leaflet btn but as they are from ipyvuetify we can use them in combination with Menu to produce on-the-map. The MapBtn is responsive to theme changes.\n-    Tiles. It only accept icon as children as the space is very limited.\n+    the classic leaflet btn but as they are from ipyvuetify we can use them in combination with Menu to produce on-the-map tiles.\n+    The MapBtn is responsive to theme changes. It only accept icon or 3 letters as children as the space is very limited.\n \n     Args:\n-        logo (str): a fas/mdi fully qualified name\n+        content (str): a fas/mdi fully qualified name or a string name. If a string name is used, only the 3 first letters will be displayed.\n     \"\"\"\n \n-    logo = None\n-    \"(sw.Icon): a sw.Icon\"\n-\n-    def __init__(self, logo, **kwargs):\n+    def __init__(self, content, **kwargs):\n \n         # create the icon\n-        self.logo = sw.Icon(small=True, children=[logo])\n+        if content.startswith(\"mdi-\") or content.startswith(\"fas fa-\"):\n+            content = sw.Icon(small=True, children=[content])\n+        else:\n+            content = content[: min(3, len(content))].upper()\n \n         # some parameters are overloaded to match the map requirements\n         kwargs[\"color\"] = \"text-color\"\n         kwargs[\"outlined\"] = True\n         kwargs[\"style_\"] = \" \".join([f\"{k}: {v};\" for k, v in map_btn_style.items()])\n-        kwargs[\"children\"] = [self.logo]\n+        kwargs[\"children\"] = [content]\n         kwargs[\"icon\"] = False\n \n         super().__init__(**kwargs)\ndiff --git a/sepal_ui/mapping/value_inspector.py b/sepal_ui/mapping/value_inspector.py\nindex ecc52e72..96508ba3 100644\n--- a/sepal_ui/mapping/value_inspector.py\n+++ b/sepal_ui/mapping/value_inspector.py\n@@ -54,7 +54,7 @@ class ValueInspector(WidgetControl):\n         )\n \n         # create a clickable btn\n-        btn = MapBtn(logo=\"fas fa-crosshairs\", v_on=\"menu.on\")\n+        btn = MapBtn(\"fas fa-crosshairs\", v_on=\"menu.on\")\n         slot = {\"name\": \"activator\", \"variable\": \"menu\", \"children\": btn}\n         close_btn = sw.Icon(children=[\"fas fa-times\"], small=True)\n         title = sw.Html(tag=\"h4\", children=[ms.v_inspector.title])\n",
+    "test_patch": "diff --git a/tests/test_FullScreenControl.py b/tests/test_FullScreenControl.py\nindex 39141edf..148242b8 100644\n--- a/tests/test_FullScreenControl.py\n+++ b/tests/test_FullScreenControl.py\n@@ -14,7 +14,7 @@ class TestFullScreenControl:\n         assert isinstance(control, sm.FullScreenControl)\n         assert control in map_.controls\n         assert control.zoomed is False\n-        assert \"fas fa-expand\" in control.w_btn.logo.children\n+        assert \"fas fa-expand\" in control.w_btn.children[0].children\n \n         return\n \n@@ -29,12 +29,12 @@ class TestFullScreenControl:\n         control.toggle_fullscreen(None, None, None)\n \n         assert control.zoomed is True\n-        assert \"fas fa-compress\" in control.w_btn.logo.children\n+        assert \"fas fa-compress\" in control.w_btn.children[0].children\n \n         # click again to reset to initial state\n         control.toggle_fullscreen(None, None, None)\n \n         assert control.zoomed is False\n-        assert \"fas fa-expand\" in control.w_btn.logo.children\n+        assert \"fas fa-expand\" in control.w_btn.children[0].children\n \n         return\ndiff --git a/tests/test_MapBtn.py b/tests/test_MapBtn.py\nindex 0dd605b8..9a9d9c2f 100644\n--- a/tests/test_MapBtn.py\n+++ b/tests/test_MapBtn.py\n@@ -1,11 +1,29 @@\n from sepal_ui import mapping as sm\n+from sepal_ui import sepalwidgets as sw\n \n \n class TestMapBtn:\n-    def test_map_btn(self):\n+    def test_init(self):\n \n+        # fas icon\n         map_btn = sm.MapBtn(\"fas fa-folder\")\n-\n         assert isinstance(map_btn, sm.MapBtn)\n+        assert isinstance(map_btn.children[0], sw.Icon)\n+        assert map_btn.children[0].children[0] == \"fas fa-folder\"\n+\n+        # mdi icon\n+        map_btn = sm.MapBtn(\"mdi-folder\")\n+        assert isinstance(map_btn.children[0], sw.Icon)\n+        assert map_btn.children[0].children[0] == \"mdi-folder\"\n+\n+        # small text\n+        map_btn = sm.MapBtn(\"to\")\n+        assert isinstance(map_btn.children[0], str)\n+        assert map_btn.children[0] == \"TO\"\n+\n+        # long text\n+        map_btn = sm.MapBtn(\"toto\")\n+        assert isinstance(map_btn.children[0], str)\n+        assert map_btn.children[0] == \"TOT\"\n \n         return\n",
+    "FAIL_TO_PASS": [
+     "tests/test_MapBtn.py::TestMapBtn::test_init"
+    ],
+    "PASS_TO_PASS": [],
+    "docker_image": "swerebench/sweb.eval.x86_64.12rambau_1776_sepal_ui-518"
+   }
+  },
+  {
+   "row_idx": 58,
+   "row": {
+    "instance_id": "ARMmbed__greentea-243",
+    "repo": "ARMmbed/greentea",
+    "base_commit": "REDACTED",
+    "patch": "diff --git a/mbed_greentea/mbed_report_api.py b/mbed_greentea/mbed_report_api.py\nindex 166bc29..22a3778 100644\n--- a/mbed_greentea/mbed_report_api.py\n+++ b/mbed_greentea/mbed_report_api.py\n@@ -42,7 +42,7 @@ def exporter_json(test_result_ext, test_suite_properties=None):\n         for suite in target.values():\n             try:\n                 suite[\"single_test_output\"] = suite[\"single_test_output\"]\\\n-                                              .decode(\"unicode_escape\")\n+                                              .decode(\"utf-8\", \"replace\")\n             except KeyError:\n                 pass\n     return json.dumps(test_result_ext, indent=4)\n@@ -603,7 +603,7 @@ def get_result_overlay_dropdowns(result_div_id, test_results):\n     result_output_dropdown = get_dropdown_html(result_output_div_id,\n                                                \"Test Output\",\n                                                test_results['single_test_output']\n-                                               .decode(\"unicode-escape\")\n+                                               .decode(\"utf-8\", \"replace\")\n                                                .rstrip(\"\\n\"),\n                                                output_text=True)\n \n",
+    "test_patch": "diff --git a/test/report_api.py b/test/report_api.py\nindex 122e26e..2a4275f 100644\n--- a/test/report_api.py\n+++ b/test/report_api.py\n@@ -45,7 +45,7 @@ class ReportEmitting(unittest.TestCase):\n                     u'build_path_abs': u'N/A',\n                     u'copy_method': u'N/A',\n                     u'image_path': u'N/A',\n-                    u'single_test_output': b'N/A',\n+                    u'single_test_output': b'\\x80abc\\uXXXX' ,\n                     u'platform_name': u'k64f',\n                     u'test_bin_name': u'N/A',\n                     u'testcase_result': {},\n",
+    "FAIL_TO_PASS": [
+     "test/report_api.py::ReportEmitting::test_report_zero_testcases"
+    ],
+    "PASS_TO_PASS": [
+     "test/report_api.py::ReportEmitting::test_report_zero_tests"
+    ],
+    "docker_image": null
+   }
+  }
+ ]
+}
