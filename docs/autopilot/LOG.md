@@ -25,3 +25,20 @@
 - Independent routine review: verdict fix first, no critical. Prompt fixes applied the same hour (lock before pull,
   absolute release command, LOST handling, alert body from a file); connector guard now fails closed. Repo-side
   findings queued as T15; full list in `~/.cheatproof-autopilot/review-2026-10-18.md`.
+
+## 2026-10-18 routine (cycle 2026-10-18T05:42:00-05:00)
+progress 8% (1/15 tasks done, 10 days to submit)
+- Executor interface and Docker backend merged (T02, #4); worktree `.env` loader and sanitized fixtures merged (#5).
+- T01 now waits only on the sandbox run (U3). T03 and T04 are unblocked.
+- Owner: the Mac has no Docker daemon (no Docker Desktop app); U7 updated and alerted.
+- Spend: one Nano call, ledger total $0.0000168 to $0.0000336; no sandbox runs.
+
+- Task T02 (#4): Haiku build, Sonnet review "fix first" (3 high: image name parsed as a docker flag, unbounded host
+  output buffering, `diff()` evadable through the sandbox's index and replace refs), one Haiku fix round, Opus final
+  review added cache-dir excludes to `diff()`. 102 tests. Live Docker test not run (no daemon).
+- Task T01 remainder (#5): Haiku build plus live Nano recording, Sonnet review "fix first" (medium: sanitize gaps,
+  `BudgetExceeded` swallowed in the sandbox step), one Haiku fix round, Opus final review: merge.
+- Lessons: repo agents in `.claude/agents/` do not load when the run starts in the parent folder (U8); run them as
+  general-purpose agents told to follow the agent file. CLAUDE.md rule 10 ("never effort max") conflicts with
+  CYCLE.md (max allowed for Haiku on hard size L pieces); the routine prompt follows CYCLE.md, planner to reconcile.
+- Learning notes caught up for #2 to #5.
