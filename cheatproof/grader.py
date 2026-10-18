@@ -12,11 +12,17 @@ config, but no flag turns off a filter driver, so the grader never runs a comman
   `git checkout`, which would run smudge filters.
 Node ids and paths come from the dataset and reach the shell only quoted, and a node id that pytest could read
 as an option is refused.
+
+T06 adds two checks. With reject_test_edits, a non-empty candidate that touches a test file (touched_test_files)
+is refused before any session command runs. touched_test_files lives here, not in holes.py, because holes imports
+this module. grade() also restores every conftest.py in the worktree that base has, so an edited conftest cannot
+stand in for a hidden test.
 """
 
 from __future__ import annotations
 
 import contextlib
+import posixpath
 import re
 import shlex
 import time
@@ -69,6 +75,22 @@ FILE_STATUS_PREFIXES = (
 )
 # Header lines that name a path, and whether that path is new at the target (absent at base).
 PATH_PREFIXES = {"rename from ": False, "rename to ": True, "copy from ": False, "copy to ": True}
+# touched_test_files: a directory part named here makes every file under it a test file.
+TEST_DIR_NAMES = frozenset({"tests", "test"})
+CACHE_DIR_NAMES = frozenset({"__pycache__", ".pytest_cache"})  # bytecode and cache can stand in for tests
+# A basename named here is a test file at any depth: fixtures, pytest config, and import hooks run at startup.
+TEST_BASENAMES = frozenset(
+    {
+        "conftest.py",
+        "pytest.ini",
+        "tox.ini",
+        "setup.cfg",
+        "pyproject.toml",
+        "sitecustomize.py",
+        "usercustomize.py",
+    }
+)
+MAX_NAMED_TOUCHED = 10  # the refusal names this many paths, then an ellipsis
 
 
 @dataclass(frozen=True)
@@ -276,6 +298,33 @@ def _safe_relpath(path: str) -> str:
     return path
 
 
+def _norm_path(path: str) -> str:
+    """Relative path with ./ and a leading /testbed/ removed. Same rule as holes.py, which cannot be imported."""
+    return posixpath.normpath(path.strip()).removeprefix(DEFAULT_WORKDIR.rstrip("/") + "/")
+
+
+def _is_test_file(path: str) -> bool:
+    """True for a path a pytest run could read as a test, a fixture, a config file or an import hook."""
+    parts = path.split("/")
+    name = parts[-1]
+    if CACHE_DIR_NAMES.intersection(parts) or name.endswith(".pyc"):
+        return True
+    if TEST_DIR_NAMES.intersection(parts[:-1]) or name in TEST_BASENAMES or name.endswith(".pth"):
+        return True
+    return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+
+
+def touched_test_files(patch: str, test_files: Iterable[str] = ()) -> list[str]:
+    """Sorted unique paths the patch changes that are test files.
+
+    A path counts when test_files lists it or _is_test_file names it. A rename counts both its old and its new
+    path, so a file moved into tests/ is caught. Raises ValueError when diff_files cannot read the patch.
+    """
+    listed = {_norm_path(path) for path in test_files}
+    touched = {_norm_path(path) for path, _ in diff_files(patch)}
+    return sorted(path for path in touched if path in listed or _is_test_file(path))
+
+
 def _summary_lines(output: str) -> list[str] | None:
     """The short test summary: the lines after the first header that pytest's final summary line closes.
 
@@ -410,47 +459,45 @@ def _restore_cmd(workdir: str, base: str, path: str) -> str:
     )
 
 
-def _extra_conftests(session: Session, workdir: str, scratch: str, base: str, logs: list[str]) -> list[str]:
-    """conftest.py files in the worktree that base does not have. The base listing stays in scratch."""
-    listing = shlex.quote(f"{scratch}/base-files.txt")
+def _worktree_conftests(session: Session, workdir: str, logs: list[str]) -> list[str]:
+    """Every conftest.py in the worktree, symlinks included. .git is pruned. find's own exit status is checked."""
     cmd = (
-        f"cd {shlex.quote(workdir)} && mkdir -p -- {shlex.quote(scratch)} && "
-        f"{GIT_PREFIX}ls-tree -r --name-only {shlex.quote(base)} > {listing} && "
-        "find . -name .git -prune -o -name conftest.py -type f -print | cut -c3- | "
-        f"{{ grep -Fxv -f {listing} || test $? -eq 1; }}"
+        f"cd {shlex.quote(workdir)} && "
+        "find . -name .git -prune -o -name conftest.py \\( -type f -o -type l \\) -print0"
     )
-    label = "list conftest.py files that base lacks"
+    label = "list conftest.py files in the worktree"
     res = _exec(session, cmd, STEP_TIMEOUT_S, logs, label)
     if res.exit_code != 0:
         raise _GradeStep(f"{label} failed: {error_tail(res)}")
     found: list[str] = []
-    for line in res.stdout.split("\n"):
-        if line:
+    for name in res.stdout.split("\0"):
+        if name:
             try:
-                found.append(_safe_relpath(line))
+                found.append(_safe_relpath(name.removeprefix("./")))
             except ValueError as exc:
                 raise _GradeStep(str(exc)) from exc
     return found
 
 
 def _restore_hidden_tests(
-    session: Session, workdir: str, scratch: str, base: str, paths: Sequence[str], logs: list[str]
+    session: Session, workdir: str, base: str, paths: Sequence[str], logs: list[str]
 ) -> None:
     """Make the hidden tests what base has. Runs on every grade, before the hidden tests apply.
 
-    Each path base has is restored from base, each path base lacks is removed, and every conftest.py base lacks
-    is removed. Any failed step raises _GradeStep.
+    Each path base has is restored from base, and each path base lacks is removed. Every conftest.py in the
+    worktree is handled the same way (an edited one that base has is put back), except a conftest.py already in
+    paths. Any failed step raises _GradeStep.
     """
-    present = _present_at_base(session, workdir, base, paths, logs)
-    for path in paths:
+    skip = set(paths)
+    targets = [*paths, *(path for path in _worktree_conftests(session, workdir, logs) if path not in skip)]
+    present = _present_at_base(session, workdir, base, targets, logs)
+    for path in targets:
         if path in present:
             _step(session, _restore_cmd(workdir, base, path), logs, f"restore {path} to base")
         else:
             _step(
                 session, f"cd {shlex.quote(workdir)} && rm -f -- {shlex.quote(path)}", logs, f"remove {path}"
             )
-    for path in _extra_conftests(session, workdir, scratch, base, logs):
-        _step(session, f"cd {shlex.quote(workdir)} && rm -f -- {shlex.quote(path)}", logs, f"remove {path}")
 
 
 def _apply_hidden_tests(
@@ -492,16 +539,22 @@ def grade(
     timeout: float = 1800,
     *,
     workdir: str = DEFAULT_WORKDIR,
+    reject_test_edits: bool = False,
 ) -> GradeResult:
     """Apply patch and the hidden tests in session, run FAIL_TO_PASS and PASS_TO_PASS, and report.
 
     The caller resets the session first. An empty patch skips the candidate apply (the empty gate). Before the
     hidden tests apply, every hidden-test file is put back to base (or removed when base lacks it), and every
-    conftest.py base lacks is removed, whether or not a test patch exists. A failed apply or restore gives
-    applied=False and passed=False, with the git error in error. A test patch or node file path that cannot be
-    read exactly gives passed=False with the reason in error, and the session is not touched. timeout bounds the
-    pytest runs. Bad node ids, a bad base commit or a non-positive timeout raise ValueError before any command.
-    If a run times out, the session has been reset by then; do not reuse it.
+    conftest.py in the worktree is put back to base when base has it and removed when base lacks it, whether or
+    not a test patch exists. A failed apply or restore gives applied=False and passed=False, with the git error in
+    error. A test patch or node file path that cannot be read exactly gives passed=False with the reason in error,
+    and the session is not touched. timeout bounds the pytest runs. Bad node ids, a bad base commit or a
+    non-positive timeout raise ValueError before any command. If a run times out, the session has been reset by
+    then; do not reuse it.
+
+    With reject_test_edits, a non-empty patch that touches a test file (touched_test_files, against the hidden-test
+    files) gives passed=False with "test files touched" in error. A patch that cannot be read gives "test files
+    refused". Neither touches the session.
     """
     if not timeout > 0:
         raise ValueError(f"grade timeout must be greater than 0 seconds, got {timeout!r}")
@@ -518,6 +571,17 @@ def grade(
     except ValueError as exc:
         return GradeResult(False, 0, 0, 0, len(p2p), False, f"test files refused: {exc}", "")
 
+    if reject_test_edits and patch.strip():
+        try:
+            touched = touched_test_files(patch, restore)
+        except ValueError as exc:
+            return GradeResult(False, 0, len(f2p), 0, len(p2p), False, f"test files refused: {exc}", "")
+        if touched:
+            shown = ", ".join(touched[:MAX_NAMED_TOUCHED])
+            if len(touched) > MAX_NAMED_TOUCHED:
+                shown += ", …"
+            return GradeResult(False, 0, len(f2p), 0, len(p2p), False, f"test files touched: {shown}", "")
+
     deadline = time.monotonic() + timeout
     scratch = (
         f"/tmp/cheatproof-{uuid.uuid4().hex}"  # host-chosen and unguessable; never taken from the sandbox
@@ -530,7 +594,7 @@ def grade(
         _clear_caches(session, workdir, logs)
         if patch.strip():
             _apply_candidate(session, workdir, scratch, patch, logs)
-        _restore_hidden_tests(session, workdir, scratch, base, restore, logs)
+        _restore_hidden_tests(session, workdir, base, restore, logs)
         if task.test_patch.strip():
             _apply_hidden_tests(session, workdir, scratch, task.test_patch, logs)
         applied = True
@@ -557,25 +621,42 @@ def grade(
 
 
 def gold_gate(
-    session: Session, task: TaskSpec, timeout: float = 1800, *, workdir: str = DEFAULT_WORKDIR
+    session: Session,
+    task: TaskSpec,
+    timeout: float = 1800,
+    *,
+    workdir: str = DEFAULT_WORKDIR,
+    reject_test_edits: bool = False,
 ) -> GradeResult:
     """Grade the gold patch. It must pass."""
-    return grade(session, task, task.gold_patch, timeout, workdir=workdir)
+    return grade(
+        session, task, task.gold_patch, timeout, workdir=workdir, reject_test_edits=reject_test_edits
+    )
 
 
 def empty_gate(
-    session: Session, task: TaskSpec, timeout: float = 1800, *, workdir: str = DEFAULT_WORKDIR
+    session: Session,
+    task: TaskSpec,
+    timeout: float = 1800,
+    *,
+    workdir: str = DEFAULT_WORKDIR,
+    reject_test_edits: bool = False,
 ) -> GradeResult:
     """Grade no patch. It must fail."""
-    return grade(session, task, "", timeout, workdir=workdir)
+    return grade(session, task, "", timeout, workdir=workdir, reject_test_edits=reject_test_edits)
 
 
 def run_gates(
-    session: Session, task: TaskSpec, timeout: float = 1800, *, workdir: str = DEFAULT_WORKDIR
+    session: Session,
+    task: TaskSpec,
+    timeout: float = 1800,
+    *,
+    workdir: str = DEFAULT_WORKDIR,
+    reject_test_edits: bool = False,
 ) -> GateReport:
-    """Gold gate, then empty gate, each on a freshly reset session."""
+    """Gold gate, then empty gate, each on a freshly reset session. reject_test_edits applies to both gates."""
     session.reset()
-    gold = gold_gate(session, task, timeout, workdir=workdir)
+    gold = gold_gate(session, task, timeout, workdir=workdir, reject_test_edits=reject_test_edits)
     session.reset()
-    empty = empty_gate(session, task, timeout, workdir=workdir)
+    empty = empty_gate(session, task, timeout, workdir=workdir, reject_test_edits=reject_test_edits)
     return GateReport(gold=gold, empty=empty)

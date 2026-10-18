@@ -1,3 +1,4 @@
+import re
 import shlex
 from dataclasses import replace
 
@@ -14,6 +15,7 @@ from cheatproof.grader import (
     grade,
     node_outcomes,
     run_gates,
+    touched_test_files,
 )
 from cheatproof.tasks import TaskSpec
 
@@ -155,8 +157,8 @@ def base_tree(*present: str):
 
 
 def extra_conftests(*paths: str) -> Result:
-    """Answer for the conftest scan: the conftest.py files the worktree has that base lacks."""
-    return Result(0, "".join(path + "\n" for path in paths), "", 0.0)
+    """Answer for the conftest scan: the conftest.py files the worktree has, NUL-separated like find -print0."""
+    return Result(0, "".join("./" + path + "\0" for path in paths), "", 0.0)
 
 
 def first_command(session: FakeSession, needle: str) -> int:
@@ -165,6 +167,11 @@ def first_command(session: FakeSession, needle: str) -> int:
 
 def fake_result(passed: bool) -> GradeResult:
     return GradeResult(passed, 0, 0, 0, 0, True, None, "")
+
+
+def edit_patch(path: str) -> str:
+    """A text diff that changes one existing file. diff_files reads the path from it."""
+    return f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-a\n+b\n"
 
 
 # node_outcomes: reading the short test summary
@@ -399,7 +406,7 @@ def test_listing_the_base_failing_fails_closed():
 
 def test_conftest_files_base_lacks_are_removed():
     session = FakeSession(
-        [("conftest.py -type f", extra_conftests("conftest.py", "tests/conftest.py")), ("pytest", all_pass)]
+        [("-name conftest.py", extra_conftests("conftest.py", "tests/conftest.py")), ("pytest", all_pass)]
     )
     result = grade(session, make_task(), GOLD)
     assert session.cmds("rm -f -- conftest.py")
@@ -408,13 +415,38 @@ def test_conftest_files_base_lacks_are_removed():
     assert result.passed is True
 
 
+def test_edited_conftest_that_base_has_is_restored_before_the_hidden_tests_apply():
+    session = FakeSession(
+        [
+            ("ls-tree --name-only -z", base_tree("conftest.py", "tests/conftest.py")),
+            ("-name conftest.py", extra_conftests("conftest.py", "tests/conftest.py")),
+            ("pytest", all_pass),
+        ]
+    )
+    result = grade(session, make_task(), GOLD)
+    for path in ("conftest.py", "tests/conftest.py"):
+        restore = f"cat-file blob {BASE}:{path} > {path}"
+        assert session.cmds(restore), path
+        assert first_command(session, restore) < first_command(session, "hidden-tests.diff")
+    assert not [cmd for cmd, _ in session.commands if cmd.endswith(" rm -f -- tests/conftest.py")]
+    assert result.passed is True
+
+
+def test_conftest_scan_covers_symlinks_and_reports_find_own_status():
+    session = FakeSession([("-name conftest.py", extra_conftests("conftest.py"))])
+    grade(session, make_task(), GOLD)
+    (scan,) = session.cmds("-name conftest.py")
+    assert "-type l" in scan
+    assert scan.endswith("-print0")  # no pipe, so find's exit status is the one checked
+
+
 def test_conftest_scan_failure_fails_closed():
-    session = FakeSession([("conftest.py -type f", Result(2, "", "find: boom", 0.0)), ("pytest", all_pass)])
+    session = FakeSession([("-name conftest.py", Result(2, "", "find: boom", 0.0)), ("pytest", all_pass)])
     result = grade(session, make_task(), GOLD)
     assert result.passed is False
     assert result.applied is False
     assert result.error is not None and result.error.startswith(
-        "list conftest.py files that base lacks failed"
+        "list conftest.py files in the worktree failed: find: boom"
     )
     assert session.cmds("pytest") == []
 
@@ -538,6 +570,146 @@ def test_grade_refuses_a_node_file_outside_the_workdir():
     assert result.passed is False
     assert result.error is not None and result.error.startswith("test files refused: ")
     assert session.commands == []
+
+
+# grade: reject_test_edits refuses before any session command
+
+TEST_EDIT = edit_patch(TEST_FILE)
+
+
+def test_reject_test_edits_refuses_a_test_touching_patch_before_any_command():
+    session = FakeSession([("pytest", all_pass)])
+    result = grade(session, make_task(), TEST_EDIT, reject_test_edits=True)
+    assert result == GradeResult(False, 0, 1, 0, 1, False, "test files touched: tests/test_x.py", "")
+    assert session.commands == []
+
+
+@pytest.mark.parametrize(("count", "tail"), [(10, ""), (11, ", …")])
+def test_refusal_names_at_most_ten_touched_files_then_an_ellipsis(count, tail):
+    names = [f"tests/test_{i:02d}.py" for i in range(count)]
+    session = FakeSession([("pytest", all_pass)])
+    result = grade(session, make_task(), "".join(edit_patch(name) for name in names), reject_test_edits=True)
+    assert result.error == "test files touched: " + ", ".join(names[:10]) + tail
+    assert session.commands == []
+
+
+def test_reject_test_edits_fails_closed_on_a_patch_it_cannot_read():
+    session = FakeSession([("pytest", all_pass)])
+    result = grade(session, make_task(), "not a patch\n", reject_test_edits=True)
+    assert result == GradeResult(
+        False, 0, 1, 0, 1, False, "test files refused: text outside a file section: 'not a patch'", ""
+    )
+    assert session.commands == []
+
+
+def scrub_scratch(text: str) -> str:
+    """Each grade picks a random scratch dir, so runs differ in its name. Blank the name to compare them."""
+    return re.sub(r"cheatproof-[0-9a-f]{32}", "cheatproof-SCRATCH", text)
+
+
+def test_source_only_patch_runs_exactly_as_without_the_flag():
+    plain = FakeSession([("pytest", fixed_only)])
+    flagged = FakeSession([("pytest", fixed_only)])
+    without = grade(plain, make_task(), GOLD)
+    with_flag = grade(flagged, make_task(), GOLD, reject_test_edits=True)
+    assert with_flag.passed is True
+    assert replace(with_flag, log_tail=scrub_scratch(with_flag.log_tail)) == replace(
+        without, log_tail=scrub_scratch(without.log_tail)
+    )
+    assert [scrub_scratch(cmd) for cmd, _ in flagged.commands] == [
+        scrub_scratch(cmd) for cmd, _ in plain.commands
+    ]
+
+
+@pytest.mark.parametrize("patch", ["", "  \n"])
+def test_empty_patch_is_unaffected_by_the_flag(patch):
+    session = FakeSession([("pytest", fixed_only)])
+    result = grade(session, make_task(), patch, reject_test_edits=True)
+    assert result.applied is True
+    assert result.error is None
+    assert result.passed is False  # the empty gate: fixed_only needs the candidate
+    assert session.cmds("pytest")
+    assert session.cmds("candidate.diff") == []
+
+
+# touched_test_files: which paths a patch changes count as tests
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/test_mod.py",
+        "pkg/test/helpers.py",
+        "conftest.py",
+        "pkg/sub/conftest.py",
+        "pkg/test_mod.py",
+        "pkg/mod_test.py",
+        "pytest.ini",
+        "tox.ini",
+        "sub/setup.cfg",
+        "pyproject.toml",
+        ".pytest_cache/v/cache/nodeids",
+        "lib/sitecustomize.py",
+        "usercustomize.py",
+        "site/evil.pth",
+        "pkg/mod.pyc",
+        "pkg/__pycache__/mod.py",
+    ],
+)
+def test_touched_test_files_flags_test_paths_at_any_depth(path):
+    assert touched_test_files(edit_patch(path)) == [path]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "src/pkg/mod.py",
+        "cheatproof/latest.py",
+        "pkg/contest.py",
+        "src/testing_utils.py",
+        "pkg/tests_helpers.py",
+        "mytests/helpers.py",
+        "attest/x.py",
+        "docs/tests.md",
+        "pkg/pytest_plugin.py",
+    ],
+)
+def test_touched_test_files_leaves_source_files_alone(path):
+    assert touched_test_files(edit_patch(path)) == []
+
+
+def test_touched_test_files_counts_a_listed_file_whatever_its_name():
+    patch = edit_patch("helpers/data.py")
+    assert touched_test_files(patch) == []
+    assert touched_test_files(patch, ["helpers/data.py"]) == ["helpers/data.py"]
+    assert touched_test_files(patch, ["./helpers/data.py"]) == ["helpers/data.py"]
+    assert touched_test_files(patch, ["/testbed/helpers/data.py"]) == ["helpers/data.py"]
+
+
+def test_touched_test_files_is_sorted_and_unique():
+    patch = edit_patch("tests/test_b.py") + edit_patch("conftest.py") + edit_patch("tests/test_a.py")
+    assert touched_test_files(patch + edit_patch("tests/test_b.py")) == [
+        "conftest.py",
+        "tests/test_a.py",
+        "tests/test_b.py",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ("src/a.py", "tests/a.py", ["tests/a.py"]),  # moved into a test dir
+        ("tests/a.py", "src/a.py", ["tests/a.py"]),  # moved out: the old test path still counts
+    ],
+)
+def test_rename_across_a_test_dir_names_the_test_side(old, new, expected):
+    patch = f"diff --git a/{old} b/{new}\nsimilarity index 100%\nrename from {old}\nrename to {new}\n"
+    assert touched_test_files(patch) == expected
+
+
+def test_touched_test_files_raises_for_a_patch_it_cannot_read():
+    with pytest.raises(ValueError):
+        touched_test_files("not a patch\n")
 
 
 # diff_files: only header lines name paths
@@ -745,3 +917,24 @@ def test_gate_report_names_an_empty_gate_that_passes():
 )
 def test_gate_report_ok_needs_gold_to_pass_and_empty_to_fail(gold, empty, ok):
     assert GateReport(gold=fake_result(gold), empty=fake_result(empty)).ok is ok
+
+
+def test_gold_gate_forwards_the_flag_and_refuses_a_test_editing_gold_patch():
+    task = make_task(gold_patch=edit_patch(TEST_FILE))
+    session = FakeSession([("pytest", all_pass)])
+    assert gold_gate(session, task).passed is True  # without the flag the gold patch is graded
+    session = FakeSession([("pytest", all_pass)])
+    result = gold_gate(session, task, reject_test_edits=True)
+    assert result.error == "test files touched: tests/test_x.py"
+    assert session.commands == []
+
+
+def test_run_gates_forwards_the_flag_to_both_gates():
+    task = make_task(gold_patch=edit_patch(TEST_FILE))
+    session = FakeSession([("pytest", fixed_only)])
+    report = run_gates(session, task, reject_test_edits=True)
+    assert report.gold.error == "test files touched: tests/test_x.py"
+    assert report.empty.applied is True  # the empty gate still runs: its patch is empty
+    assert report.empty.passed is False
+    assert report.empty.error is None
+    assert session.resets == 2
