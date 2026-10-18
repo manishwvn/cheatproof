@@ -106,7 +106,7 @@ same attacker after; inconclusive attacks, resets during a patched attack and ho
 never certified). For T07: when the attacker fails before hardening, scan-found holes are not patched; show the scan
 in the certificate. A trojaned `/usr/bin/git` in the image can still fake the strip check (residual risk).
 
-### T07 Certificates and hackability score — size M — todo — needs T06
+### T07 Certificates and hackability score — size M — in-progress (cycle 2026-10-18T13:24:20-05:00) — needs T06
 `cheatproof/certify.py` and `cheatproof/cli.py`: `cheatproof harden <env-id>` writes a JSON certificate (task, image
 digest, holes found, patches applied, gate results before and after, attacker model and budget, cost, timestamp) and
 `cheatproof report` writes a per-benchmark hackability score with n, raw counts and a 95% interval. Schema is
