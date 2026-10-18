@@ -43,3 +43,20 @@ progress 8% (1/15 tasks done, 10 days to submit)
   CYCLE.md (max allowed for Haiku on hard size L pieces); the routine prompt follows CYCLE.md, planner to reconcile.
 - Learning notes caught up for #2 to #5.
 - Refused tool: `mcp__ccd_turn__wrap_up` (connector not on the routine allowlist); not retried.
+
+## 2026-10-18 routine (cycle 2026-10-18T07:24:18-05:00)
+progress 30% (3/16 tasks done, 10 days to submit)
+- T04 attacker loop merged (#6); T03 task loader, grader gates and exposure scan merged (#7). 409 tests.
+- T16 added (planner): strategy prompt text and the Tavily budget counter; U9 asks the planner for it.
+- Spend: $0 (no model, sandbox or Tavily calls). Datasets-server fetches are free and keyless.
+
+- Task T04 (#6): Sonnet core build. Sonnet review "fix first" (2 high: a failed `diff()` looked like an empty
+  submit; timeout resets were silent), one Haiku fix round (diff_ok, reset note, max_searches, 402 raises
+  BudgetExceeded, type-only tool errors, AST denylist, real GuardedLLM test). Opus final review: merge.
+- The strategies/websearch builder's run was cut off by a safety classifier mid-brief; its output was set aside
+  (trashed, never committed) and the loop now takes caller-supplied prompts. Prompt text goes to the planner (T16).
+- Task T03 (#7): two Haiku builders. Sonnet review "fix first" (2 high: hidden tests restored only on apply
+  failure; `git checkout` runs filter drivers), two parallel Haiku fixers. Opus final review: merge; object-store
+  tampering noted for T06.
+- Lessons: sanitizer guard redacts 40-hex SHAs in fixtures, so tests synthesise SHAs at runtime. `git apply` runs
+  repo filter drivers too; apply with GIT_DIR pointing nowhere.

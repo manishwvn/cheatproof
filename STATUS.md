@@ -7,10 +7,12 @@
   under one lock), CI and security workflows, autopilot scripts (`next_run.py`, `progress.py`, `lock.py`) with tests,
   guards, docs, queue T01–T14, ADR 0001 (spend cap) and ADR 0002 (executor: Sandboxes, Docker fallback).
   2026-10-18 routine: executor with Docker backend (`cheatproof/executor.py`, #4), worktree `.env` loader and
-  sanitized Token Factory fixtures (#5). 155 tests.
-- **Next for the routine:** T03 task loader and T04 attacker on fakes (both unblocked), T15 review fixes.
+  sanitized Token Factory fixtures (#5). Cycle 07:24: attacker loop (`cheatproof/attacker.py`, #6); task loader,
+  grader gates and exposure scan (`tasks.py`, `grader.py`, `exposure.py`, hero fixture, #7). 409 tests.
+- **Next for the routine:** T05 hole classifier (unblocked), T15 review fixes; T06 after T05.
+- **Planner:** T16 (U9) attack strategy prompts and the Tavily budget counter; needed before live attacks (T08).
 - **Owner blockers:** U3 (Sandboxes access), U7 (no Docker daemon on the Mac, and only 16 GB free disk). U1 done
   2026-10-18: promo applied, key in `.env`, caps 20/4.
-- **Risk:** the Oct 21 go/no-go needs live attacker runs; T02–T04 must land by Oct 20.
+- **Risk:** the Oct 21 go/no-go needs live attacker runs: T16 (planner) and an executor (U3 or U7) by Oct 20.
 - **Routine:** `cheatproof-autopilot`, hourly at about :23, state in `~/.cheatproof-autopilot/` (see
   `docs/autopilot/CYCLE.md`). Owner item U8: set its folder to the repo and mode to Bypass. Review fixes queued as T15.

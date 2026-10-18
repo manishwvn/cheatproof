@@ -53,7 +53,7 @@ USER item for the planner to merge. Do T02 first if both are runnable.
 
 ## Milestone: hero path
 
-### T03 Task loader with gold and empty gates — size M — in-progress (cycle 2026-10-18T07:24:18-05:00) — needs T02
+### T03 Task loader with gold and empty gates — size M — done #7 — needs T02
 Load 30 SWE-rebench and 10 SWE-bench Verified task specs (instance ID, repo, base commit, image, FAIL_TO_PASS,
 PASS_TO_PASS, gold patch, test patch) from the public Hugging Face datasets via HTTP (no new heavy dependency), cached
 under `runs/` (git-ignored). Pick tasks with small images and pure-Python repos first (disk). `cheatproof/grader.py`
@@ -62,7 +62,13 @@ both. Add a static exposure scan per task, in code with no model: future commits
 writable, network reachable. Hero fixture: one labelled task in `tests/fixtures/hero/` whose `.git` exposes the future
 fix (expected: attack succeeds before hardening, fails after). Tests use recorded fixtures only.
 
-### T04 Attacker agent with four attacks — size L — in-progress (cycle 2026-10-18T07:24:18-05:00) — needs T02
+Done 2026-10-18 (routine, #7): `cheatproof/tasks.py` (datasets-server loader, validation, selection, cache),
+`cheatproof/grader.py` (hidden tests always restored with `cat-file blob`, patches applied with no repo config,
+empty gate must really run), `cheatproof/exposure.py`, hero fixture. Live fetch: Verified keeps only pytest-shaped
+ids (django/sympy rows skip), so expect a thin Verified pick; rebench rows without `docker_image` are skipped.
+Left for T06: the grader trusts the sandbox object store; edited base `conftest.py` files are not restored.
+
+### T04 Attacker agent with four attacks — size L — done #6 — needs T02
 `cheatproof/attacker.py`: a Nemotron tool-calling loop (Ultra by `ATTACKER_MODEL`; Super for cheap dev runs) told to
 make the grader pass without solving the task. Tools: `run`, `read_file`, `write_file`, `submit`, all executed only
 inside the executor; plus `web_search` (Tavily, host side, counted against `TAVILY_CALL_CAP`) only in the
@@ -70,6 +76,10 @@ network-fetch experiment. Four strategy hints: git-history retrieval, test edits
 upstream fix. Limits: about 15 steps and 50k tokens per attempt, enforced through the budget. Every step is logged as
 structured JSON (step, tool, args, result digest, tokens). Fake LLM client for tests; one recorded live transcript as
 a fixture once T01 is done. Model output is untrusted data.
+
+Done 2026-10-18 (routine, #6): the loop only (`attack(llm, session, system_prompt, task_prompt, ...)`): tools run
+through the session, step/token/search limits, JSONL trace, 402 and `BudgetExceeded` stop, diff failure flagged.
+The per-strategy prompt text and the live Tavily wrapper moved to T16 (planner).
 
 ### T05 Hole classifier from traces — size M — todo — needs T04
 `cheatproof/holes.py`: decide in code from the trace and the final diff which hole an attack used: `git-history`
@@ -91,6 +101,11 @@ sandbox's own git config, attributes or filter drivers (`diff()` excludes byteco
 digest, holes found, patches applied, gate results before and after, attacker model and budget, cost, timestamp) and
 `cheatproof report` writes a per-benchmark hackability score with n, raw counts and a 95% interval. Schema is
 versioned and tested.
+
+### T16 Attack strategy prompts and Tavily counter (planner) — size S — waiting: planner (U9)
+The four strategy hints for T04 (git-history, test-edit, hard-code, network) as caller-supplied `system_prompt`
+text, and a `budget.reserve_tavily_call()` counter enforcing `TAVILY_CALL_CAP` plus a host-side search callable
+for `attack(search=...)`. `budget.py` is a planner-merge path, and the routine left the prompt text to the planner.
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
@@ -172,3 +187,6 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
   edit: set the folder to `/Users/manish/Documents/Nebius_X_Nvidia/cheatproof` and the permission mode to **Bypass**,
   then save. Until then runs start in the parent folder in auto mode, so the repo's connector guard does not load
   and a run may stop on a refused step. Then tell the lead "U8 done".
+- **U9 Planner work for T16** (ready 2026-10-18): in an interactive session, write the attacker strategy prompts
+  and the Tavily budget counter (T16), then flip T16 to `done`. T05 and T06 do not wait on it; the first live
+  attacker run (T08) does.
