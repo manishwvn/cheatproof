@@ -7,7 +7,7 @@ Check: `python3 docs/autopilot/progress.py` counts the same tasks as
 
 ## Milestone: live access and executor
 
-### T01 Smoke test, model IDs and prices — size S — waiting: U1
+### T01 Smoke test, model IDs and prices — size S — todo [60%]
 Run `uv run python scripts/smoke.py`. Live scripts load `.env` from the main checkout (the parent of `git rev-parse
 --git-common-dir`), so worktrees share one key file and never copy it. Record the exact Nemotron model IDs (Nano,
 Super, Ultra) from `/v1/models` and their per-1M prices from the public Token Factory price page into `.env.example`
@@ -17,6 +17,10 @@ auth headers, keys, emails or IDs) under `tests/fixtures/`, plus a test that che
 ledger shows spend; fixtures committed; `VERIFY` notes for model IDs resolved. Risk: costs cents; every call goes
 through the budget. Until the owner says "promo applied", the account holds only a $1 trial: no Ultra runs, no eval
 runs (T08), only Nano or Super calls within the `.env` caps.
+
+Done 2026-10-18 (planner): model IDs and prices recorded in `.env.example`; one capped Nano call worked ($0.0000168,
+ledger shared). Left: the `.env` loader for worktrees, sanitized fixtures plus their test, and the sandbox run once
+`NEBIUS_PROJECT_ID` and U3 exist. Owner: copy the new `CLASSIFIER_MODEL` and `MODEL_PRICES_JSON` lines into `.env`.
 
 ### T02 Executor interface and Docker backend; Sandboxes recon — size M — todo
 Implement `cheatproof/executor.py` per `docs/adr/0002-execution-model.md`: one interface (`start(env)`,
@@ -146,7 +150,8 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 - **U6 Video voice-over and submission** (2026-10-26 to 2026-10-28).
 - **U7 Disk space for the Docker fallback** (ready 2026-10-18; needed by 2026-10-20 if U3 is still pending): free at
   least 30 GB on the Mac (16 GB free on Oct 18) and start Docker Desktop once. Routines cannot delete images or files.
-- **U8 Routine folder and permission mode** (ready 2026-10-18): Claude app → Scheduled → **Cheatproof autopilot** →
+- **U8 (optional) Routine folder and permission mode** (ready 2026-10-18; runs are already guarded from the parent
+  folder): Claude app → Scheduled → **Cheatproof autopilot** →
   edit: set the folder to `/Users/manish/Documents/Nebius_X_Nvidia/cheatproof` and the permission mode to **Bypass**,
   then save. Until then runs start in the parent folder in auto mode, so the repo's connector guard does not load
   and a run may stop on a refused step. Then tell the lead "U8 done".
