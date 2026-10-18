@@ -384,13 +384,13 @@ def test_problem_statement_survives_the_cache_round_trip(tmp_path):
     assert load_tasks("swe-rebench", fetcher=cache_only, cache_dir=tmp_path) == first
 
 
-def test_a_cache_from_before_the_field_loads_with_an_empty_statement(tmp_path):
-    # Same cache version, no problem_statement key: the cache stays valid and the statement is just empty.
+def test_a_version_2_cache_without_the_statement_is_refetched(tmp_path):
+    # A spec dict without problem_statement still loads, but a v2 cache file is stale: the loader fetches again.
     task = parse_row(REBENCH, REBENCH_BY_ID["ARMmbed__yotta-804"]).to_dict()
     del task["problem_statement"]
     assert TaskSpec.from_dict(task).problem_statement == ""
     payload = {
-        "version": tasks.CACHE_VERSION,
+        "version": 2,
         "source": "swe-rebench",
         "scan_rows": REBENCH.scan_rows,
         "scanned": 1,
@@ -398,13 +398,10 @@ def test_a_cache_from_before_the_field_loads_with_an_empty_statement(tmp_path):
         "tasks": [task],
     }
     (tmp_path / "swe-rebench.json").write_text(json.dumps(payload), encoding="utf-8")
-
-    def cache_only(*args, **kwargs):
-        raise AssertionError("an old cache of the current version should answer without a fetch")
-
-    (spec,) = load_tasks("swe-rebench", fetcher=cache_only, cache_dir=tmp_path).selected
-    assert spec.instance_id == "ARMmbed__yotta-804"
-    assert spec.problem_statement == ""
+    fetched = load_tasks("swe-rebench", fetcher=FakeRowsApi(REBENCH_ROWS), cache_dir=tmp_path)
+    assert len(fetched.selected) == 2  # both valid rows from the fetch, not the one cached task
+    cached = json.loads((tmp_path / "swe-rebench.json").read_text(encoding="utf-8"))
+    assert cached["version"] == tasks.CACHE_VERSION == 3
 
 
 def test_selection_size_comes_from_the_source_default_or_n(tmp_path):

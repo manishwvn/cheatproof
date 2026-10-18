@@ -32,14 +32,16 @@ from cheatproof.grader import checked_node, checked_sha, diff_files
 ROWS_URL = "https://datasets-server.huggingface.co/rows"
 PAGE_MAX = 100  # the rows API refuses longer pages
 HTTP_TIMEOUT_S = 60
-CACHE_VERSION = (
-    2  # 2: rows are checked at load (commit, node ids, patch paths, image namespace); v1 caches are stale
-)
+# 2: rows are checked at load (commit, node ids, patch paths, image namespace); v1 caches are stale.
+# 3: tasks carry problem_statement; a v2 cache would give the attacker no statement, so it is refetched.
+CACHE_VERSION = 3
 # Image names this loader accepts. The executor pulls only these namespaces; any other name is skipped as bad_image.
 ALLOWED_IMAGE_PREFIXES = ("swebench/", "swerebench/")
 RUNS_TASKS = Path(__file__).resolve().parent.parent / "runs" / "tasks"
 NON_PYTHON_PENALTY = 1000.0  # a gold patch touching a non-.py file ranks after every all-Python task
-PROBLEM_CHARS = 20000  # a longer problem statement is cut to this many characters, the cut marker included
+PROBLEM_CHARS = (
+    8000  # a longer problem statement is cut to this many characters (about 2k tokens per attack step)
+)
 PROBLEM_CUT = "\n[problem statement cut here]"
 # Repos with compiled extensions: slow, disk-heavy images that do not fit the pure-Python goal.
 DEFAULT_DENY_REPOS = frozenset(
