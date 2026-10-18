@@ -24,7 +24,8 @@ apart, so 30 minutes from both is impossible). Never read or touch the other pro
   Network stays off except in the network-fetch experiment. Never `docker rmi` or prune; alert the owner when free disk
   is under 10 GB.
 - Tests never call models or paid APIs.
-- Never use an extra-billed model; never reasoning effort `max` (`xhigh` is the ceiling, for risky work only).
+- Never use an extra-billed model. Effort `max` only for Haiku builders on hard size L pieces; every other agent
+  stays at `xhigh` or below.
 - Never end the turn while a workflow or background agent runs; block on it.
 - Never `git restore`, `git checkout -- <file>`, `git reset --hard`, `git clean` or force-push. Direct pushes to
   `main` may change only `docs/autopilot/QUEUE.md`, `docs/autopilot/LOG.md` and `STATUS.md` (claims, done marks,
@@ -66,10 +67,18 @@ override when `weekly-cap` holds one; `--runnable` counts tasks whose status is 
 4. Claim the task on `main`: status `in-progress (cycle <START>)`, commit `chore: claim <id>`, push. Never start a
    task that a live cycle claimed. A claim from a cycle whose lock is gone is stale: reclaim it and say so in LOG.md.
 5. Build in a worktree: `git worktree add ../cheatproof-wt/<branch> -b <branch> origin/main`, then `uv sync` inside
-   it. Models: the lead plans and integrates; builders are Haiku (`model: haiku`, effort high, xhigh if hard); the
-   reviewer (`.claude/agents/reviewer.md`) is Sonnet; Opus reviews only PRs that touch budget, executor or
-   containment, CI, `.claude/` or `docs/autopilot/`. Size S or docs tasks: one builder plus one reviewer. At most two
-   fix rounds.
+   it. **Model routing (owner rule, 2026-10-18; saves the Opus limit):** Opus (this session) only orchestrates (splits
+   the task, writes each agent's brief, integrates, decides merges) and gives the final independent review; it writes
+   no bulk code. Haiku 5.5 does almost everything else: building, tests, docs, lookups, fixes (`model: haiku`, effort
+   `xhigh`; `max` allowed for Haiku only, on hard pieces of size L tasks). Sonnet takes what Haiku fails twice, the
+   hardest single piece of a size L task, and the first-pass review (`.claude/agents/reviewer.md`). Route by size:
+   - S or docs: one Haiku builder → Sonnet review → Opus final review of the diff.
+   - M: plan into 2–4 disjoint pieces → Haiku builders in parallel → one Haiku audit (tests, lint, spec check) →
+     Sonnet review → Opus final review.
+   - L: plan into up to 6 disjoint pieces → Haiku builders in parallel (Sonnet for the core piece) → Haiku audit →
+     Sonnet review → Opus final review.
+   Every brief names the files, the acceptance test and "touch nothing else". At most two fix rounds (Haiku fixes,
+   Sonnet if it fails again). Read usage before each wave of agents; at the cap, stop at a safe point.
 6. Every live run (model calls, sandbox or Docker runs) prints the ledger snapshot before and after and records the
    cost in the PR description.
 
@@ -81,7 +90,7 @@ never merge on pending or zero checks; `gh pr checks <n> --watch`). Order, from 
 Mark the task `done #<PR>` on `main` and update `STATUS.md`.
 **Planner-merge paths:** a PR touching `cheatproof/budget.py`, `cheatproof/llm.py`, `.github/workflows/`, `.claude/`,
 `.gitignore`, `pyproject.toml` dependencies, or anything in `docs/autopilot/` other than `QUEUE.md` and `LOG.md` is
-never merged by a routine. Open it, get the Opus review, then add a `## USER` item: "say `review` in an interactive
+never merged by a routine. Open it, get the Opus final review, then add a `## USER` item: "say `review` in an interactive
 session to merge PR #<n>". A skipped CodeQL job (private repo) counts as passing; any other skipped or pending check
 does not.
 
