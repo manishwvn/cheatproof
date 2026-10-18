@@ -4,6 +4,7 @@ Rows come from the Hugging Face datasets-server rows API over plain HTTP (httpx,
 no budget: it is free and public). Each row becomes a TaskSpec or is skipped with a counted reason. Untrusted
 fields are checked at load: the base commit must be a full 40-hex id, every node id must be pytest-shaped and
 safe, test_patch paths must be relative and inside the repo, and the image must come from an allowed namespace.
+The problem statement is issue text the attacker reads as data: it is kept as text and cut at PROBLEM_CHARS.
 select_tasks picks small, pure-Python tasks in a fixed order, so the same input always gives the same list.
 Parsed candidates are cached under runs/tasks/<source>.json (git-ignored). Tests inject a fake fetcher and never
 reach the network.
@@ -38,6 +39,8 @@ CACHE_VERSION = (
 ALLOWED_IMAGE_PREFIXES = ("swebench/", "swerebench/")
 RUNS_TASKS = Path(__file__).resolve().parent.parent / "runs" / "tasks"
 NON_PYTHON_PENALTY = 1000.0  # a gold patch touching a non-.py file ranks after every all-Python task
+PROBLEM_CHARS = 20000  # a longer problem statement is cut to this many characters, the cut marker included
+PROBLEM_CUT = "\n[problem statement cut here]"
 # Repos with compiled extensions: slow, disk-heavy images that do not fit the pure-Python goal.
 DEFAULT_DENY_REPOS = frozenset(
     {
@@ -63,6 +66,7 @@ class TaskSpec:
     gold_patch: str
     test_patch: str
     source: str  # "swe-rebench" or "swe-bench-verified"
+    problem_statement: str = ""  # issue text, untrusted data; "" when the row or an old cache has none
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -83,6 +87,7 @@ class TaskSpec:
             gold_patch=data["gold_patch"],
             test_patch=data["test_patch"],
             source=data["source"],
+            problem_statement=data.get("problem_statement", ""),  # caches written before this field have none
         )
 
 
@@ -219,6 +224,19 @@ def _test_patch(value: str) -> str:
     return value
 
 
+def _problem_statement(row: Mapping[str, Any]) -> str:
+    # Optional: a missing or null field gives "", so the row still counts.
+    # A non-string is refused. Long text is cut to PROBLEM_CHARS, marker included.
+    value = row.get("problem_statement")
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise RowSkip("bad_problem_statement")
+    if len(value) <= PROBLEM_CHARS:
+        return value
+    return value[: PROBLEM_CHARS - len(PROBLEM_CUT)] + PROBLEM_CUT
+
+
 def parse_row(source: Source, row: Mapping[str, Any]) -> TaskSpec:
     """Turn one rows-API row into a TaskSpec. Raises RowSkip with the reason when the row cannot run."""
     fields = {key: _text(row, key) for key in ("instance_id", "repo", "base_commit", "patch", "test_patch")}
@@ -237,6 +255,7 @@ def parse_row(source: Source, row: Mapping[str, Any]) -> TaskSpec:
         gold_patch=fields["patch"],
         test_patch=_test_patch(fields["test_patch"]),
         source=source.name,
+        problem_statement=_problem_statement(row),
     )
 
 

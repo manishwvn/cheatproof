@@ -6,6 +6,8 @@ import pytest
 from cheatproof import tasks
 from cheatproof.executor import IMAGE_RE
 from cheatproof.tasks import (
+    PROBLEM_CHARS,
+    PROBLEM_CUT,
     SOURCES,
     RowSkip,
     TaskSpec,
@@ -145,6 +147,40 @@ def test_json_string_and_list_test_fields_parse_the_same():
     assert parse_row(VERIFIED, as_list) == parse_row(VERIFIED, row)
 
 
+STATEMENT = "Synthetic issue: parsing an empty URL raises instead of returning None."
+
+
+@pytest.mark.parametrize(
+    "source, row",
+    [
+        (VERIFIED, VERIFIED_BY_ID[ASTROPY]),
+        (REBENCH, REBENCH_BY_ID["ARMmbed__yotta-804"]),
+    ],
+)
+def test_problem_statement_is_read_from_the_row_field_of_both_sources(source, row):
+    spec = parse_row(source, {**row, "problem_statement": STATEMENT})
+    assert spec.problem_statement == STATEMENT
+
+
+def test_rows_without_the_field_or_with_null_load_with_an_empty_statement():
+    # The recorded fixture rows carry no problem_statement. They still parse, with "" as the statement.
+    assert all("problem_statement" not in row for row in REBENCH_ROWS + VERIFIED_ROWS)
+    specs, skipped = parse_rows(REBENCH, REBENCH_ROWS)
+    assert skipped == {"no_image": 1}
+    assert [s.problem_statement for s in specs] == ["", ""]
+    row = REBENCH_BY_ID["ARMmbed__yotta-804"]
+    assert parse_row(REBENCH, {**row, "problem_statement": None}).problem_statement == ""
+
+
+def test_long_statement_is_cut_to_the_cap_with_a_marker():
+    row = VERIFIED_BY_ID[ASTROPY]
+    long = parse_row(VERIFIED, {**row, "problem_statement": "x" * (PROBLEM_CHARS + 500)}).problem_statement
+    assert len(long) == PROBLEM_CHARS
+    assert long.endswith(PROBLEM_CUT)
+    exact = "y" * PROBLEM_CHARS  # exactly at the cap: kept whole, no marker
+    assert parse_row(VERIFIED, {**row, "problem_statement": exact}).problem_statement == exact
+
+
 @pytest.mark.parametrize(
     "instance_id, image",
     [
@@ -210,6 +246,8 @@ def test_both_allowed_namespaces_are_accepted(image):
         ({"test_patch": "--- a/../escape.py\n+++ b/../escape.py\n@@ -1 +1 @@\n-a\n+b\n"}, "bad_patch"),
         ({"FAIL_TO_PASS": "[]"}, "no_fail_to_pass"),
         ({"docker_image": None}, "no_image"),
+        ({"problem_statement": 42}, "bad_problem_statement"),
+        ({"problem_statement": ["issue text"]}, "bad_problem_statement"),
     ],
 )
 def test_broken_rows_are_skipped_with_a_counted_reason(change, reason):
@@ -330,6 +368,43 @@ def test_a_cache_from_before_row_checks_is_not_reused(tmp_path):
     loaded = load_tasks("swe-rebench", fetcher=api, cache_dir=tmp_path)
     assert len(api.calls) == 1
     assert len(loaded.selected) == 2
+
+
+def test_problem_statement_survives_the_cache_round_trip(tmp_path):
+    row = {**REBENCH_BY_ID["ARMmbed__yotta-804"], "problem_statement": STATEMENT}
+    first = load_tasks("swe-rebench", fetcher=FakeRowsApi([row]), cache_dir=tmp_path)
+    (spec,) = first.selected
+    assert spec.problem_statement == STATEMENT
+    stored = json.loads((tmp_path / "swe-rebench.json").read_text(encoding="utf-8"))
+    assert stored["tasks"][0]["problem_statement"] == STATEMENT
+
+    def cache_only(*args, **kwargs):
+        raise AssertionError("the cache should answer without a fetch")
+
+    assert load_tasks("swe-rebench", fetcher=cache_only, cache_dir=tmp_path) == first
+
+
+def test_a_cache_from_before_the_field_loads_with_an_empty_statement(tmp_path):
+    # Same cache version, no problem_statement key: the cache stays valid and the statement is just empty.
+    task = parse_row(REBENCH, REBENCH_BY_ID["ARMmbed__yotta-804"]).to_dict()
+    del task["problem_statement"]
+    assert TaskSpec.from_dict(task).problem_statement == ""
+    payload = {
+        "version": tasks.CACHE_VERSION,
+        "source": "swe-rebench",
+        "scan_rows": REBENCH.scan_rows,
+        "scanned": 1,
+        "skipped": {},
+        "tasks": [task],
+    }
+    (tmp_path / "swe-rebench.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    def cache_only(*args, **kwargs):
+        raise AssertionError("an old cache of the current version should answer without a fetch")
+
+    (spec,) = load_tasks("swe-rebench", fetcher=cache_only, cache_dir=tmp_path).selected
+    assert spec.instance_id == "ARMmbed__yotta-804"
+    assert spec.problem_statement == ""
 
 
 def test_selection_size_comes_from_the_source_default_or_n(tmp_path):
