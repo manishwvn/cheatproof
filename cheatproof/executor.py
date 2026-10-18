@@ -8,13 +8,19 @@ sandbox run in cheatproof/budget.py before the container exists.
 
 from __future__ import annotations
 
+import contextlib
+import math
 import os
 import posixpath
+import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 import time
+import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -22,8 +28,13 @@ from typing import Protocol, Self
 
 from cheatproof.budget import Budget
 
-MAX_OUTPUT_BYTES = 64 * 1024  # per stream, per run() call
+MAX_OUTPUT_BYTES = 64 * 1024  # kept per stream, per run() call
+OUTPUT_MARGIN_BYTES = 4 * 1024  # the host reads this far past the cap, then kills the client
+MAX_DIFF_BYTES = 8 * 1024 * 1024  # diff() raises above this; it never truncates a patch
+MAX_RUN_TIMEOUT_S = 1800
+EXEC_GRACE_S = 10  # host waits this long past the in-container timeout before it kills docker exec
 TIMEOUT_EXIT_CODE = 124  # same as timeout(1)
+OUTPUT_KILL_EXIT_CODE = 137  # 128 + SIGKILL: the host killed the client for exceeding its output cap
 PIDS_LIMIT = 512
 DAEMON_WAIT_S = 120
 DAEMON_POLL_S = 5
@@ -32,6 +43,31 @@ IO_TIMEOUT_S = 120
 RUN_TIMEOUT_S = 900  # docker run may pull an image first
 DESTROY_TIMEOUT_S = 60
 GIB = 1024**3
+READ_CHUNK = 64 * 1024
+PIPE_POLL_S = 0.05
+PIPE_JOIN_S = 2
+IMAGE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./:@-]*")
+
+# Runs in the container as `sh -lc <this> cheatproof <cmd>`, so $1 is the command. timeout(1) with KILL
+# stops a command that ignores TERM. Without timeout(1) in the image the command is unbounded inside, and
+# the host backstop in DockerSession.run is the only limit.
+_IN_CONTAINER_TIMEOUT = (
+    'if command -v timeout >/dev/null 2>&1; then exec timeout -s KILL {seconds} sh -lc "$1"; '
+    'else exec sh -lc "$1"; fi'
+)
+
+# Runs in the container. A fresh index file, read from the start commit, means a replace ref, an
+# assume-unchanged bit or a skip-worktree bit in the sandbox cannot hide a change. The index path must not
+# exist yet (git rejects an empty index file), so it lives in a new temp directory. Repo-level git config
+# and attributes are still untrusted: T05/T06 restore the hidden tests at grade time.
+_DIFF_SCRIPT = (
+    'set -e; export GIT_CONFIG_NOSYSTEM=1; tmp=$(mktemp -d); export GIT_INDEX_FILE="$tmp/index"; '
+    "trap 'rm -rf \"$tmp\"' EXIT; "
+    "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null read-tree {base}; "
+    "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null add -A -f; "
+    "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null "
+    "diff --cached --binary --no-color --no-ext-diff --no-textconv {base}"
+)
 
 
 class ExecutorRefused(RuntimeError):
@@ -50,6 +86,12 @@ class EnvSpec:
     cpus: float = 2.0
     memory: str = "4g"
 
+    def __post_init__(self) -> None:
+        # The image becomes a docker positional argument. A name that could parse as an option
+        # (--privileged, --network=host) is refused here, before any docker call.
+        if not IMAGE_RE.fullmatch(self.image):
+            raise ValueError(f"invalid image name {self.image!r}: use letters, digits and ._:@/- only")
+
 
 @dataclass(frozen=True)
 class Result:
@@ -57,10 +99,13 @@ class Result:
     stdout: str
     stderr: str
     duration: float
+    timed_out: bool = False  # the host killed the client at its timeout
+    truncated: bool = False  # output was cut at a cap; diff() raises instead of setting this
 
 
 # argv (no shell), timeout in seconds, stdin -> Result. The runner enforces the timeout.
-Runner = Callable[[list[str], float, bytes | None], Result]
+# Callers pass max_bytes only when they set it; the default runner accepts it.
+Runner = Callable[..., Result]
 
 
 def _decode(raw: bytes | str | None) -> str:
@@ -69,30 +114,137 @@ def _decode(raw: bytes | str | None) -> str:
     return raw if isinstance(raw, str) else raw.decode("utf-8", "replace")
 
 
-def subprocess_runner(argv: list[str], timeout: float, stdin: bytes | None = None) -> Result:
-    """Default runner. A timeout returns exit 124 with a note in stderr instead of raising."""
+def _kill_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the client's process group (the client leads it), then reap the client."""
+    with contextlib.suppress(OSError):  # the group may already be gone
+        os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait()
+
+
+class _Pipe:
+    """Reads one child pipe on a thread. Keeps at most `limit` bytes, then stops and sets `overflow`."""
+
+    def __init__(self, stream, limit: int, overflow: threading.Event) -> None:
+        self._stream = stream
+        self._limit = limit
+        self._overflow = overflow
+        self.buf = bytearray()
+        self.over = False
+        self._thread = threading.Thread(target=self._pump, daemon=True)
+        self._thread.start()
+
+    def _pump(self) -> None:
+        fd = self._stream.fileno()
+        while True:
+            try:
+                chunk = os.read(fd, READ_CHUNK)
+            except OSError:
+                return
+            if not chunk:
+                return
+            room = self._limit - len(self.buf)
+            if len(chunk) > room:
+                self.buf += chunk[:room]
+                self.over = True
+                self._overflow.set()
+                return
+            self.buf += chunk
+
+    def finish(self) -> None:
+        self._thread.join(PIPE_JOIN_S)
+        if not self._thread.is_alive():
+            self._stream.close()
+
+
+def _feed(stream, data: bytes) -> None:
+    with contextlib.suppress(OSError):  # the client exited or was killed before it read all of stdin
+        stream.write(data)
+    with contextlib.suppress(OSError):
+        stream.close()
+
+
+def subprocess_runner(
+    argv: list[str],
+    timeout: float,
+    stdin: bytes | None = None,
+    *,
+    max_bytes: int = MAX_OUTPUT_BYTES + OUTPUT_MARGIN_BYTES,
+) -> Result:
+    """Default runner. argv runs without a shell.
+
+    Each stream is read through a pipe up to max_bytes. Past that the client is killed and the result is
+    marked truncated, so host memory stays bounded. A timeout kills the client and returns exit 124 with
+    timed_out set and a note in stderr instead of raising.
+    """
     started = time.monotonic()
     try:
-        proc = subprocess.run(argv, input=stdin, capture_output=True, timeout=timeout, check=False)
-    except subprocess.TimeoutExpired as exc:
-        note = f"\n[timed out after {timeout:g}s]"
-        elapsed = time.monotonic() - started
-        return Result(TIMEOUT_EXIT_CODE, _decode(exc.stdout), _decode(exc.stderr) + note, elapsed)
+        proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,  # its own process group, so the kill reaches anything it started
+        )
     except FileNotFoundError as exc:
         raise ExecutorUnavailable(f"{argv[0]} not found on PATH") from exc
-    return Result(proc.returncode, _decode(proc.stdout), _decode(proc.stderr), time.monotonic() - started)
+
+    overflow = threading.Event()
+    out = _Pipe(proc.stdout, max_bytes, overflow)
+    err = _Pipe(proc.stderr, max_bytes, overflow)
+    if stdin is not None:
+        threading.Thread(target=_feed, args=(proc.stdin, stdin), daemon=True).start()
+
+    deadline = started + timeout
+    timed_out = False
+    while proc.poll() is None and not overflow.is_set():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            break
+        overflow.wait(min(PIPE_POLL_S, remaining))
+    stopped = proc.poll() is None  # the loop ended early: on timeout or on output overflow
+    _kill_group(proc)
+    out.finish()
+    err.finish()
+
+    note = ""
+    if timed_out:
+        code, note = TIMEOUT_EXIT_CODE, f"\n[timed out after {timeout:g}s]"
+    else:
+        code = OUTPUT_KILL_EXIT_CODE if stopped else proc.returncode
+    return Result(
+        code,
+        _decode(bytes(out.buf)),
+        _decode(bytes(err.buf)) + note,
+        time.monotonic() - started,
+        timed_out=timed_out,
+        truncated=out.over or err.over,
+    )
 
 
-def _cap(text: str) -> str:
+def _cap(text: str) -> tuple[str, bool]:
+    """Keep the first MAX_OUTPUT_BYTES of a stream. Returns (text, cut)."""
     raw = text.encode("utf-8", "replace")
     if len(raw) <= MAX_OUTPUT_BYTES:
-        return text
+        return text, False
     kept = raw[:MAX_OUTPUT_BYTES].decode("utf-8", "ignore")
-    return f"{kept}\n[truncated {len(raw) - MAX_OUTPUT_BYTES} bytes]"
+    return f"{kept}\n[truncated: over {MAX_OUTPUT_BYTES} bytes, first {MAX_OUTPUT_BYTES} kept]", True
 
 
 def _root_free_gb() -> float:
     return shutil.disk_usage("/").free / GIB
+
+
+def _env_min_one[N: (int, float)](name: str, default: N, cast: Callable[[str], N]) -> N:
+    """A number from the environment. Unparsable, non-finite or below 1 falls back to the default."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = cast(raw)
+    except ValueError:
+        return default
+    return value if math.isfinite(value) and value >= 1 else default
 
 
 class Session(ABC):
@@ -100,7 +252,11 @@ class Session(ABC):
 
     @abstractmethod
     def run(self, cmd: str, timeout: float) -> Result:
-        """Run cmd with `sh -lc` in the workdir. Timeout gives exit 124. Output capped per stream."""
+        """Run cmd with `sh -lc` in the workdir. timeout must be > 0 and is capped at MAX_RUN_TIMEOUT_S.
+
+        The command gets exit 124 when the container timeout fires. If the host had to kill the client,
+        the result has timed_out=True and the sandbox has been reset. Output is capped per stream.
+        """
 
     @abstractmethod
     def write_file(self, path: str, data: bytes | str) -> None:
@@ -108,7 +264,8 @@ class Session(ABC):
 
     @abstractmethod
     def diff(self) -> str:
-        """Patch of all changes since start, tracked and untracked. Raises if git fails."""
+        """Patch of all changes since start, tracked and untracked. Raises if git fails, if the base
+        commit was not recorded, or if the patch is larger than MAX_DIFF_BYTES."""
 
     @abstractmethod
     def reset(self) -> None:
@@ -116,7 +273,7 @@ class Session(ABC):
 
     @abstractmethod
     def close(self) -> None:
-        """Destroy the sandbox. Safe to call twice."""
+        """Destroy the sandbox. Safe to call twice. Raises RuntimeError if removal fails; retry close."""
 
     def __enter__(self) -> Self:
         return self
@@ -146,9 +303,9 @@ class DockerExecutor:
         self._runner = runner
         self._disk_free_gb = disk_free_gb
         self._min_free_gb = (
-            min_free_gb if min_free_gb is not None else float(os.environ.get("MIN_FREE_DISK_GB", "10"))
+            min_free_gb if min_free_gb is not None else _env_min_one("MIN_FREE_DISK_GB", 10.0, float)
         )
-        self._image_cap = image_cap if image_cap is not None else int(os.environ.get("DOCKER_IMAGE_CAP", "6"))
+        self._image_cap = image_cap if image_cap is not None else _env_min_one("DOCKER_IMAGE_CAP", 6, int)
         self._platform = platform
         self._sleep = sleep
         self._clock = clock
@@ -156,8 +313,13 @@ class DockerExecutor:
     def start(self, env: EnvSpec, budget: Budget | None = None) -> Session:
         return DockerSession(self, env, Budget.from_env() if budget is None else budget)
 
-    def _docker(self, args: list[str], timeout: float, stdin: bytes | None = None) -> Result:
-        return self._runner(["docker", *args], timeout, stdin)
+    def _docker(
+        self, args: list[str], timeout: float, stdin: bytes | None = None, max_bytes: int | None = None
+    ) -> Result:
+        argv = ["docker", *args]
+        if max_bytes is None:
+            return self._runner(argv, timeout, stdin)
+        return self._runner(argv, timeout, stdin, max_bytes=max_bytes)
 
     def _ensure_daemon(self) -> None:
         if self._docker(["info"], DAEMON_CHECK_TIMEOUT_S).exit_code == 0:
@@ -176,7 +338,7 @@ class DockerExecutor:
 
     def _preflight(self, image: str) -> None:
         # Only a pull needs guards. A local image starts with no disk or image-count check.
-        if self._docker(["image", "inspect", image], IO_TIMEOUT_S).exit_code == 0:
+        if self._docker(["image", "inspect", "--", image], IO_TIMEOUT_S).exit_code == 0:
             return
         free = self._disk_free_gb()
         if free < self._min_free_gb:
@@ -197,33 +359,57 @@ class DockerExecutor:
             raise ExecutorUnavailable(f"docker images failed: {res.stderr.strip()[-300:]}")
         return len({line.strip() for line in res.stdout.splitlines() if line.strip()})
 
-    def _create(self, env: EnvSpec) -> str:
+    def _create(self, env: EnvSpec) -> tuple[str, str]:
+        """Start the container. Returns (name, id). A failure after docker run removes the named container."""
         network = "bridge" if env.network else "none"
+        name = f"cheatproof-{uuid.uuid4().hex}"
         argv = [
             "run",
             "-d",
             "--rm",
+            "--name",
+            name,
+            "--label",
+            "cheatproof=1",
             "--network",
             network,
             "--cpus",
             str(env.cpus),
             "--memory",
             env.memory,
+            "--memory-swap",
+            env.memory,  # equal to --memory, so no swap
             "--pids-limit",
             str(PIDS_LIMIT),
+            "--cap-drop",
+            "ALL",
             "--security-opt",
             "no-new-privileges",
+            "--ulimit",
+            "nofile=1024:1024",
             "--workdir",
             env.workdir,
+            "--",  # docker's flag parser (pflag) stops at --, so the image is always positional
             env.image,
             "sleep",
             "infinity",
         ]
-        res = self._docker(argv, RUN_TIMEOUT_S)
+        try:
+            res = self._docker(argv, RUN_TIMEOUT_S)
+        except BaseException:
+            self._remove_quietly(name)
+            raise
         cid = res.stdout.strip()
         if res.exit_code != 0 or not cid:
+            self._remove_quietly(name)  # also covers a docker run that timed out or printed no id
             raise ExecutorUnavailable(f"docker run failed ({res.exit_code}): {res.stderr.strip()[-500:]}")
-        return cid
+        return name, cid
+
+    def _remove_quietly(self, name: str) -> None:
+        """docker rm -f after a failed start. Errors are dropped so the original error reaches the caller.
+        A leftover is still findable by its cheatproof=1 label."""
+        with contextlib.suppress(Exception):
+            self._docker(["rm", "-f", name], DESTROY_TIMEOUT_S)
 
     def _base_commit(self, cid: str, workdir: str) -> str:
         script = f"cd {shlex.quote(workdir)} && git rev-parse HEAD"
@@ -236,6 +422,7 @@ class DockerSession(Session):
         self._executor = executor
         self._env = env
         self._budget = budget
+        self._name: str | None = None
         self._cid: str | None = None
         self._base = ""
         self._closed = False
@@ -245,8 +432,14 @@ class DockerSession(Session):
         self._executor._ensure_daemon()
         self._executor._preflight(self._env.image)
         self._budget.reserve_sandbox_run()  # before the container exists; BudgetExceeded propagates
-        self._cid = self._executor._create(self._env)
-        self._base = self._executor._base_commit(self._cid, self._env.workdir)
+        self._name, self._cid = self._executor._create(self._env)
+        self._base = ""
+        try:
+            self._base = self._executor._base_commit(self._cid, self._env.workdir)
+        except BaseException:
+            self._executor._remove_quietly(self._name)
+            self._name = self._cid = None
+            raise
 
     def _live(self) -> str:
         if self._closed:
@@ -256,14 +449,36 @@ class DockerSession(Session):
         return self._cid
 
     def _destroy(self) -> None:
-        if self._cid is not None:
-            # docker rm -f kills the container. Exit code ignored: --rm may already have removed it.
-            self._executor._docker(["rm", "-f", self._cid], DESTROY_TIMEOUT_S)
-            self._cid = None
+        if self._name is None:
+            return
+        # docker rm -f kills the container. "No such container" means --rm already removed it.
+        res = self._executor._docker(["rm", "-f", self._name], DESTROY_TIMEOUT_S)
+        if res.exit_code != 0 and "No such container" not in res.stderr:
+            raise RuntimeError(
+                f"docker rm -f {self._name} failed ({res.exit_code}): {res.stderr.strip()[-300:]}"
+            )
+        self._name = None
+        self._cid = None
 
     def run(self, cmd: str, timeout: float) -> Result:
-        res = self._executor._docker(["exec", self._live(), "sh", "-lc", cmd], timeout)
-        return replace(res, stdout=_cap(res.stdout), stderr=_cap(res.stderr))
+        if not timeout > 0:  # also refuses NaN
+            raise ValueError(f"run timeout must be greater than 0 seconds, got {timeout!r}")
+        limit = min(float(timeout), MAX_RUN_TIMEOUT_S)
+        cid = self._live()
+        # The in-container timeout normally fires first and leaves the container usable. The host waits
+        # EXEC_GRACE_S longer as a backstop, for a hung docker exec or an image without timeout(1).
+        script = _IN_CONTAINER_TIMEOUT.format(seconds=max(1, math.ceil(limit)))
+        res = self._executor._docker(
+            ["exec", cid, "sh", "-lc", script, "cheatproof", cmd], limit + EXEC_GRACE_S
+        )
+        if res.timed_out:
+            # The host killed docker exec, so the command may still run in the container. reset() removes
+            # that container and every process in it. Files written earlier in this session are lost,
+            # and the reset reserves one more sandbox run.
+            self.reset()
+        stdout, out_cut = _cap(res.stdout)
+        stderr, err_cut = _cap(res.stderr)
+        return replace(res, stdout=stdout, stderr=stderr, truncated=res.truncated or out_cut or err_cut)
 
     def write_file(self, path: str, data: bytes | str) -> None:
         payload = data.encode("utf-8") if isinstance(data, str) else data
@@ -276,12 +491,17 @@ class DockerSession(Session):
             raise RuntimeError(f"write_file {path!r} failed ({res.exit_code}): {res.stderr.strip()[-300:]}")
 
     def diff(self) -> str:
-        # Diffs against the commit recorded at start, so a commit made inside the sandbox cannot hide changes.
-        # git add -A stages untracked files; .gitignore still applies. Output is not capped.
-        base = shlex.quote(self._base or "HEAD")
-        workdir = shlex.quote(self._env.workdir)
-        script = f"cd {workdir} && git add -A && git diff --cached --no-color --binary {base}"
-        res = self._executor._docker(["exec", self._live(), "sh", "-c", script], IO_TIMEOUT_S)
+        cid = self._live()
+        if not self._base:
+            raise RuntimeError("base commit was not recorded at start; refusing to build a diff")
+        script = _DIFF_SCRIPT.format(workdir=shlex.quote(self._env.workdir), base=shlex.quote(self._base))
+        res = self._executor._docker(
+            ["exec", cid, "sh", "-c", script], IO_TIMEOUT_S, max_bytes=MAX_DIFF_BYTES
+        )
+        if res.timed_out:
+            raise RuntimeError(f"diff timed out after {IO_TIMEOUT_S}s")
+        if res.truncated:
+            raise RuntimeError(f"diff is over MAX_DIFF_BYTES={MAX_DIFF_BYTES}; refusing to truncate it")
         if res.exit_code != 0:
             raise RuntimeError(f"diff failed ({res.exit_code}): {res.stderr.strip()[-300:]}")
         return res.stdout
