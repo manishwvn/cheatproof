@@ -7,7 +7,7 @@ Check: `python3 docs/autopilot/progress.py` counts the same tasks as
 
 ## Milestone: live access and executor
 
-### T01 Smoke test, model IDs and prices — size S — todo [60%]
+### T01 Smoke test, model IDs and prices — size S — in-progress (cycle 2026-10-18T05:42:00-05:00) [60%]
 Run `uv run python scripts/smoke.py`. Live scripts load `.env` from the main checkout (the parent of `git rev-parse
 --git-common-dir`), so worktrees share one key file and never copy it. Record the exact Nemotron model IDs (Nano,
 Super, Ultra) from `/v1/models` and their per-1M prices from the public Token Factory price page into `.env.example`
@@ -22,7 +22,7 @@ Done 2026-10-18 (planner): model IDs and prices recorded in `.env.example`; one 
 ledger shared). Left: the `.env` loader for worktrees, sanitized fixtures plus their test, and the sandbox run once
 `NEBIUS_PROJECT_ID` and U3 exist. Promo applied 2026-10-18: `.env` now has caps 20/4 and the verified model lines.
 
-### T02 Executor interface and Docker backend; Sandboxes recon — size M — todo
+### T02 Executor interface and Docker backend; Sandboxes recon — size M — in-progress (cycle 2026-10-18T05:42:00-05:00)
 Implement `cheatproof/executor.py` per `docs/adr/0002-execution-model.md`: one interface (`start(env)`,
 `run(cmd, timeout)`, `write_file`, `diff`, `reset`, `close`) with a `DockerExecutor` now and a `SandboxExecutor`
 (contree-sdk) once U3 is done. Config flag `EXECUTOR=docker|sandbox`. Docker backend: `docker run --rm`,
