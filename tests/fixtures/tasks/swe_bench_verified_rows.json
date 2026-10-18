@@ -1,0 +1,45 @@
+{
+ "dataset": "princeton-nlp/SWE-bench_Verified",
+ "config": "default",
+ "split": "test",
+ "num_rows_total": 500,
+ "note": "Recorded from the datasets-server rows API on 2026-10-18, keys trimmed to the parsed set, then run through cheatproof.sanitize (the fixture guard). The sanitizer redacts base_commit (a 40-char hex run) in every row.",
+ "rows": [
+  {
+   "row_idx": 83,
+   "row": {
+    "instance_id": "django__django-12419",
+    "repo": "django/django",
+    "base_commit": "REDACTED",
+    "patch": "diff --git a/django/conf/global_settings.py b/django/conf/global_settings.py\n--- a/django/conf/global_settings.py\n+++ b/django/conf/global_settings.py\n@@ -637,6 +637,6 @@ def gettext_noop(s):\n SECURE_HSTS_PRELOAD = False\n SECURE_HSTS_SECONDS = 0\n SECURE_REDIRECT_EXEMPT = []\n-SECURE_REFERRER_POLICY = None\n+SECURE_REFERRER_POLICY = 'same-origin'\n SECURE_SSL_HOST = None\n SECURE_SSL_REDIRECT = False\n",
+    "test_patch": "diff --git a/tests/project_template/test_settings.py b/tests/project_template/test_settings.py\n--- a/tests/project_template/test_settings.py\n+++ b/tests/project_template/test_settings.py\n@@ -38,6 +38,7 @@ def test_middleware_headers(self):\n             self.assertEqual(headers, [\n                 b'Content-Length: 0',\n                 b'Content-Type: text/html; charset=utf-8',\n+                b'Referrer-Policy: same-origin',\n                 b'X-Content-Type-Options: nosniff',\n                 b'X-Frame-Options: DENY',\n             ])\n",
+    "FAIL_TO_PASS": "[\"test_middleware_headers (project_template.test_settings.TestStartProjectSettings)\"]",
+    "PASS_TO_PASS": "[]"
+   }
+  },
+  {
+   "row_idx": 39,
+   "row": {
+    "instance_id": "django__django-11206",
+    "repo": "django/django",
+    "base_commit": "REDACTED",
+    "patch": "diff --git a/django/utils/numberformat.py b/django/utils/numberformat.py\n--- a/django/utils/numberformat.py\n+++ b/django/utils/numberformat.py\n@@ -27,6 +27,14 @@ def format(number, decimal_sep, decimal_pos=None, grouping=0, thousand_sep='',\n     # sign\n     sign = ''\n     if isinstance(number, Decimal):\n+\n+        if decimal_pos is not None:\n+            # If the provided number is too small to affect any of the visible\n+            # decimal places, consider it equal to '0'.\n+            cutoff = Decimal('0.' + '1'.rjust(decimal_pos, '0'))\n+            if abs(number) < cutoff:\n+                number = Decimal('0')\n+\n         # Format values with more than 200 digits (an arbitrary cutoff) using\n         # scientific notation to avoid high memory usage in {:f}'.format().\n         _, digits, exponent = number.as_tuple()\n",
+    "test_patch": "diff --git a/tests/utils_tests/test_numberformat.py b/tests/utils_tests/test_numberformat.py\n--- a/tests/utils_tests/test_numberformat.py\n+++ b/tests/utils_tests/test_numberformat.py\n@@ -94,7 +94,7 @@ def test_decimal_numbers(self):\n             ('1e-10', 8, '0.00000000'),\n             ('1e-11', 8, '0.00000000'),\n             ('1' + ('0' * 300), 3, '1.000e+300'),\n-            ('0.{}1234'.format('0' * 299), 3, '1.234e-300'),\n+            ('0.{}1234'.format('0' * 299), 3, '0.000'),\n         ]\n         for value, decimal_pos, expected_value in tests:\n             with self.subTest(value=value):\n",
+    "FAIL_TO_PASS": "[\"test_decimal_numbers (utils_tests.test_numberformat.TestNumberFormat)\", \"test_decimal_subclass (utils_tests.test_numberformat.TestNumberFormat)\"]",
+    "PASS_TO_PASS": "[\"test_float_numbers (utils_tests.test_numberformat.TestNumberFormat)\", \"test_format_number (utils_tests.test_numberformat.TestNumberFormat)\", \"test_format_string (utils_tests.test_numberformat.TestNumberFormat)\", \"test_large_number (utils_tests.test_numberformat.TestNumberFormat)\"]"
+   }
+  },
+  {
+   "row_idx": 19,
+   "row": {
+    "instance_id": "astropy__astropy-7671",
+    "repo": "astropy/astropy",
+    "base_commit": "REDACTED",
+    "patch": "diff --git a/astropy/utils/introspection.py b/astropy/utils/introspection.py\n--- a/astropy/utils/introspection.py\n+++ b/astropy/utils/introspection.py\n@@ -4,6 +4,7 @@\n \n \n import inspect\n+import re\n import types\n import importlib\n from distutils.version import LooseVersion\n@@ -139,6 +140,14 @@ def minversion(module, version, inclusive=True, version_path='__version__'):\n     else:\n         have_version = resolve_name(module.__name__, version_path)\n \n+    # LooseVersion raises a TypeError when strings like dev, rc1 are part\n+    # of the version number. Match the dotted numbers only. Regex taken\n+    # from PEP440, https://www.python.org/dev/peps/pep-0440/, Appendix B\n+    expr = '^([1-9]\\\\d*!)?(0|[1-9]\\\\d*)(\\\\.(0|[1-9]\\\\d*))*'\n+    m = re.match(expr, version)\n+    if m:\n+        version = m.group(0)\n+\n     if inclusive:\n         return LooseVersion(have_version) >= LooseVersion(version)\n     else:\n",
+    "test_patch": "diff --git a/astropy/utils/tests/test_introspection.py b/astropy/utils/tests/test_introspection.py\n--- a/astropy/utils/tests/test_introspection.py\n+++ b/astropy/utils/tests/test_introspection.py\n@@ -67,7 +67,7 @@ def test_minversion():\n     from types import ModuleType\n     test_module = ModuleType(str(\"test_module\"))\n     test_module.__version__ = '0.12.2'\n-    good_versions = ['0.12', '0.12.1', '0.12.0.dev']\n+    good_versions = ['0.12', '0.12.1', '0.12.0.dev', '0.12dev']\n     bad_versions = ['1', '1.2rc1']\n     for version in good_versions:\n         assert minversion(test_module, version)\n",
+    "FAIL_TO_PASS": "[\"astropy/utils/tests/test_introspection.py::test_minversion\"]",
+    "PASS_TO_PASS": "[\"astropy/utils/tests/test_introspection.py::test_pkg_finder\", \"astropy/utils/tests/test_introspection.py::test_find_current_mod\", \"astropy/utils/tests/test_introspection.py::test_find_mod_objs\"]"
+   }
+  }
+ ]
+}
