@@ -50,8 +50,10 @@ OFAC-sanctioned places. Also excludes employees, families and households of the 
   The balance is prepaid via top-up, but it can go negative, and the card is auto-charged at month start or at a
   "configured billing threshold". There is no documented hard spend cap, so the in-app cap in `cheatproof/budget.py`
   ($20 total) is mandatory.
-- Credits: $25 via the activation code `NEBIUS-DEVPOST-GLOBAL26`, entered on the form at https://nebius.com/promo-code,
-  which emails the real promo code (then Balance → Top up → With promo code). The Nebius Builders Program may add $25
+- Credits: $25 via the activation code `NEBIUS-DEVPOST-GLOBAL26`, entered on the promo form opened through the Devpost
+  Resources page link (event code `2026-devpost-global-ai-hack`; the bare https://nebius.com/promo-code URL errors with
+  "no event name found"). The form emails the real promo code (then Balance → Top up → With promo code). A new
+  account starts with a $1 trial balance. The Nebius Builders Program may add $25
   (expires 90 days after issue; unreliable, so the plan assumes $25). Tavily promo `BBDEVPOST`.
 - Sandboxes (beta): access via `tokenfactory.nebius.com/sandboxes/about` or contree@nebius.com. 50 concurrent ops.
   Networking can only be on or off. Only stdout/stderr are captured. Root in the VM. Per-run price not documented.

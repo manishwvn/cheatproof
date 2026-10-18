@@ -8,13 +8,15 @@ Check: `python3 docs/autopilot/progress.py` counts the same tasks as
 ## Milestone: live access and executor
 
 ### T01 Smoke test, model IDs and prices — size S — waiting: U1
-Run `uv run python scripts/smoke.py`. Live scripts load `.env` from the main checkout (the parent of
-`git rev-parse --git-common-dir`), so worktrees share one key file and never copy it. Record the exact Nemotron model
-IDs (Nano, Super, Ultra) from `/v1/models` and their per-1M prices from the public Token Factory price page into
-`.env.example` comments and the `MODEL_PRICES_JSON` example. Confirm one capped call and, if `NEBIUS_PROJECT_ID` is set,
-one sandbox run. Record sanitized response fixtures (no auth headers, keys, emails or IDs) under `tests/fixtures/`,
-plus a test that checks the sanitizing. Acceptance: the ledger shows spend; fixtures committed; `VERIFY` notes for
-model IDs resolved. Risk: costs cents; every call goes through the budget.
+Run `uv run python scripts/smoke.py`. Live scripts load `.env` from the main checkout (the parent of `git rev-parse
+--git-common-dir`), so worktrees share one key file and never copy it. Record the exact Nemotron model IDs (Nano,
+Super, Ultra) from `/v1/models` and their per-1M prices from the public Token Factory price page into `.env.example`
+comments and the `MODEL_PRICES_JSON` example. Use the cheapest model (Nano) for the smoke call; never Ultra here.
+Confirm one capped call and, if `NEBIUS_PROJECT_ID` is set, one sandbox run. Record sanitized response fixtures (no
+auth headers, keys, emails or IDs) under `tests/fixtures/`, plus a test that checks the sanitizing. Acceptance: the
+ledger shows spend; fixtures committed; `VERIFY` notes for model IDs resolved. Risk: costs cents; every call goes
+through the budget. Until the owner says "promo applied", the account holds only a $1 trial: no Ultra runs, no eval
+runs (T08), only Nano or Super calls within the `.env` caps.
 
 ### T02 Executor interface and Docker backend; Sandboxes recon — size M — todo
 Implement `cheatproof/executor.py` per `docs/adr/0002-execution-model.md`: one interface (`start(env)`,
@@ -106,19 +108,23 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
-- **U1 Nebius Token Factory account, credits and key** (ready 2026-10-16):
-  1. https://tokenfactory.nebius.com → sign up and log in.
-  2. Add the card when billing setup asks (activation only; the app's $20 cap keeps spend inside the credits).
-  3. Open https://nebius.com/promo-code and submit the form with the activation code `NEBIUS-DEVPOST-GLOBAL26`.
-     Nebius emails you the real promo code.
-  4. Token Factory → Balance → **Top up** → **With promo code** → paste the emailed code. Check the balance shows the
-     credit.
+- **U1 Nebius Token Factory account, credits and key** (ready 2026-10-16; status 2026-10-18: account exists, billing
+  active with a $1 trial for 29 days, promo form submitted, promo code pending by email for up to 24 h):
+  1. ~~https://tokenfactory.nebius.com → sign up and log in.~~ Done.
+  2. ~~Add the card when billing setup asks (activation only; the app's caps keep spend inside the credits).~~ Done.
+  3. ~~Open the promo form through the **Devpost Resources page link** (event code `2026-devpost-global-ai-hack`),
+     not the bare https://nebius.com/promo-code URL, which errors with "no event name found". Submit it with the
+     activation code `NEBIUS-DEVPOST-GLOBAL26`.~~ Done; Nebius emails the real promo code.
+  4. When the email arrives: Token Factory → Balance → **Top up** → **With promo code** → paste the emailed code.
+     Check the balance shows the credit.
   5. Billing and organisation settings: turn off any auto-charge or "billing threshold" option if one exists.
   6. **Get API key** (copy it once) and Project settings → copy the project ID.
   7. In `/Users/manish/Documents/Nebius_X_Nvidia/cheatproof`, copy `.env.example` to `.env` and fill
-     `NEBIUS_API_KEY` and `NEBIUS_PROJECT_ID`. Never paste keys in chat.
+     `NEBIUS_API_KEY` and `NEBIUS_PROJECT_ID`. **Keep `SPEND_CAP_USD=0.8` and `DAILY_CAP_USD=0.8` from the example
+     until the promo credit shows in the balance**, so spend stays inside the $1 trial; then set them to 20 and 4.
+     Never paste keys in chat.
 
-  Then tell the lead "U1 done".
+  Then tell the lead "U1 done" (and "promo applied" after step 4).
 - **U2 Tavily key (optional, for the network-fetch attack and the Tavily bonus)** (ready 2026-10-16): sign up at
   https://tavily.com, apply promo `BBDEVPOST`, put the key in `.env` as `TAVILY_API_KEY`. Optional: join
   https://dev.nebius.com/builders for extra credit (unreliable; the plan assumes $25 only).
