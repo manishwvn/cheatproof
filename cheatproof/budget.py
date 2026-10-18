@@ -4,12 +4,18 @@ Token Factory has no documented hard spend limit and lets the balance go negativ
 lives here. Every call reserves its worst-case cost before it runs and settles the real cost
 after. A crash leaves the reservation counted, which errs on the side of spending less. The
 ledger is a JSON file guarded by an OS file lock, so parallel processes share one budget.
+
+Fail closed. Both spend caps and every price must be a finite number above 0, and the sandbox
+run cap a whole number of 0 or more. A missing, empty, nan, inf, zero or negative money value,
+or a bad run cap, raises BudgetExceeded before anything is spent, because a bad value must never
+read as "unlimited". snapshot() only reads the ledger and never writes it.
 """
 
 from __future__ import annotations
 
 import fcntl
 import json
+import math
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -18,7 +24,7 @@ from pathlib import Path
 
 
 class BudgetExceeded(RuntimeError):
-    """A call would push spend past a cap, or the budget was halted."""
+    """A call would push spend past a cap, the budget was halted, or a cap setting is missing or invalid."""
 
 
 @dataclass(frozen=True)
@@ -29,9 +35,6 @@ class Price:
     def cost(self, input_tokens: int, output_tokens: int) -> float:
         return (input_tokens * self.input_per_m + output_tokens * self.output_per_m) / 1_000_000
 
-
-# The one total spend cap in USD (the account has about $25 of credits). Only the owner changes it.
-DEFAULT_SPEND_CAP_USD = 20.0
 
 # VERIFY: deliberately high until real Token Factory prices are recorded via MODEL_PRICES_JSON.
 DEFAULT_PRICE = Price(input_per_m=3.0, output_per_m=10.0)
@@ -44,6 +47,44 @@ class Hold:
     day: str
 
 
+def _positive(name: str, value: object) -> float:
+    """A finite number above 0, or BudgetExceeded. Zero or less would let spend through unchecked."""
+    number = math.nan
+    if not isinstance(value, bool):
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            pass
+    if not math.isfinite(number) or number <= 0:
+        raise BudgetExceeded(f"{name} must be a finite number above 0 (see .env.example), got {value!r}")
+    return number
+
+
+def _run_cap(value: object) -> int:
+    # 0 is allowed: it means no sandbox runs, which spends nothing.
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise BudgetExceeded(
+            f"sandbox_run_cap (SANDBOX_RUN_CAP) must be a whole number, 0 or more, got {value!r}"
+        )
+    return value
+
+
+def _checked_price(label: str, price: Price) -> Price:
+    return Price(
+        input_per_m=_positive(f"{label} input price", price.input_per_m),
+        output_per_m=_positive(f"{label} output price", price.output_per_m),
+    )
+
+
+def _is_spend(value: object) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0
+    )
+
+
 def _ledger_path() -> Path:
     # One shared ledger for every checkout and worktree, so caps cannot multiply. Fail closed.
     raw = os.environ.get("SPEND_LEDGER", "")
@@ -51,6 +92,29 @@ def _ledger_path() -> Path:
     if not raw or not path.is_absolute():
         raise BudgetExceeded("SPEND_LEDGER must be set to an absolute path (see .env.example)")
     return path
+
+
+def _env_cap(name: str) -> float:
+    # Required: a missing money cap is never replaced by a default.
+    if name not in os.environ:
+        raise BudgetExceeded(f"{name} must be set to a finite number above 0 (see .env.example)")
+    return _positive(name, os.environ[name])
+
+
+def _env_prices() -> dict[str, Price]:
+    raw = os.environ.get("MODEL_PRICES_JSON", "{}")
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        raise BudgetExceeded("MODEL_PRICES_JSON is not valid JSON (see .env.example)") from None
+    if not isinstance(parsed, dict):
+        raise BudgetExceeded("MODEL_PRICES_JSON must map model ids to [input, output] USD per 1M tokens")
+    prices: dict[str, Price] = {}
+    for model, pair in parsed.items():
+        if not isinstance(pair, list) or len(pair) != 2:
+            raise BudgetExceeded(f"MODEL_PRICES_JSON entry for {model} must be [input, output]")
+        prices[model] = Price(pair[0], pair[1])  # the Budget constructor checks each number
+    return prices
 
 
 class Budget:
@@ -64,36 +128,53 @@ class Budget:
         sandbox_run_usd: float = 0.05,
         default_price: Price = DEFAULT_PRICE,
     ) -> None:
+        # Every cap and price is checked here too, so a direct construction fails closed as well.
         self.ledger = Path(ledger)
-        self.total_cap_usd = total_cap_usd
-        self.daily_cap_usd = daily_cap_usd
-        self.sandbox_run_cap = sandbox_run_cap
+        self.total_cap_usd = _positive("total cap (SPEND_CAP_USD)", total_cap_usd)
+        self.daily_cap_usd = _positive("daily cap (DAILY_CAP_USD)", daily_cap_usd)
+        self.sandbox_run_cap = _run_cap(sandbox_run_cap)
         # VERIFY: per-run sandbox price is not documented; this conservative guess counts toward the money caps.
-        self.sandbox_run_usd = sandbox_run_usd
-        self.prices = prices or {}
-        self.default_price = default_price
+        self.sandbox_run_usd = _positive("sandbox run price (SANDBOX_RUN_USD)", sandbox_run_usd)
+        self.prices = {model: _checked_price(f"price for {model}", p) for model, p in (prices or {}).items()}
+        self.default_price = _checked_price("default price", default_price)
 
     @classmethod
     def from_env(cls) -> Budget:
-        raw = json.loads(os.environ.get("MODEL_PRICES_JSON", "{}"))
-        prices = {model: Price(float(p[0]), float(p[1])) for model, p in raw.items()}
+        # The ledger is checked first, then the two money caps, which have no defaults.
+        ledger = _ledger_path()
+        total_cap = _env_cap("SPEND_CAP_USD")
+        daily_cap = _env_cap("DAILY_CAP_USD")
+        raw_run_cap = os.environ.get("SANDBOX_RUN_CAP", "250")
+        try:
+            run_cap = int(raw_run_cap)
+        except ValueError:
+            raise BudgetExceeded(
+                f"SANDBOX_RUN_CAP must be a whole number, 0 or more, got {raw_run_cap!r}"
+            ) from None
         return cls(
-            ledger=_ledger_path(),
-            total_cap_usd=float(os.environ.get("SPEND_CAP_USD", DEFAULT_SPEND_CAP_USD)),
-            daily_cap_usd=float(os.environ.get("DAILY_CAP_USD", "4")),
-            sandbox_run_cap=int(os.environ.get("SANDBOX_RUN_CAP", "250")),
-            prices=prices,
-            sandbox_run_usd=float(os.environ.get("SANDBOX_RUN_USD", "0.05")),
+            ledger=ledger,
+            total_cap_usd=total_cap,
+            daily_cap_usd=daily_cap,
+            sandbox_run_cap=run_cap,
+            prices=_env_prices(),
+            sandbox_run_usd=_positive("SANDBOX_RUN_USD", os.environ.get("SANDBOX_RUN_USD", "0.05")),
         )
 
     def price(self, model: str) -> Price:
         return self.prices.get(model, self.default_price)
 
     @contextmanager
-    def _locked(self):
+    def _lock(self):
         self.ledger.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.ledger.with_suffix(".lock"), "w") as lock:
+        # Append mode creates the lock file without truncating it.
+        with open(self.ledger.with_suffix(".lock"), "a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+
+    @contextmanager
+    def _locked(self):
+        # The state is written back only when the block exits normally, so a refused call changes nothing.
+        with self._lock():
             state = self._read()
             yield state
             tmp = self.ledger.with_suffix(".tmp")
@@ -101,9 +182,14 @@ class Budget:
             os.replace(tmp, self.ledger)
 
     def _read(self) -> dict:
-        if self.ledger.exists():
-            return json.loads(self.ledger.read_text())
-        return {"total_usd": 0.0, "days": {}, "sandbox_runs": 0, "halted": None}
+        if not self.ledger.exists():
+            return {"total_usd": 0.0, "days": {}, "sandbox_runs": 0, "halted": None}
+        state = json.loads(self.ledger.read_text())
+        amounts = [state.get("total_usd"), *state.get("days", {}).values()]
+        if not all(_is_spend(amount) for amount in amounts):
+            # A nan or negative amount would make every cap comparison pass. Refuse instead.
+            raise BudgetExceeded(f"ledger {self.ledger} has a non-finite or negative amount; fix it by hand")
+        return state
 
     def reserve(self, model: str, input_tokens: int, max_output_tokens: int) -> Hold:
         return self._reserve_usd(model, self.price(model).cost(input_tokens, max_output_tokens))
@@ -152,5 +238,14 @@ class Budget:
             s["halted"] = reason
 
     def snapshot(self) -> dict:
-        with self._locked() as s:
-            return dict(s)
+        """Read-only view of the ledger. It never writes, creates or resets a field.
+
+        A cleared `halted` flag therefore stays cleared.
+        """
+        lock_path = self.ledger.with_suffix(".lock")
+        if not lock_path.exists():
+            # No writer has ever locked this ledger, so there is nothing to wait for.
+            return self._read()
+        with open(lock_path) as lock:
+            fcntl.flock(lock, fcntl.LOCK_SH)
+            return self._read()

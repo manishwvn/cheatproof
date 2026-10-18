@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Routine lock: one line `<start ISO> <heartbeat ISO>` in the lock file; empty means free.
 
-acquire:   exit 0 and print `START <iso>` when the lock was free or stale; exit 3 and print `HELD <line>` otherwise.
+acquire:   exit 0 and print `START <iso>` on stdout when the lock was free or stale. Stdout then holds nothing else;
+           a stale takeover is noted on stderr. Exit 3 and print `HELD <line>` on stderr when another run holds it.
 heartbeat: rewrite the heartbeat if the lock still holds --start; exit 4 (`LOST`) if another run owns it.
 release:   empty the file only if it holds --start; exit 4 (`NOT-OURS`) and leave it untouched otherwise.
 Read, check and write happen under an OS lock on `<lock>.guard`, so two runs cannot both take the lock.
-The lock file itself is never deleted. Works on Python 3.9+ (the system python3 runs it).
+A missing parent folder of the lock is created with mode 0o700. The lock file itself is never deleted.
+Works on Python 3.9+ (the system python3 runs it).
 """
 import argparse
 import fcntl
+import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -46,6 +49,7 @@ def main(argv=None):
         p.error("--start is required for " + a.action)
     now = a.now or when(now_iso())
     stamp = now.isoformat(timespec="seconds")
+    os.makedirs(os.path.dirname(os.path.abspath(a.lock)), mode=0o700, exist_ok=True)
     with open(a.lock + ".guard", "a") as guard:
         fcntl.flock(guard, fcntl.LOCK_EX)
         try:
@@ -56,11 +60,13 @@ def main(argv=None):
         first = line.split()[0] if line else ""
         if a.action == "acquire":
             if line and not is_stale(line, now, a.stale_min):
-                print("HELD " + line)
+                print("HELD " + line, file=sys.stderr)
                 return 3
             with open(a.lock, "w") as fh:
                 fh.write(stamp + " " + stamp + "\n")
-            print("START " + stamp + (" (took stale lock: " + line + ")" if line else ""))
+            if line:
+                print("took stale lock: " + line, file=sys.stderr)
+            print("START " + stamp)
             return 0
         if first != a.start:
             print(("LOST " if a.action == "heartbeat" else "NOT-OURS ") + (line or "(empty)"))
