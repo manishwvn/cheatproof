@@ -111,3 +111,15 @@ progress 62% (6/16 tasks done, 10 days to submit)
   general-purpose Sonnet agent told to follow `.claude/agents/reviewer.md`.
 - Lesson: when two builders share a contract in parallel, the integration test only goes green after both land;
   brief the second fixer with the other's final key names.
+
+## 2026-10-18 routine (cycle 2026-10-18T14:24:26-05:00)
+progress 66% (6/16 tasks done, 10 days to submit)
+- T09 report site built as draft PR #12 (`cheatproof/site.py`, `site` CLI subcommand), 1052 tests green, ruff clean.
+- Not merged: the run reached F 83 (cap 85) after the build wave, before the Sonnet review. Next run reviews #12.
+- Spend: $0 (no model, sandbox or Tavily calls).
+
+- Task T09: two parallel Haiku builders (site module, CLI wiring) against one fixed `build_site` contract; both
+  landed green first time. Haiku audit, Sonnet review and Opus final review deferred to the next run.
+- Daily audit deferred again (F headroom). Learning notes: nothing merged this run.
+- Lesson: the certificate stores only the attack diff's digest, so the per-environment page cannot show the patch
+  diff the T09 spec asks for; T08 should record the diff (sanitized) in `results/` beside the trace.
