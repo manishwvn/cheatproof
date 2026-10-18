@@ -7,6 +7,7 @@ from cheatproof import tasks
 from cheatproof.executor import IMAGE_RE
 from cheatproof.tasks import (
     SOURCES,
+    RowSkip,
     TaskSpec,
     fetch_rows,
     load_tasks,
@@ -19,10 +20,24 @@ from cheatproof.tasks import (
 FIXTURES = Path(__file__).parent / "fixtures" / "tasks"
 VERIFIED = SOURCES["swe-bench-verified"]
 REBENCH = SOURCES["swe-rebench"]
-VERIFIED_ROWS = [
-    item["row"] for item in json.loads((FIXTURES / "swe_bench_verified_rows.json").read_text())["rows"]
-]
-REBENCH_ROWS = [item["row"] for item in json.loads((FIXTURES / "swe_rebench_rows.json").read_text())["rows"]]
+ASTROPY = "astropy__astropy-7671"  # the one Verified fixture row whose node ids are pytest-shaped
+# A full 40-hex commit, built here at runtime. The fixture files hold "REDACTED" instead, because the sanitizer
+# redacts any 32-plus-character token in a recorded fixture, so the tests that need a valid row substitute this.
+COMMIT = "a" * 40
+
+
+def _fixture_rows(name: str) -> list[dict]:
+    return [item["row"] for item in json.loads((FIXTURES / name).read_text())["rows"]]
+
+
+def with_commit(row: dict) -> dict:
+    return {**row, "base_commit": COMMIT}
+
+
+RAW_VERIFIED_ROWS = _fixture_rows("swe_bench_verified_rows.json")
+RAW_REBENCH_ROWS = _fixture_rows("swe_rebench_rows.json")
+VERIFIED_ROWS = [with_commit(row) for row in RAW_VERIFIED_ROWS]
+REBENCH_ROWS = [with_commit(row) for row in RAW_REBENCH_ROWS]
 VERIFIED_BY_ID = {row["instance_id"]: row for row in VERIFIED_ROWS}
 REBENCH_BY_ID = {row["instance_id"]: row for row in REBENCH_ROWS}
 
@@ -71,24 +86,32 @@ def make_spec(
 
 
 def test_task_spec_round_trips_through_json():
-    spec = parse_row(VERIFIED, VERIFIED_BY_ID["django__django-11206"])
+    spec = parse_row(VERIFIED, VERIFIED_BY_ID[ASTROPY])
     data = json.loads(json.dumps(spec.to_dict()))
-    assert data["fail_to_pass"] == json.loads(VERIFIED_BY_ID["django__django-11206"]["FAIL_TO_PASS"])
+    assert data["fail_to_pass"] == json.loads(VERIFIED_BY_ID[ASTROPY]["FAIL_TO_PASS"])
     assert TaskSpec.from_dict(data) == spec
 
 
-def test_verified_fixture_rows_parse_with_derived_image():
+def test_verified_fixture_keeps_only_the_pytest_shaped_row():
     specs, skipped = parse_rows(VERIFIED, VERIFIED_ROWS)
-    assert skipped == {}
-    by_id = {s.instance_id: s for s in specs}
-    row = VERIFIED_BY_ID["django__django-12419"]
-    spec = by_id["django__django-12419"]
-    assert spec.image == "swebench/sweb.eval.x86_64.django_1776_django-12419:latest"
-    assert spec.repo == "django/django"
+    assert skipped == {"non_pytest_id": 2}  # both django rows name tests as "test_x (module.Class)"
+    (spec,) = specs
+    row = VERIFIED_BY_ID[ASTROPY]
+    assert spec.instance_id == ASTROPY
+    assert spec.image == "swebench/sweb.eval.x86_64.astropy_1776_astropy-7671:latest"
+    assert spec.repo == "astropy/astropy"
+    assert spec.base_commit == COMMIT
     assert spec.source == "swe-bench-verified"
     assert spec.fail_to_pass == tuple(json.loads(row["FAIL_TO_PASS"]))
     assert spec.gold_patch == row["patch"]
     assert spec.test_patch == row["test_patch"]
+
+
+@pytest.mark.parametrize("instance_id", ["django__django-12419", "django__django-11206"])
+def test_django_style_node_ids_are_skipped_as_non_pytest(instance_id):
+    with pytest.raises(RowSkip) as skip:
+        parse_row(VERIFIED, VERIFIED_BY_ID[instance_id])
+    assert skip.value.reason == "non_pytest_id"
 
 
 def test_rebench_fixture_uses_list_tests_and_its_docker_image_field():
@@ -105,8 +128,15 @@ def test_rebench_fixture_uses_list_tests_and_its_docker_image_field():
     assert spec.source == "swe-rebench"
 
 
+def test_redacted_fixture_commits_are_skipped_as_bad_commit():
+    assert all(row["base_commit"] == "REDACTED" for row in RAW_REBENCH_ROWS)
+    specs, skipped = parse_rows(REBENCH, RAW_REBENCH_ROWS)
+    assert specs == []
+    assert skipped == {"bad_commit": len(RAW_REBENCH_ROWS)}
+
+
 def test_json_string_and_list_test_fields_parse_the_same():
-    row = VERIFIED_BY_ID["django__django-11206"]
+    row = VERIFIED_BY_ID[ASTROPY]
     as_list = {
         **row,
         "FAIL_TO_PASS": json.loads(row["FAIL_TO_PASS"]),
@@ -118,12 +148,12 @@ def test_json_string_and_list_test_fields_parse_the_same():
 @pytest.mark.parametrize(
     "instance_id, image",
     [
-        ("django__django-12419", "swebench/sweb.eval.x86_64.django_1776_django-12419:latest"),
+        ("astropy__astropy-7671", "swebench/sweb.eval.x86_64.astropy_1776_astropy-7671:latest"),
         ("Sphinx__Sphinx-7000", "swebench/sweb.eval.x86_64.sphinx_1776_sphinx-7000:latest"),
     ],
 )
 def test_derived_image_is_lower_case_and_passes_the_executor_regex(instance_id, image):
-    row = {**VERIFIED_BY_ID["django__django-12419"], "instance_id": instance_id}
+    row = {**VERIFIED_BY_ID[ASTROPY], "instance_id": instance_id}
     spec = parse_row(VERIFIED, row)
     assert spec.image == image
     assert IMAGE_RE.fullmatch(spec.image)
@@ -138,12 +168,46 @@ def test_invalid_image_is_skipped_and_counted(image):
 
 
 @pytest.mark.parametrize(
+    "image",
+    [
+        "python:3.12-slim",
+        "docker.io/library/python:3.12",
+        "ghcr.io/swebench/sweb.eval.x86_64.x:latest",
+        "Swebench/sweb.eval.x86_64.x:latest",  # the prefix is case-sensitive
+    ],
+)
+def test_image_outside_the_allowed_namespaces_is_skipped_as_bad_image(image):
+    bad = {**REBENCH_BY_ID["ARMmbed__yotta-804"], "docker_image": image}
+    specs, skipped = parse_rows(REBENCH, [bad])
+    assert specs == []
+    assert skipped == {"bad_image": 1}
+
+
+@pytest.mark.parametrize(
+    "image", ["swebench/sweb.eval.x86_64.x:latest", "swerebench/sweb.eval.x86_64.x:latest"]
+)
+def test_both_allowed_namespaces_are_accepted(image):
+    row = {**REBENCH_BY_ID["ARMmbed__yotta-804"], "docker_image": image}
+    assert parse_row(REBENCH, row).image == image
+
+
+@pytest.mark.parametrize(
     "change, reason",
     [
         ({"base_commit": None}, "missing_field"),
+        ({"base_commit": "REDACTED"}, "bad_commit"),
+        ({"base_commit": "71fb12cefda5"}, "bad_commit"),  # an abbreviated id is not a full base commit
+        ({"base_commit": "z" * 40}, "bad_commit"),
         ({"patch": ""}, "missing_field"),
         ({"FAIL_TO_PASS": "[not json"}, "bad_tests"),
         ({"PASS_TO_PASS": 7}, "bad_tests"),
+        ({"FAIL_TO_PASS": ["-x.py::test_a"]}, "bad_tests"),  # pytest would read it as an option
+        ({"PASS_TO_PASS": ["tests/test_a.py::test_b\nrm"]}, "bad_tests"),
+        ({"FAIL_TO_PASS": ["test_x (mod.Class)"]}, "non_pytest_id"),
+        ({"PASS_TO_PASS": ["tests/test_a.py"]}, "non_pytest_id"),
+        ({"FAIL_TO_PASS": ["/abs/tests/test_a.py::test_b"]}, "non_pytest_id"),
+        ({"FAIL_TO_PASS": ["../tests/test_a.py::test_b"]}, "non_pytest_id"),
+        ({"test_patch": "--- a/../escape.py\n+++ b/../escape.py\n@@ -1 +1 @@\n-a\n+b\n"}, "bad_patch"),
         ({"FAIL_TO_PASS": "[]"}, "no_fail_to_pass"),
         ({"docker_image": None}, "no_image"),
     ],
@@ -156,7 +220,7 @@ def test_broken_rows_are_skipped_with_a_counted_reason(change, reason):
 
 
 def test_duplicate_instances_are_counted_once():
-    specs, skipped = parse_rows(VERIFIED, [VERIFIED_BY_ID["django__django-12419"]] * 2)
+    specs, skipped = parse_rows(VERIFIED, [VERIFIED_BY_ID[ASTROPY]] * 2)
     assert len(specs) == 1
     assert skipped == {"duplicate": 1}
 
@@ -226,9 +290,14 @@ def test_load_tasks_selects_from_fixture_rows_and_counts_skips(tmp_path):
 
 
 def test_load_tasks_default_deny_list_drops_native_repos(tmp_path):
-    loaded = load_tasks("swe-bench-verified", fetcher=FakeRowsApi(VERIFIED_ROWS), cache_dir=tmp_path)
-    assert "astropy__astropy-7671" not in [s.instance_id for s in loaded.selected]
-    assert [s.instance_id for s in loaded.selected] == ["django__django-12419", "django__django-11206"]
+    denied = load_tasks("swe-bench-verified", fetcher=FakeRowsApi(VERIFIED_ROWS), cache_dir=tmp_path)
+    # The astropy row is a native repo, and the django rows are not pytest-shaped, so nothing is selected.
+    assert denied.valid == 1
+    assert denied.selected == ()
+    allowed = load_tasks(
+        "swe-bench-verified", fetcher=FakeRowsApi(VERIFIED_ROWS), cache_dir=tmp_path, deny_repos=()
+    )
+    assert [s.instance_id for s in allowed.selected] == [ASTROPY]
 
 
 def test_cache_round_trip_in_tmp_path(tmp_path):
@@ -247,10 +316,27 @@ def test_cache_round_trip_in_tmp_path(tmp_path):
     assert len(api.calls) == 3
 
 
+def test_a_cache_from_before_row_checks_is_not_reused(tmp_path):
+    stale = {
+        "version": 1,
+        "source": "swe-rebench",
+        "scan_rows": 1000,
+        "scanned": 0,
+        "skipped": {},
+        "tasks": [],
+    }
+    (tmp_path / "swe-rebench.json").write_text(json.dumps(stale))
+    api = FakeRowsApi(REBENCH_ROWS)
+    loaded = load_tasks("swe-rebench", fetcher=api, cache_dir=tmp_path)
+    assert len(api.calls) == 1
+    assert len(loaded.selected) == 2
+
+
 def test_selection_size_comes_from_the_source_default_or_n(tmp_path):
-    assert load_tasks("swe-bench-verified", fetcher=FakeRowsApi(VERIFIED_ROWS), cache_dir=tmp_path).selected
-    one = load_tasks("swe-bench-verified", fetcher=FakeRowsApi(VERIFIED_ROWS), cache_dir=tmp_path, n=1)
-    assert [s.instance_id for s in one.selected] == ["django__django-12419"]
+    default = load_tasks("swe-rebench", fetcher=FakeRowsApi(REBENCH_ROWS), cache_dir=tmp_path)
+    assert len(default.selected) == 2  # two valid rows, under the default of 30
+    one = load_tasks("swe-rebench", fetcher=FakeRowsApi(REBENCH_ROWS), cache_dir=tmp_path, n=1)
+    assert [s.instance_id for s in one.selected] == ["12rambau__sepal_ui-518"]
     assert REBENCH.default_n == 30 and VERIFIED.default_n == 10
 
 
@@ -261,15 +347,15 @@ def test_unknown_source_is_refused(tmp_path):
 
 def test_cli_fetch_writes_the_cache_and_prints_counts(tmp_path, capsys):
     code = main(
-        ["fetch", "--source", "swe-bench-verified", "--n", "1"],
+        ["fetch", "--source", "swe-bench-verified", "--n", "1", "--deny-repo", "owner/none"],
         fetcher=FakeRowsApi(VERIFIED_ROWS),
         cache_dir=tmp_path,
     )
     out = capsys.readouterr().out
     assert code == 0
-    # The native astropy row is valid; the deny list drops it at selection, not at parse.
-    assert "swe-bench-verified: scanned=3 valid=3 selected=1" in out
-    assert "django__django-12419" in out
+    assert "swe-bench-verified: scanned=3 valid=1 selected=1" in out
+    assert "skipped by reason: non_pytest_id=2" in out
+    assert ASTROPY in out
     assert (tmp_path / "swe-bench-verified.json").exists()
 
 

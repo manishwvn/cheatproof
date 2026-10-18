@@ -19,8 +19,10 @@ the fail-to-pass test without fixing `add`.
 ## What the scan should report
 
 - `git-history`: `git rev-list --all --not <base>` lists the `future` commit.
-- `test-edit`: a caveat. Inside a container that runs as root, `test -w` is true for every file, so a live scan
-  also reports `test-edit`. The label names only the target hole.
+- `test-edit`: not a hole here. Inside a container that runs as root, `test -w` is true for every file, so the
+  probe reports `tests/test_calc.py` as writable. That file is a node-id file, which the grader restores from base
+  before it grades, so it is covered (`restore_covered`). The repo has no other test file. A writable test file the
+  grader does not restore (for example a `tests/conftest.py` the agent adds) would turn `test-edit` on.
 - `network`: off in the sandbox, so no hole.
 
 ## Tests

@@ -1,9 +1,12 @@
 """Task-spec loader for SWE-bench Verified and SWE-rebench (queue T03).
 
 Rows come from the Hugging Face datasets-server rows API over plain HTTP (httpx, no datasets library, no key,
-no budget: it is free and public). Each row becomes a TaskSpec or is skipped with a counted reason. select_tasks
-picks small, pure-Python tasks in a fixed order, so the same input always gives the same list. Parsed candidates
-are cached under runs/tasks/<source>.json (git-ignored). Tests inject a fake fetcher and never reach the network.
+no budget: it is free and public). Each row becomes a TaskSpec or is skipped with a counted reason. Untrusted
+fields are checked at load: the base commit must be a full 40-hex id, every node id must be pytest-shaped and
+safe, test_patch paths must be relative and inside the repo, and the image must come from an allowed namespace.
+select_tasks picks small, pure-Python tasks in a fixed order, so the same input always gives the same list.
+Parsed candidates are cached under runs/tasks/<source>.json (git-ignored). Tests inject a fake fetcher and never
+reach the network.
 
 Run: python -m cheatproof.tasks fetch [--source swe-rebench|swe-bench-verified|all] [--n N]
 """
@@ -23,11 +26,16 @@ from typing import Any
 import httpx
 
 from cheatproof.executor import IMAGE_RE
+from cheatproof.grader import checked_node, checked_sha, diff_files
 
 ROWS_URL = "https://datasets-server.huggingface.co/rows"
 PAGE_MAX = 100  # the rows API refuses longer pages
 HTTP_TIMEOUT_S = 60
-CACHE_VERSION = 1
+CACHE_VERSION = (
+    2  # 2: rows are checked at load (commit, node ids, patch paths, image namespace); v1 caches are stale
+)
+# Image names this loader accepts. The executor pulls only these namespaces; any other name is skipped as bad_image.
+ALLOWED_IMAGE_PREFIXES = ("swebench/", "swerebench/")
 RUNS_TASKS = Path(__file__).resolve().parent.parent / "runs" / "tasks"
 NON_PYTHON_PENALTY = 1000.0  # a gold patch touching a non-.py file ranks after every all-Python task
 # Repos with compiled extensions: slow, disk-heavy images that do not fit the pure-Python goal.
@@ -166,25 +174,68 @@ def _image(source: Source, instance_id: str, row: Mapping[str, Any]) -> str:
     # Same check the executor applies before docker sees the name, so a bad name is skipped here, not at run time.
     if not isinstance(image, str) or not IMAGE_RE.fullmatch(image):
         raise RowSkip("bad_image")
+    if not image.startswith(ALLOWED_IMAGE_PREFIXES):
+        raise RowSkip("bad_image")
     return image
+
+
+def _commit(value: str) -> str:
+    # The grader checks out this exact commit, so it must be a full id. "REDACTED" and abbreviations are refused.
+    try:
+        sha = checked_sha(value)
+    except ValueError:
+        raise RowSkip("bad_commit") from None
+    if len(sha) != 40:
+        raise RowSkip("bad_commit")
+    return sha
+
+
+def _pytest_shaped(node: str) -> bool:
+    # 'path/test_x.py::name': a relative .py path, '::', a name. django and sympy ids do not have this shape.
+    path, sep, name = node.partition("::")
+    return bool(
+        sep and name and path.endswith(".py") and not path.startswith("/") and ".." not in path.split("/")
+    )
+
+
+def _nodes(row: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    nodes = _tests(row, key)
+    for node in nodes:
+        try:
+            checked_node(node)
+        except ValueError:
+            raise RowSkip("bad_tests") from None
+        if not _pytest_shaped(node):
+            raise RowSkip("non_pytest_id")
+    return nodes
+
+
+def _test_patch(value: str) -> str:
+    # diff_files refuses an absolute path, a '..' segment or a line break, so such a patch never reaches the shell.
+    try:
+        diff_files(value)
+    except ValueError:
+        raise RowSkip("bad_patch") from None
+    return value
 
 
 def parse_row(source: Source, row: Mapping[str, Any]) -> TaskSpec:
     """Turn one rows-API row into a TaskSpec. Raises RowSkip with the reason when the row cannot run."""
     fields = {key: _text(row, key) for key in ("instance_id", "repo", "base_commit", "patch", "test_patch")}
+    base_commit = _commit(fields["base_commit"])
     image = _image(source, fields["instance_id"], row)
-    fail_to_pass = _tests(row, "FAIL_TO_PASS")
+    fail_to_pass = _nodes(row, "FAIL_TO_PASS")
     if not fail_to_pass:  # nothing to grade without a fail-to-pass test
         raise RowSkip("no_fail_to_pass")
     return TaskSpec(
         instance_id=fields["instance_id"],
         repo=fields["repo"],
-        base_commit=fields["base_commit"],
+        base_commit=base_commit,
         image=image,
         fail_to_pass=fail_to_pass,
-        pass_to_pass=_tests(row, "PASS_TO_PASS"),
+        pass_to_pass=_nodes(row, "PASS_TO_PASS"),
         gold_patch=fields["patch"],
-        test_patch=fields["test_patch"],
+        test_patch=_test_patch(fields["test_patch"]),
         source=source.name,
     )
 

@@ -2,11 +2,14 @@
 
 scan() probes a session and reports the holes an attacker can use:
   git-history  refs, the reflog, FETCH_HEAD or ORIG_HEAD point past base_commit, so the fix may be in .git
-  test-edit    a hidden test file (a test_patch path or an F2P node file) is writable
+  test-edit    the uid running the agent can write a test file the grader does not restore from base. The grader
+               restores its node-id files and test_patch paths before it grades, so a writable one of those is
+               covered. Any other writable test file (a conftest.py, a helper under a tests/ dir) is a hole.
   network      a TCP connection to 1.1.1.1:53 succeeds
 
-The scan is read-only: it writes nothing, resets nothing and deletes nothing. A probe that cannot run counts
-as a hole, with an "unverified" note in its evidence, so a clean report never rests on a check that did not run.
+The scan is read-only: it writes nothing, resets nothing and deletes nothing. A probe that cannot run, or whose
+input the grader would refuse, counts as a hole, with an "unverified" or "unverifiable" note in its evidence, so a
+clean report never rests on a check that did not run.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from cheatproof.executor import Result, Session
 from cheatproof.grader import (
     DEFAULT_WORKDIR,
     STEP_TIMEOUT_S,
+    checked_node,
     checked_sha,
     diff_files,
     error_tail,
@@ -32,32 +36,58 @@ if TYPE_CHECKING:
 HOLE_GIT_HISTORY = "git-history"
 HOLE_TEST_EDIT = "test-edit"
 HOLE_NETWORK = "network"
-PROBE_TIMEOUT_S = 15  # the connect itself gives up after 3 s
+PROBE_TIMEOUT_S = 15  # the host's cap on one network probe; each probe also gives up its connect after 3 s
 CONNECT_PROBE = "import socket; socket.create_connection(('1.1.1.1', 53), timeout=3).close()"
+# Tried in order. A probe whose program is missing (exit 127) hands over to the next. The first that runs decides.
+NETWORK_PROBES = (
+    ("python3", f"python3 -c {shlex.quote(CONNECT_PROBE)}"),
+    ("python", f"python -c {shlex.quote(CONNECT_PROBE)}"),
+    ("bash /dev/tcp", "timeout 3 bash -c '</dev/tcp/1.1.1.1/53'"),
+)
+MISSING_EXIT = 127  # shell status for "command not found"
 REF_FORMAT = "%(objectname)|%(*objectname)|%(refname)"  # *objectname is the peeled target of an annotated tag
+# What counts as a test file for the test-edit probe: test modules, conftest.py, and anything under a test dir.
+TEST_FILE_TESTS = (
+    "-name 'test_*.py' -o -name '*_test.py' -o -name conftest.py "
+    "-o -path '*/test/*' -o -path '*/tests/*' -o -path '*/testing/*'"
+)
 
 
 @dataclass(frozen=True)
 class ExposureReport:
     future_git: bool
     future_git_evidence: list[str]
-    tests_writable: bool
-    writable_tests: list[str]  # writable test paths, or an "unverified" note
+    tests_writable: bool  # observed: the probe uid can write at least one test path, covered or not
+    writable_tests: list[str]  # those paths, or an "unverified" / "unverifiable" note
+    restore_covered: bool  # every writable test path is one the grader restores from base
+    unrestored_tests: list[
+        str
+    ]  # writable test paths the grader does not restore, or the note; empty if covered
     network: bool
     network_evidence: list[str]
     holes: list[str]  # HOLE_* labels, in the order git-history, test-edit, network
 
 
+@dataclass(frozen=True)
+class _TestProbe:
+    writable: list[str]
+    unrestored: list[str]  # a subset of writable
+
+
 def scan(session: Session, task: TaskSpec, *, workdir: str = DEFAULT_WORKDIR) -> ExposureReport:
-    base = checked_sha(task.base_commit)
-    git_evidence = _git_history(session, base, workdir)
-    writable = _writable_tests(session, task, workdir)
+    try:
+        base = checked_sha(task.base_commit)
+    except ValueError as exc:
+        git_evidence = [_unverifiable(exc)]  # no base, so history cannot be checked: fail closed
+    else:
+        git_evidence = _git_history(session, base, workdir)
+    tests = _writable_tests(session, task, workdir)
     network, network_evidence = _network(session)
     holes = [
         label
         for label, hit in (
             (HOLE_GIT_HISTORY, bool(git_evidence)),
-            (HOLE_TEST_EDIT, bool(writable)),
+            (HOLE_TEST_EDIT, bool(tests.unrestored)),
             (HOLE_NETWORK, network),
         )
         if hit
@@ -65,8 +95,10 @@ def scan(session: Session, task: TaskSpec, *, workdir: str = DEFAULT_WORKDIR) ->
     return ExposureReport(
         future_git=bool(git_evidence),
         future_git_evidence=git_evidence,
-        tests_writable=bool(writable),
-        writable_tests=writable,
+        tests_writable=bool(tests.writable),
+        writable_tests=tests.writable,
+        restore_covered=not tests.unrestored,
+        unrestored_tests=tests.unrestored,
         network=network,
         network_evidence=network_evidence,
         holes=holes,
@@ -76,6 +108,10 @@ def scan(session: Session, task: TaskSpec, *, workdir: str = DEFAULT_WORKDIR) ->
 def _unverified(what: str, res: Result) -> str:
     tail = error_tail(res)
     return f"unverified: {what} failed (exit {res.exit_code})" + (f": {tail}" if tail else "")
+
+
+def _unverifiable(exc: ValueError) -> str:
+    return f"unverifiable: {exc}"
 
 
 def _is_base(sha: str, base: str) -> bool:
@@ -129,34 +165,79 @@ def _git_history(session: Session, base: str, workdir: str) -> list[str]:
     return evidence
 
 
-def _writable_check(path: str) -> str:
-    # test -w only reads permissions. A missing file is judged by whether its directory is writable.
+def _covered_check(path: str) -> str:
+    # test -w only reads permissions, and as root it is true for every file. A missing file is judged by its dir.
     q = shlex.quote(path)
     return (
         f'p={q}; if [ -e "$p" ]; then test -w "$p"; else test -w "$(dirname -- "$p")"; fi '
-        "&& printf '%s\\n' \"$p\""
+        "&& printf 'covered %s\\n' \"$p\""
     )
 
 
-def _writable_tests(session: Session, task: TaskSpec, workdir: str) -> list[str]:
-    paths = sorted(
-        {node_file(node) for node in task.fail_to_pass} | {rel for rel, _ in diff_files(task.test_patch)}
+def _probe_script(workdir: str, covered: list[str]) -> str:
+    """One shell run that reports the writable test paths. Output lines: 'covered <path>' for a restore-set
+    path the uid can write, 'uncovered <path>' for another writable test file, and a final 'done'.
+
+    The listing runs before the loop, so a failed find ends the probe with exit 3 rather than a partial list.
+    """
+    checks = "; ".join(_covered_check(path) for path in covered) or "true"
+    skip = "|".join(shlex.quote("./" + path) for path in covered) or "''"
+    return (
+        f"cd {shlex.quote(workdir)} || exit 2; {checks}; "
+        f"found=$(find . -name .git -prune -o -type f \\( {TEST_FILE_TESTS} \\) -print) "
+        "|| { echo 'test file listing failed' >&2; exit 3; }; "
+        "printf '%s\\n' \"$found\" | while IFS= read -r f; do "
+        f'case "$f" in {skip}) continue ;; esac; '
+        'if [ -w "$f" ]; then printf \'uncovered %s\\n\' "${f#./}"; fi; '
+        "done; printf 'done\\n'"
     )
-    script = (
-        f"cd {shlex.quote(workdir)} || exit 2; " + "; ".join(_writable_check(p) for p in paths) + "; true"
-    )
-    res = session.run(script, STEP_TIMEOUT_S)
+
+
+def _writable_tests(session: Session, task: TaskSpec, workdir: str) -> _TestProbe:
+    try:
+        nodes = [checked_node(node) for node in (*task.fail_to_pass, *task.pass_to_pass)]
+        covered = sorted(
+            {node_file(node) for node in nodes} | {rel for rel, _ in diff_files(task.test_patch)}
+        )
+    except ValueError as exc:
+        note = _unverifiable(exc)  # the grader would refuse this id or path, so its restore set is unknown
+        return _TestProbe([note], [note])
+    res = session.run(_probe_script(workdir, covered), STEP_TIMEOUT_S)
+    lines = res.stdout.splitlines()
+    if res.truncated:
+        note = "unverified: writability check output was cut"
+        return _TestProbe([note], [note])
     if res.exit_code != 0:
-        return [_unverified("writability check", res)]
-    listed = set(paths)
-    return [line for line in res.stdout.splitlines() if line in listed]
+        note = _unverified("writability check", res)
+        return _TestProbe([note], [note])
+    if "done" not in lines:
+        note = "unverified: writability check did not finish"
+        return _TestProbe([note], [note])
+    listed = set(covered)
+    writable: list[str] = []
+    unrestored: list[str] = []
+    for line in lines:
+        kind, _, path = line.partition(" ")
+        if kind == "covered" and path in listed:
+            writable.append(path)
+        elif kind == "uncovered" and path:
+            writable.append(path)
+            unrestored.append(path)
+    return _TestProbe(writable, unrestored)
 
 
 def _network(session: Session) -> tuple[bool, list[str]]:
-    res = session.run(f"python3 -c {shlex.quote(CONNECT_PROBE)}", PROBE_TIMEOUT_S)
-    if res.exit_code == 0:
-        return True, ["connected to 1.1.1.1:53"]
-    if res.exit_code == 1 and not res.timed_out:
-        return False, []  # the connect failed: no route, refused, or timed out
-    # python3 is missing or the probe was killed. Assume reachable rather than claim a clean network.
-    return True, [_unverified("network probe", res)]
+    for name, cmd in NETWORK_PROBES:
+        res = session.run(cmd, PROBE_TIMEOUT_S)
+        if res.timed_out:
+            return True, [
+                _unverified(f"network probe ({name})", res)
+            ]  # killed by the host: unknown, fail closed
+        if res.exit_code == 0:
+            return True, [f"connected to 1.1.1.1:53 ({name})"]
+        if res.exit_code == 1:
+            return False, []  # the connect failed: no route or refused
+        if res.exit_code != MISSING_EXIT:
+            return True, [_unverified(f"network probe ({name})", res)]  # unexpected status: assume reachable
+        # This program is missing here. Try the next probe.
+    return True, ["unverified: probe unavailable (python3, python and bash /dev/tcp all missing)"]

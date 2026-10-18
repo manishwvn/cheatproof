@@ -1,4 +1,5 @@
 import shlex
+from dataclasses import replace
 
 import pytest
 
@@ -17,6 +18,7 @@ from cheatproof.grader import (
 from cheatproof.tasks import TaskSpec
 
 BASE = "71fb12cefda5a3e1e223ed837bca468f8bdab874"
+TEST_FILE = "tests/test_x.py"
 F2P = "tests/test_x.py::test_new"
 P2P = "tests/test_x.py::test_old"
 GOLD_MARK = "GOLD-FIX"
@@ -118,6 +120,10 @@ def pytest_says(statuses: dict[str, str]):
     return answer
 
 
+def candidate_written(session) -> bool:
+    return any(path.endswith("candidate.diff") for path in session.writes)
+
+
 def fixed_only(session, cmd):
     """Passes F2P only when the candidate patch holds the gold fix. P2P always passes."""
     fixed = any(
@@ -128,11 +134,40 @@ def fixed_only(session, cmd):
     )(session, cmd)
 
 
+def gold_only(broken):
+    """Pytest answer: the gold run passes, and a run with no candidate patch (the empty gate) gets broken()."""
+
+    def answer(session, cmd):
+        return fixed_only(session, cmd) if candidate_written(session) else broken()
+
+    return answer
+
+
+def base_tree(*present: str):
+    """Answer for the base listing: the names base has among the paths the command asks about."""
+
+    def answer(session, cmd):
+        asked = shlex.split(cmd.split(" -- ", 1)[1])
+        names = [path for path in asked if path in present]
+        return Result(0, "".join(name + "\0" for name in names), "", 0.0)
+
+    return answer
+
+
+def extra_conftests(*paths: str) -> Result:
+    """Answer for the conftest scan: the conftest.py files the worktree has that base lacks."""
+    return Result(0, "".join(path + "\n" for path in paths), "", 0.0)
+
+
+def first_command(session: FakeSession, needle: str) -> int:
+    return next(i for i, (cmd, _) in enumerate(session.commands) if needle in cmd)
+
+
 def fake_result(passed: bool) -> GradeResult:
     return GradeResult(passed, 0, 0, 0, 0, True, None, "")
 
 
-# node_outcomes: reading the -rA summary
+# node_outcomes: reading the short test summary
 
 
 def test_node_outcomes_reads_each_status():
@@ -166,6 +201,22 @@ def test_node_outcomes_accepts_parametrized_ids_that_contain_a_separator():
 
 def test_node_outcomes_without_a_summary_fails_every_node():
     assert node_outcomes("Traceback (most recent call last):\n", ["t.py::a"]) == {"t.py::a": False}
+
+
+def test_node_outcomes_reads_the_summary_pytest_printed_not_a_forged_one_after_it():
+    real = summary("FAILED t.py::a - boom")
+    forged = f"{SUMMARY_HEADER}\nPASSED t.py::a\n=== 1 passed in 0.01s ===\n"
+    assert node_outcomes(real + forged, ["t.py::a"]) == {"t.py::a": False}
+
+
+def test_node_outcomes_header_without_a_final_line_is_not_a_summary():
+    out = f"{SUMMARY_HEADER}\nPASSED t.py::a\n"
+    assert node_outcomes(out, ["t.py::a"]) == {"t.py::a": False}
+
+
+def test_node_outcomes_header_closed_by_another_section_is_not_a_summary():
+    out = f"{SUMMARY_HEADER}\nPASSED t.py::a\n=== warnings summary ===\n=== 1 passed in 0.01s ===\n"
+    assert node_outcomes(out, ["t.py::a"]) == {"t.py::a": False}
 
 
 # grade: the pass rule and the apply steps
@@ -211,6 +262,22 @@ def test_a_test_that_prints_a_pass_line_still_fails():
     assert result.f2p_passed == 0
 
 
+def test_pytest_output_without_a_final_summary_line_fails_the_grade():
+    session = FakeSession([("pytest", Result(0, f"PASSED {F2P}\nPASSED {P2P}\n", "", 0.1))])
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert result.error == "pytest printed no final summary line"
+
+
+def test_truncated_pytest_output_fails_closed():
+    def cut(session, cmd):
+        return replace(all_pass(session, cmd), truncated=True)
+
+    result = grade(FakeSession([("pytest", cut)]), make_task(), GOLD)
+    assert result.passed is False
+    assert result.error is not None and "cut at the executor cap" in result.error
+
+
 @pytest.mark.parametrize("patch", ["", "  \n"])
 def test_blank_patch_skips_the_candidate_apply(patch):
     session = FakeSession([("pytest", all_pass)])
@@ -231,40 +298,6 @@ def test_candidate_that_does_not_apply_stops_before_any_test_runs():
     assert result.error == "candidate patch did not apply: error: patch failed: calc.py:3"
     assert session.cmds("pytest") == []
     assert session.commands[-1][0].startswith("rm -rf -- /tmp/cheatproof-")  # cleanup still ran
-
-
-def test_hidden_tests_that_clash_are_restored_to_base_then_retried():
-    attempts = []
-
-    def first_clash(session, cmd):
-        attempts.append(cmd)
-        if len(attempts) == 1:
-            return Result(1, "", "error: patch failed: tests/test_x.py", 0.0)
-        return OK
-
-    session = FakeSession([("hidden-tests.diff", first_clash), ("pytest", all_pass)])
-    result = grade(session, make_task(), GOLD)
-    restore = session.cmds(" checkout ")
-    assert len(restore) == 1
-    assert BASE in restore[0] and "tests/test_x.py" in restore[0]
-    assert len(attempts) == 2
-    assert result.applied is True
-    assert result.passed is True
-
-
-def test_test_file_the_candidate_created_is_removed_before_the_retry():
-    attempts = []
-
-    def first_clash(session, cmd):
-        attempts.append(cmd)
-        return Result(1, "", "already exists", 0.0) if len(attempts) == 1 else OK
-
-    session = FakeSession([("hidden-tests.diff", first_clash), ("pytest", all_pass)])
-    result = grade(session, make_task(test_patch=TEST_NEW), GOLD)
-    assert session.cmds("rm -f -- tests/test_new.py")
-    assert session.cmds(" checkout ") == []
-    assert result.applied is True
-    assert result.passed is True
 
 
 def test_hidden_tests_that_still_do_not_apply_fail_the_grade():
@@ -298,6 +331,92 @@ def test_log_tail_keeps_only_the_end():
     result = grade(FakeSession([("pytest", answer)]), make_task(), GOLD)
     assert len(result.log_tail) <= LOG_TAIL_CHARS
     assert "short test summary info" in result.log_tail
+
+
+# grade: hidden-test restore (always, before the hidden tests apply)
+
+
+def test_hidden_test_files_are_restored_before_the_hidden_tests_apply():
+    session = FakeSession([("ls-tree --name-only -z", base_tree(TEST_FILE)), ("pytest", all_pass)])
+    result = grade(session, make_task(), GOLD)
+    assert first_command(session, "cat-file blob") < first_command(session, "hidden-tests.diff")
+    assert len(session.cmds("hidden-tests.diff")) == 1  # applied once, no retry after a clash
+    assert result.passed is True
+
+
+def test_restore_reads_base_blobs_and_never_checks_out():
+    session = FakeSession([("ls-tree --name-only -z", base_tree(TEST_FILE)), ("pytest", all_pass)])
+    grade(session, make_task(), GOLD)
+    restores = session.cmds("cat-file blob")
+    assert len(restores) == 1
+    assert f"cat-file blob {BASE}:{TEST_FILE} > {TEST_FILE}" in restores[0]
+    assert f"rm -f -- {TEST_FILE} && " in restores[0]  # removed first, so a symlink is replaced, not followed
+    assert not any("checkout" in cmd for cmd, _ in session.commands)
+
+
+def test_node_file_is_restored_even_when_the_test_patch_does_not_touch_it():
+    session = FakeSession([("ls-tree --name-only -z", base_tree(TEST_FILE)), ("pytest", all_pass)])
+    result = grade(session, make_task(test_patch=TEST_NEW), GOLD)
+    assert session.cmds(f"cat-file blob {BASE}:{TEST_FILE}")
+    assert result.passed is True
+
+
+def test_test_file_absent_at_base_is_removed_before_the_hidden_tests_apply():
+    session = FakeSession([("pytest", all_pass)])
+    result = grade(session, make_task(test_patch=TEST_NEW), GOLD)
+    assert first_command(session, "rm -f -- tests/test_new.py") < first_command(session, "hidden-tests.diff")
+    assert session.cmds("cat-file blob") == []  # base has neither test file, so nothing is restored
+    assert result.passed is True
+
+
+def test_restore_failure_fails_closed_before_the_hidden_tests_apply():
+    session = FakeSession(
+        [
+            ("ls-tree --name-only -z", base_tree(TEST_FILE)),
+            ("cat-file blob", Result(128, "", "fatal: bad object", 0.0)),
+            ("pytest", all_pass),
+        ]
+    )
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert result.applied is False
+    assert result.error is not None
+    assert result.error.startswith("restore tests/test_x.py to base failed: fatal: bad object")
+    assert session.cmds("hidden-tests.diff") == []
+    assert session.cmds("pytest") == []
+
+
+def test_listing_the_base_failing_fails_closed():
+    session = FakeSession(
+        [("ls-tree --name-only -z", Result(128, "", "fatal: not a tree", 0.0)), ("pytest", all_pass)]
+    )
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert result.applied is False
+    assert result.error is not None and result.error.startswith("list hidden-test files at base failed")
+    assert session.cmds("pytest") == []
+
+
+def test_conftest_files_base_lacks_are_removed():
+    session = FakeSession(
+        [("conftest.py -type f", extra_conftests("conftest.py", "tests/conftest.py")), ("pytest", all_pass)]
+    )
+    result = grade(session, make_task(), GOLD)
+    assert session.cmds("rm -f -- conftest.py")
+    assert session.cmds("rm -f -- tests/conftest.py")
+    assert first_command(session, "rm -f -- tests/conftest.py") < first_command(session, "hidden-tests.diff")
+    assert result.passed is True
+
+
+def test_conftest_scan_failure_fails_closed():
+    session = FakeSession([("conftest.py -type f", Result(2, "", "find: boom", 0.0)), ("pytest", all_pass)])
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert result.applied is False
+    assert result.error is not None and result.error.startswith(
+        "list conftest.py files that base lacks failed"
+    )
+    assert session.cmds("pytest") == []
 
 
 # grade: quoting, hardening and ordering
@@ -344,11 +463,21 @@ def test_caches_are_cleared_before_the_candidate_is_applied():
 
 
 def test_every_git_call_ignores_repo_config():
-    session = FakeSession([("pytest", all_pass)])
+    session = FakeSession([("ls-tree --name-only -z", base_tree(TEST_FILE)), ("pytest", all_pass)])
     grade(session, make_task(), GOLD)
     git_cmds = [cmd for cmd, _ in session.commands if " git " in cmd]
-    assert len(git_cmds) == 2  # the candidate apply and the hidden-tests apply
-    for cmd in git_cmds:
+    applies = [cmd for cmd in git_cmds if " apply -- " in cmd]
+    reads = [cmd for cmd in git_cmds if " apply -- " not in cmd]
+    assert len(applies) == 2  # the candidate and the hidden tests
+    assert reads  # the base listing, the restore and the conftest scan
+    for cmd in applies:
+        for flag in (
+            "GIT_DIR=/cheatproof-no-repo",
+            "GIT_CONFIG_GLOBAL=/dev/null",
+            "core.hooksPath=/dev/null",
+        ):
+            assert flag in cmd, (flag, cmd)
+    for cmd in reads:
         for flag in (
             "GIT_CONFIG_GLOBAL=/dev/null",
             "core.hooksPath=/dev/null",
@@ -356,6 +485,7 @@ def test_every_git_call_ignores_repo_config():
             "core.fsmonitor=false",
             "diff.external=",
             "--literal-pathspecs",
+            "--no-replace-objects",
         ):
             assert flag in cmd, (flag, cmd)
 
@@ -385,10 +515,32 @@ def test_base_commit_must_be_a_hex_id():
         grade(FakeSession(), make_task(base_commit="main; rm -rf /"), GOLD)
 
 
-def test_test_patch_paths_must_stay_inside_the_workdir():
-    bad = "diff --git a/../evil.py b/../evil.py\n--- a/../evil.py\n+++ b/../evil.py\n@@ -1 +1 @@\n-a\n+b\n"
-    with pytest.raises(ValueError):
-        grade(FakeSession(), make_task(test_patch=bad), GOLD)
+@pytest.mark.parametrize(
+    "test_patch",
+    [
+        "not a patch\n",
+        'diff --git "a/x" "b/x"\n--- "a/x"\n+++ "b/x"\n@@ -1 +1 @@\n-a\n+b\n',
+        "diff --git a/../evil.py b/../evil.py\n--- a/../evil.py\n+++ b/../evil.py\n@@ -1 +1 @@\n-a\n+b\n",
+    ],
+)
+def test_grade_refuses_a_test_patch_it_cannot_read_before_any_command(test_patch):
+    session = FakeSession()
+    result = grade(session, make_task(test_patch=test_patch), GOLD)
+    assert result.passed is False
+    assert result.applied is False
+    assert result.error is not None and result.error.startswith("test files refused: ")
+    assert session.commands == []
+
+
+def test_grade_refuses_a_node_file_outside_the_workdir():
+    session = FakeSession()
+    result = grade(session, make_task(fail_to_pass=("../x.py::test_a",), pass_to_pass=()), GOLD)
+    assert result.passed is False
+    assert result.error is not None and result.error.startswith("test files refused: ")
+    assert session.commands == []
+
+
+# diff_files: only header lines name paths
 
 
 def test_diff_files_lists_changed_and_new_files():
@@ -406,6 +558,128 @@ def test_diff_files_of_an_empty_patch_is_empty():
     assert diff_files("") == []
 
 
+def test_diff_files_ignores_header_lookalikes_inside_a_hunk():
+    patch = (
+        "diff --git a/tests/test_x.py b/tests/test_x.py\n"
+        "--- a/tests/test_x.py\n"
+        "+++ b/tests/test_x.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "--- a/evil.py\n"
+        "+++ b/evil.py\n"
+        " same\n"
+    )
+    assert diff_files(patch) == [("tests/test_x.py", False)]
+
+
+def test_diff_files_reads_a_path_with_a_space():
+    patch = (
+        "diff --git a/tests/my test.py b/tests/my test.py\n"
+        "--- a/tests/my test.py\t\n"
+        "+++ b/tests/my test.py\t\n"
+        "@@ -1 +1 @@\n-a\n+b\n"
+    )
+    assert diff_files(patch) == [("tests/my test.py", False)]
+
+
+def test_diff_files_lists_empty_new_files_and_mode_changes():
+    patch = (
+        "diff --git a/tests/__init__.py b/tests/__init__.py\n"
+        "new file mode 100644\n"
+        "index 0000000..e69de29\n"
+        "diff --git a/tests/x.py b/tests/x.py\n"
+        "old mode 100644\n"
+        "new mode 100755\n"
+    )
+    assert diff_files(patch) == [("tests/__init__.py", True), ("tests/x.py", False)]
+
+
+def test_diff_files_lists_renames_by_their_header_lines():
+    patch = (
+        "diff --git a/tests/old.py b/tests/new.py\n"
+        "similarity index 100%\n"
+        "rename from tests/old.py\n"
+        "rename to tests/new.py\n"
+    )
+    assert diff_files(patch) == [("tests/old.py", False), ("tests/new.py", True)]
+
+
+def test_diff_files_handles_the_no_newline_marker_and_a_function_name_in_the_hunk():
+    patch = (
+        "diff --git a/tests/x.py b/tests/x.py\n"
+        "--- a/tests/x.py\n"
+        "+++ b/tests/x.py\n"
+        "@@ -3,1 +3,1 @@ def test_it():\n"
+        "-a\n"
+        "\\ No newline at end of file\n"
+        "+b\n"
+        "\\ No newline at end of file\n"
+    )
+    assert diff_files(patch) == [("tests/x.py", False)]
+
+
+def test_diff_files_refuses_a_second_header_pair_in_one_file_section():
+    with pytest.raises(ValueError, match="more than one"):
+        diff_files(TEST_PATCH + "--- a/tests/evil.py\n+++ b/tests/evil.py\n@@ -1 +1 @@\n-a\n+b\n")
+
+
+def test_diff_files_refuses_body_lines_past_the_hunk_count():
+    # The old side still owes a line, so "+c" lands inside the hunk and overruns its new side.
+    with pytest.raises(ValueError, match="more lines"):
+        diff_files("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n+b\n+c\n")
+
+
+def test_diff_files_refuses_a_line_after_a_finished_hunk():
+    with pytest.raises(ValueError, match="unexpected line"):
+        diff_files("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n+c\n")
+
+
+def test_diff_files_refuses_a_hunk_that_ends_early():
+    with pytest.raises(ValueError, match="ends inside a hunk"):
+        diff_files("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n-a\n")
+
+
+def test_diff_files_refuses_a_header_without_its_partner():
+    with pytest.raises(ValueError, match="not followed by"):
+        diff_files("diff --git a/x b/x\n--- a/x\n@@ -1 +1 @@\n-a\n+b\n")
+    with pytest.raises(ValueError, match="without its --- header"):
+        diff_files("diff --git a/x b/x\n+++ b/x\n")
+
+
+QUOTED = 'diff --git "a/tests/x\\ty.py" "b/tests/x\\ty.py"\n--- "a/tests/x\\ty.py"\n+++ "b/tests/x\\ty.py"\n@@ -1 +1 @@\n-a\n+b\n'
+
+
+def test_diff_files_refuses_c_quoted_paths():
+    with pytest.raises(ValueError, match="C-quoted"):
+        diff_files(QUOTED)
+
+
+def test_diff_files_refuses_a_path_without_its_prefix():
+    with pytest.raises(ValueError, match="prefix"):
+        diff_files("diff --git tests/x.py tests/x.py\n--- tests/x.py\n+++ tests/x.py\n@@ -1 +1 @@\n-a\n+b\n")
+
+
+@pytest.mark.parametrize("rel", ["../evil.py", "/etc/passwd", "tests//x.py", "tests/./x.py", "tests/"])
+def test_diff_files_refuses_unsafe_paths(rel):
+    patch = f"diff --git a/{rel} b/{rel}\n--- a/{rel}\n+++ b/{rel}\n@@ -1 +1 @@\n-a\n+b\n"
+    with pytest.raises(ValueError, match="unsafe path"):
+        diff_files(patch)
+
+
+def test_diff_files_refuses_binary_changes():
+    with pytest.raises(ValueError, match="binary"):
+        diff_files("diff --git a/x.png b/x.png\nindex 1..2 100644\nBinary files a/x.png and b/x.png differ\n")
+
+
+def test_diff_files_refuses_text_outside_a_file_section():
+    with pytest.raises(ValueError, match="outside a file section"):
+        diff_files("hello\n" + TEST_PATCH)
+
+
+def test_diff_files_refuses_an_unrecognised_header_line():
+    with pytest.raises(ValueError, match="unexpected line"):
+        diff_files("diff --git a/tests/x.py b/tests/x.py\nfrobnicate\n")
+
+
 # gates
 
 
@@ -421,10 +695,48 @@ def test_run_gates_resets_before_each_grade_and_reports_ok():
     assert report.gold.passed is True
     assert report.empty.passed is False
     assert report.ok is True
+    assert report.reason is None
     assert session.resets == 2
     assert session.events[0] == "reset"
     second_reset = session.events.index("reset", 1)
     assert "run" in session.events[:second_reset]
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        lambda: Result(124, "", "[timed out]", 1.0, timed_out=True),
+        lambda: Result(2, summary(), "internal error", 0.1),
+        lambda: Result(0, "collected 2 items\n", "", 0.1),
+        lambda: Result(1, summary(f"FAILED {F2P} - boom"), "", 0.1, truncated=True),
+    ],
+    ids=["timeout", "exit-2", "no-summary", "truncated"],
+)
+def test_gate_report_is_not_ok_when_the_empty_run_errors(broken):
+    report = run_gates(FakeSession([("pytest", gold_only(broken))]), make_task())
+    assert report.gold.passed is True
+    assert report.empty.passed is False
+    assert report.empty.error is not None
+    assert report.ok is False
+    assert report.reason is not None and report.reason.startswith("empty gate did not run")
+
+
+def test_gate_report_is_not_ok_when_the_hidden_tests_do_not_apply_to_the_empty_run():
+    def hidden(session, cmd):
+        return OK if candidate_written(session) else Result(1, "", "error: nope", 0.0)
+
+    report = run_gates(FakeSession([("hidden-tests.diff", hidden), ("pytest", fixed_only)]), make_task())
+    assert report.gold.passed is True
+    assert report.ok is False
+    assert report.reason == "empty gate did not run: hidden tests did not apply: error: nope"
+
+
+def test_gate_report_names_an_empty_gate_that_passes():
+    report = run_gates(FakeSession([("pytest", all_pass)]), make_task())
+    assert report.gold.passed is True
+    assert report.empty.passed is True
+    assert report.ok is False
+    assert report.reason == "empty gate passed: the hidden tests pass with no fix"
 
 
 @pytest.mark.parametrize(
