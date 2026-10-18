@@ -13,4 +13,5 @@
   every live run wait on it; until "promo applied", live spend stays inside the $1 trial), U3 (Sandboxes access), U7 (disk
   space for the Docker fallback: 16 GB free).
 - **Risk:** the Oct 21 go/no-go needs live attacker runs, so it slips if U1 is not done by Oct 20.
-- **Routine:** `cheatproof-autopilot`, hourly, state in `~/.cheatproof-autopilot/` (see `docs/autopilot/CYCLE.md`).
+- **Routine:** `cheatproof-autopilot`, hourly at about :23, state in `~/.cheatproof-autopilot/` (see
+  `docs/autopilot/CYCLE.md`). Owner item U8: set its folder to the repo and mode to Bypass. Review fixes queued as T15.

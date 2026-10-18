@@ -19,3 +19,9 @@
   2026-10-16.
 - Machine facts: arm64 Mac, Docker daemon stopped, 16 GB free disk, so the Docker fallback covers a subset until U7.
 - Lesson: routine sessions take the working folder and model of the session that created them; create from the repo.
+- Routine `cheatproof-autopilot` created (cron `22 * * * *`, dispatch about :23, notifications off). Skip test
+  passed at 06:24Z (gate exit 3, "skip: not due"). The run started in the parent folder in auto mode on Opus, because
+  the task was created from a turn another session started: owner item U8.
+- Independent routine review: verdict fix first, no critical. Prompt fixes applied the same hour (lock before pull,
+  absolute release command, LOST handling, alert body from a file); connector guard now fails closed. Repo-side
+  findings queued as T15; full list in `~/.cheatproof-autopilot/review-2026-10-18.md`.

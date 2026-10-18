@@ -30,6 +30,13 @@ fake runner; one opt-in live test (`-m docker`, skipped in CI) runs `echo ok` in
 (after U3): confirm and record with fixtures the networking flag, file upload, checkpoint and branch, timeout,
 preloaded SWE-rebench image naming and per-run cost; update ADR 0002 and resolve its `VERIFY` notes.
 
+### T15 Routine review fixes (planner-merge PR) — size M — todo
+Apply the "Open, repo side" items 1–11 in `~/.cheatproof-autopilot/review-2026-10-18.md` (fail-closed caps and a
+read-only `snapshot()`, `lock.py` output, optional `--now`, CYCLE.md alignment and planner-merge list, `leakcheck.py`,
+a versioned pre-push hook, CLI tests and a Python 3.9 compile step in CI, reviewer model, tracked `results/`, pre-flip
+scan patterns). Every item touches a planner-merge path: open one PR with tests green and the Opus review, then add a
+USER item for the planner to merge. Do T02 first if both are runnable.
+
 ## Milestone: hero path
 
 ### T03 Task loader with gold and empty gates — size M — todo — needs T02
@@ -139,3 +146,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 - **U6 Video voice-over and submission** (2026-10-26 to 2026-10-28).
 - **U7 Disk space for the Docker fallback** (ready 2026-10-18; needed by 2026-10-20 if U3 is still pending): free at
   least 30 GB on the Mac (16 GB free on Oct 18) and start Docker Desktop once. Routines cannot delete images or files.
+- **U8 Routine folder and permission mode** (ready 2026-10-18): Claude app → Scheduled → **Cheatproof autopilot** →
+  edit: set the folder to `/Users/manish/Documents/Nebius_X_Nvidia/cheatproof` and the permission mode to **Bypass**,
+  then save. Until then runs start in the parent folder in auto mode, so the repo's connector guard does not load
+  and a run may stop on a refused step. Then tell the lead "U8 done".
