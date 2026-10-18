@@ -4,8 +4,8 @@ import httpx
 import openai
 import pytest
 
-from twindiff.budget import Budget, BudgetExceeded, Price
-from twindiff.llm import GuardedLLM
+from cheatproof.budget import Budget, BudgetExceeded, Price
+from cheatproof.llm import GuardedLLM
 
 PRICE = Price(input_per_m=1.0, output_per_m=2.0)
 
@@ -141,7 +141,7 @@ def test_server_error_keeps_worst_case_reservation(tmp_path):
 
 
 def test_tools_count_toward_input_estimate():
-    from twindiff.llm import estimate_tokens
+    from cheatproof.llm import estimate_tokens
 
     tools = [{"type": "function", "function": {"name": "read_file", "description": "x" * 300}}]
     assert estimate_tokens([], tools) > estimate_tokens([]) + 90
@@ -154,3 +154,38 @@ def test_ledger_path_must_be_absolute(monkeypatch):
     monkeypatch.delenv("SPEND_LEDGER")
     with pytest.raises(BudgetExceeded, match="absolute"):
         Budget.from_env()
+
+
+def test_parallel_sandbox_reservations_never_pass_the_run_cap(tmp_path):
+    # Each reservation opens its own lock file handle, so threads contend like separate processes.
+    from concurrent.futures import ThreadPoolExecutor
+
+    b = make_budget(tmp_path, total=10, daily=10, runs=5, run_usd=0.01)
+
+    def try_run(_):
+        try:
+            b.reserve_sandbox_run()
+            return True
+        except BudgetExceeded:
+            return False
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(pool.map(try_run, range(40)))
+    assert sum(results) == 5
+    assert b.snapshot()["sandbox_runs"] == 5
+    assert b.snapshot()["total_usd"] == pytest.approx(0.05)
+
+
+def test_sandbox_run_returns_hold_and_halt_wins_over_run_cap(tmp_path):
+    b = make_budget(tmp_path, runs=0, run_usd=0.01)
+    b.halt("test")
+    with pytest.raises(BudgetExceeded, match="halted"):
+        b.reserve_sandbox_run()
+    ok = make_budget(tmp_path / "other", runs=1, run_usd=0.01)
+    assert ok.reserve_sandbox_run().usd == pytest.approx(0.01)
+
+
+def test_default_total_cap_is_the_one_documented_number(monkeypatch, tmp_path):
+    monkeypatch.setenv("SPEND_LEDGER", str(tmp_path / "ledger.json"))
+    monkeypatch.delenv("SPEND_CAP_USD", raising=False)
+    assert Budget.from_env().total_cap_usd == 20.0

@@ -30,6 +30,9 @@ class Price:
         return (input_tokens * self.input_per_m + output_tokens * self.output_per_m) / 1_000_000
 
 
+# The one total spend cap in USD (the account has about $25 of credits). Only the owner changes it.
+DEFAULT_SPEND_CAP_USD = 20.0
+
 # VERIFY: deliberately high until real Token Factory prices are recorded via MODEL_PRICES_JSON.
 DEFAULT_PRICE = Price(input_per_m=3.0, output_per_m=10.0)
 
@@ -76,7 +79,7 @@ class Budget:
         prices = {model: Price(float(p[0]), float(p[1])) for model, p in raw.items()}
         return cls(
             ledger=_ledger_path(),
-            total_cap_usd=float(os.environ.get("SPEND_CAP_USD", "20")),
+            total_cap_usd=float(os.environ.get("SPEND_CAP_USD", DEFAULT_SPEND_CAP_USD)),
             daily_cap_usd=float(os.environ.get("DAILY_CAP_USD", "4")),
             sandbox_run_cap=int(os.environ.get("SANDBOX_RUN_CAP", "250")),
             prices=prices,
@@ -106,19 +109,21 @@ class Budget:
         return self._reserve_usd(model, self.price(model).cost(input_tokens, max_output_tokens))
 
     def _reserve_usd(self, model: str, worst: float) -> Hold:
-        day = date.today().isoformat()
         with self._locked() as s:
-            if s["halted"]:
-                raise BudgetExceeded(f"budget halted: {s['halted']}")
-            if s["total_usd"] + worst > self.total_cap_usd:
-                raise BudgetExceeded(
-                    f"total cap ${self.total_cap_usd:.2f} reached (spent ${s['total_usd']:.4f})"
-                )
-            today = s["days"].get(day, 0.0)
-            if today + worst > self.daily_cap_usd:
-                raise BudgetExceeded(f"daily cap ${self.daily_cap_usd:.2f} reached (today ${today:.4f})")
-            s["total_usd"] += worst
-            s["days"][day] = today + worst
+            return self._charge(s, model, worst)
+
+    def _charge(self, s: dict, model: str, worst: float) -> Hold:
+        # Caller holds the ledger lock, so the checks and the booking are one atomic step.
+        day = date.today().isoformat()
+        if s["halted"]:
+            raise BudgetExceeded(f"budget halted: {s['halted']}")
+        if s["total_usd"] + worst > self.total_cap_usd:
+            raise BudgetExceeded(f"total cap ${self.total_cap_usd:.2f} reached (spent ${s['total_usd']:.4f})")
+        today = s["days"].get(day, 0.0)
+        if today + worst > self.daily_cap_usd:
+            raise BudgetExceeded(f"daily cap ${self.daily_cap_usd:.2f} reached (today ${today:.4f})")
+        s["total_usd"] += worst
+        s["days"][day] = today + worst
         return Hold(model, worst, day)
 
     def settle(self, hold: Hold, input_tokens: int, output_tokens: int) -> float:
@@ -129,14 +134,17 @@ class Budget:
             s["days"][hold.day] = max(0.0, s["days"].get(hold.day, 0.0) + delta)
         return actual
 
-    def reserve_sandbox_run(self) -> None:
+    def reserve_sandbox_run(self) -> Hold:
+        # One lock for the run cap, the money caps, the halt flag and both counters, so parallel
+        # processes cannot all pass the checks and then overshoot. The run's cost stays booked.
         with self._locked() as s:
+            if s["halted"]:
+                raise BudgetExceeded(f"budget halted: {s['halted']}")
             if s["sandbox_runs"] >= self.sandbox_run_cap:
                 raise BudgetExceeded(f"sandbox run cap {self.sandbox_run_cap} reached")
-        # Money caps and the halt flag are checked in _reserve_usd; the run's cost stays booked.
-        self._reserve_usd("sandbox-run", self.sandbox_run_usd)
-        with self._locked() as s:
+            hold = self._charge(s, "sandbox-run", self.sandbox_run_usd)
             s["sandbox_runs"] += 1
+        return hold
 
     def halt(self, reason: str) -> None:
         """Stop all paid calls until a person clears `halted` in the ledger file."""

@@ -1,0 +1,51 @@
+# ADR 0002: execution model (Token Factory Sandboxes, local Docker as fallback)
+
+**Status:** accepted, 2026-10-18. Facts marked `VERIFY` are confirmed by T02 with recorded fixtures. The final
+executor is chosen at the go/no-go on 2026-10-21.
+
+## Context
+Cheatproof runs untrusted code on purpose: a dishonest agent gets a shell inside each SWE environment, and the gold,
+empty and attacker gates run the task's tests. That code must never run on the host. Every model call must go
+through Token Factory (hard requirement), and every paid action through `cheatproof/budget.py` (ADR 0001).
+
+Known on 2026-10-18:
+- **Token Factory Sandboxes** (beta): access is gated (U3). Checkpoints and branches, about 7,000 preloaded SWE
+  environments, 50 concurrent operations, root inside the VM, networking only on or off, only stdout and stderr
+  captured. Per-run price is not documented. SDK: `contree-sdk` 0.3.6. `VERIFY`: networking flag, file upload,
+  checkpoint and branch calls, timeout, preloaded image naming, cost per run.
+- **The dev machine** is an arm64 Mac with Docker installed but the daemon stopped, and 16 GB of free disk. SWE-bench
+  and SWE-rebench images are linux/amd64 (`VERIFY`), so they run under emulation, slower, and each image is about
+  1–3 GB (`VERIFY`). Routines cannot remove images (`docker rmi` is denied), so disk only shrinks.
+
+## Decision
+One executor interface in `cheatproof/executor.py`, chosen by `EXECUTOR=sandbox|docker`:
+
+```
+start(env) -> Session      # from a task image (Sandboxes: a checkpoint)
+Session.run(cmd, timeout) -> Result(exit_code, stdout, stderr, duration)
+Session.write_file(path, data)
+Session.diff() -> str      # files changed since start
+Session.reset()            # back to the start state (Sandboxes: a new branch)
+Session.close()
+```
+
+1. **Primary: Token Factory Sandboxes.** One checkpoint per task after setup; the attacker, the gold gate and the
+   empty gate each run on their own branch; each hardening patch gets its own branch. Network off by default.
+2. **Fallback: local Docker.** `docker run --rm --network none` with CPU, memory and time limits and no host mounts
+   except a scratch directory. A fresh container replaces each branch. Guards in code: free disk at least
+   `MIN_FREE_DISK_GB` (10) before a pull, at most `DOCKER_IMAGE_CAP` (6) distinct images, small pure-Python images
+   first. With 16 GB free, the Docker fallback covers a subset, not all 40 tasks, until the owner frees disk (U7).
+3. Every session start calls `budget.reserve_sandbox_run()` on both backends, so the run cap and the money caps
+   apply the same way. All model calls go through `cheatproof/llm.py` on either backend.
+4. The network-fetch attack is the only experiment that turns network on; it runs on its own branch or container.
+
+## Options considered
+- **GitHub Actions runners as a remote Docker host** (x86_64, about 14 GB disk, free minutes): native images and no
+  local disk pressure, but the Nebius key would have to live in a repository secret and private-repo minutes are
+  limited. Not chosen; the owner may revisit if both Sandboxes and local disk fail.
+- **Sandboxes only:** the best story ("native to Nebius"), but access is gated and the timeline is unknown.
+
+## Consequences
+- Switching backends is a config flag, so the go/no-go can pick whichever works on Oct 21.
+- With Docker only, the pitch says "Sandbox-ready" honestly and loses the preloaded-environment claim.
+- Results always record which executor produced them.
