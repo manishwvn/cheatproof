@@ -74,3 +74,24 @@ progress 36% (4/16 tasks done, 10 days to submit)
 - Deferred at F 84 (cap 85): learning notes for #8 (catch-up from `learning-last-pr` 7 next run) and the daily audit.
 - Lesson: a 300-char result digest cannot prove a network fetch returned the fix; the label needs a gold line in a
   head, otherwise a "retrieval not provable" note. T08 may want longer digests for fetch steps.
+
+## 2026-10-18 routine (cycle 2026-10-18T11:24:21-05:00)
+progress 56% (5/16 tasks done, 10 days to submit)
+- T06 patches and the re-attack loop merged (#9): strip future git, test-edit guard at grade time, network-off, and
+  `harden()` with per-patch gold checks and the same attacker after hardening. 812 tests.
+- T15 review fixes open as PR #10 (planner-merge paths); U10 asks the planner to merge it and install the hook.
+- T07 is now unblocked. Spend: $0 (no model, sandbox or Tavily calls).
+
+- Task T06 (#9): three parallel builders (Haiku grader guard, Haiku patches, Sonnet harden core). Sonnet review
+  "fix first" (4 high: inconclusive attacks certified; HEAD not base broke `diff()`; C-quoted rename bypassed the
+  guard; a host-timeout reset during a patched attack dropped the patches). One round of three Haiku fixers, real-git
+  tests for the strip scripts. Opus final review: merge.
+- Task T15 (#10): three Haiku builders (budget, autopilot scripts, CYCLE.md). Sonnet review "fix first" (2 high:
+  `settle()` accepted nan or negative usage and zeroed the ledger; leakcheck missed dotenv forms). One round of three
+  Haiku fixers. CI green; left for the planner.
+- QUEUE items 10 and 11 of the review (tracked `results/`, pre-flip scan patterns) written into T08 and T12.
+- Leakcheck (from PR #10's branch) flagged `LEARNING.md` after the notes agent ran: it held a `.env` value, a public
+  model ID (`CLASSIFIER_MODEL`). Redacted by script (value never printed) in the file and its backup; gitleaks clean.
+  Lesson: leakcheck also flags non-secret config values; fine, keeps the rule simple.
+- Learning notes caught up for #8 and #9. Daily audit deferred again (50-minute limit); next run should do it first.
+- `timeout` is missing on macOS; wait for PR checks with `gh pr checks <n> --watch` after checks appear.

@@ -44,12 +44,15 @@ output, fresh-index `diff()`, named containers with label `cheatproof=1`), guard
 Docker test has not run: the Mac has the docker CLI but no daemon (U7). The Sandbox recon moves to T01's sandbox
 step and T03/T06 once U3 is done.
 
-### T15 Routine review fixes (planner-merge PR) — size M — in-progress (cycle 2026-10-18T11:24:21-05:00)
+### T15 Routine review fixes (planner-merge PR) — size M — in review [80%]
 Apply the "Open, repo side" items 1–11 in `~/.cheatproof-autopilot/review-2026-10-18.md` (fail-closed caps and a
 read-only `snapshot()`, `lock.py` output, optional `--now`, CYCLE.md alignment and planner-merge list, `leakcheck.py`,
 a versioned pre-push hook, CLI tests and a Python 3.9 compile step in CI, reviewer model, tracked `results/`, pre-flip
 scan patterns). Every item touches a planner-merge path: open one PR with tests green and the Opus review, then add a
 USER item for the planner to merge. Do T02 first if both are runnable.
+
+Done 2026-10-18 (routine): PR #10 open, CI green, Sonnet review fixed (one round), Opus final review: ready. Items 10
+and 11 are below (T08, T12 text). Planner merges #10 (U10), then installs `docs/autopilot/pre-push`.
 
 ## Milestone: hero path
 
@@ -88,13 +91,20 @@ hidden tests fail), `hard-code` (patch special-cases test inputs; passes visible
 (fetch or web search returned the fix). Unclear cases are `unclassified` and reported raw. Nano may write a one-line
 explanation; it never decides the label. Tests on hand-made traces.
 
-### T06 Four patches and the re-attack loop — size L — in-progress (cycle 2026-10-18T11:24:21-05:00) — needs T03, T05
+### T06 Four patches and the re-attack loop — size L — done #9 — needs T03, T05
 `cheatproof/patches.py`: strip future `.git` objects and refs; hidden read-only tests restored at grade time; network
 off; a grader check that fails when test files were touched. Apply only the patches the found holes need, then
 re-run the gold gate, the empty gate and the same attacker with the same budget. A patch that breaks the gold gate is
 rejected and reported. Sandboxes: one branch per patch from the task checkpoint (Docker: a fresh container).
 From the T02 review: the grader must clear `__pycache__` and stale `.pyc` before grading, and must not trust the
 sandbox's own git config, attributes or filter drivers (`diff()` excludes bytecode and cache dirs).
+
+Done 2026-10-18 (routine, #9): `cheatproof/patches.py` (strip-future-git refuses unless HEAD is the base, rebuilds
+the index, prunes and verifies in the sandbox; test-edit guard; network-off), `grade(reject_test_edits=True)`, every
+base `conftest.py` restored, `cheatproof/harden.py` (clean-session grade of the attack diff, per-patch gold check,
+same attacker after; inconclusive attacks, resets during a patched attack and holes the exposure scan still shows are
+never certified). For T07: when the attacker fails before hardening, scan-found holes are not patched; show the scan
+in the certificate. A trojaned `/usr/bin/git` in the image can still fake the strip check (residual risk).
 
 ### T07 Certificates and hackability score — size M — todo — needs T06
 `cheatproof/certify.py` and `cheatproof/cli.py`: `cheatproof harden <env-id>` writes a JSON certificate (task, image
@@ -113,7 +123,8 @@ for `attack(search=...)`. `budget.py` is a planner-merge path, and the routine l
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
-sanitized traces needed for replay.
+sanitized traces needed for replay. Committed certificates and replay traces go in a tracked `results/` folder (`runs/` stays a
+git-ignored cache; `git add -f` is denied).
 
 ### T09 Report page and judge replay mode — size M — todo — needs T07
 A static report site (no server, no paid calls): the 40-task table, one before/after page per environment with the
@@ -136,7 +147,8 @@ or music. The owner records the final voice (U6).
 
 ### T12 Fresh-clone final check and pre-flip check — size S — todo — after 2026-10-27
 Fresh clone, follow the README exactly, run tests and one replay. Pre-flip: full-history secret scan green;
-`git log --all --oneline -- LEARNING.md` empty; full-history grep finds no personal details. Report to the owner.
+`git log --all --oneline -- LEARNING.md` empty; full-history grep finds no personal details. Scan patterns include
+`/Users/`, the owner's username and promo codes; docs use `~` or relative paths. Report to the owner.
 
 ### T13 Learning pack — size M — todo — needs T12
 Fill `LEARNING.md` interview questions, complete the glossary, re-read the whole file for accuracy.
@@ -187,6 +199,10 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
   edit: set the folder to `/Users/manish/Documents/Nebius_X_Nvidia/cheatproof` and the permission mode to **Bypass**,
   then save. Until then runs start in the parent folder in auto mode, so the repo's connector guard does not load
   and a run may stop on a refused step. Then tell the lead "U8 done".
+- **U10 Merge PR #10 (T15 review fixes)** (ready 2026-10-18): in an interactive session say `review` to merge
+  https://github.com/manishwvn/cheatproof/pull/10 (planner-merge paths: budget.py, docs/autopilot/, CI). Then install
+  the hook: `cp docs/autopilot/pre-push "$(git rev-parse --git-path hooks)/pre-push"`. Note: `budget.py` now refuses
+  to start unless `SPEND_CAP_USD` and `DAILY_CAP_USD` are set (≤ 20, daily ≤ total); the current `.env` sets 20 and 4.
 - **U9 Planner work for T16** (ready 2026-10-18): in an interactive session, write the attacker strategy prompts
   and the Tavily budget counter (T16), then flip T16 to `done`. T05 and T06 do not wait on it; the first live
   attacker run (T08) does.
