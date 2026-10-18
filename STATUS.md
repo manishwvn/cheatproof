@@ -11,6 +11,6 @@
   attacker on fakes.
 - **Owner blockers:** U3 (Sandboxes access), U7 (disk space for the Docker fallback: 16 GB free). U1 done
   2026-10-18: promo applied, key in `.env`, caps 20/4.
-- **Risk:** the Oct 21 go/no-go needs live attacker runs, so it slips if U1 is not done by Oct 20.
+- **Risk:** the Oct 21 go/no-go needs live attacker runs; T02–T04 must land by Oct 20.
 - **Routine:** `cheatproof-autopilot`, hourly at about :23, state in `~/.cheatproof-autopilot/` (see
   `docs/autopilot/CYCLE.md`). Owner item U8: set its folder to the repo and mode to Bypass. Review fixes queued as T15.
