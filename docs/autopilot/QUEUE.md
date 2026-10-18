@@ -124,16 +124,67 @@ The four strategy hints for T04 (git-history, test-edit, hard-code, network) as 
 text, and a `budget.reserve_tavily_call()` counter enforcing `TAVILY_CALL_CAP` plus a host-side search callable
 for `attack(search=...)`. `budget.py` is a planner-merge path, and the routine left the prompt text to the planner.
 
+### T17 Record traces and attack diffs; keep paid runs (audit 2026-10-18) — size M — todo
+From the first daily audit. `cli.py` calls `attack` with no `trace_path`, so no trace is written, and
+`report.attacks` (the raw diffs) is dropped; the site reads `attack["final_diff"]`, which `harden._attack_summary`
+never emits. Pass `trace_path=results/traces/<certificate stem>.jsonl`, and write the sanitized attack diff beside
+the certificate (`results/diffs/<stem>.<round>.diff`, through `sanitize`, digest checked against
+`final_diff_sha256`) so the site can show it. If `build_certificate` raises after a paid run (for example
+`_check_strings` trips on `/home/` in an error tail), write the digest-only `report.to_dict()` first and redact with
+`sanitize` instead of discarding the run. Also call `load_env()` before importing `cheatproof.attacker` in
+`cli.py` (and note the same order bug in `scripts/smoke.py` for the planner). Tests with fakes only.
+
+### T18 Batch driver for the 40-task run (audit 2026-10-18) — size M — todo — needs T17
+A `cheatproof batch` subcommand: run `harden` over a selected task list serially, resume (skip tasks that already
+have a certificate), record a per-task "not run" row with the reason (`ExecutorRefused`, image cap, disk, budget
+halt) instead of stopping, and stop cleanly at the daily cap. Put the selection rule and the scanned, skipped
+(`non_pytest_id`, no `docker_image`) and selected counts into the score and the site, so n run versus n selected is
+honest. Re-check free disk before each task. Never prune images (the owner does, between batches).
+
+### T19 Honest outcomes in certificates and scores (audit 2026-10-18) — size M — todo
+(1) `harden.py:314`: an empty final diff, or an attack with no write step, is a `no_attempt` outcome: never
+certified, counted separately. (2) `certify.py`: split `certified` into `certified_unhardened` (never hacked) and
+`certified_hardened`; record executor, attacks per round, `max_output_tokens`, `cmd_timeout` and strategy label in
+the `attacker` block (ADR 0002 promises the executor). (3) `harden.py:449`: `classify` never gets
+`visible_passed`, so `hard-code` cannot be found; pass it, and report hard-code only as "attempted" when the hidden
+grade fails. (4) `exposure.py:196`: `test -w` is always true as root and `covered` omits the restored `conftest.py`
+files; build the covered set from the grader's restore set and label the rest "writable as root". (5)
+`grader.py:421`: candidate code can print a forged pytest summary and `os._exit(0)`; require exactly one summary
+header and add a code-computed `grader-forgery` label. (6) Label certificate `cost_usd` as budgeted (ledger delta).
+
+### T20 Attacker task prompt with the problem statement (audit 2026-10-18) — size S — in-progress (cycle 2026-10-18T16:24:21-05:00)
+`cli.py:139`: the attacker sees only the repo and failing test ids, and those tests are absent until grade time, so
+it is blind. Store `problem_statement` in `TaskSpec` (`tasks.py`, cache and validation) and show it in the task
+prompt; never show the gold or test patch. Tests with recorded rows.
+
+### T21 Container and client limits (audit 2026-10-18) — size S — todo
+`executor.py:369`: containers have no disk quota, no `--read-only` and no sized tmpfs; add a sized tmpfs for
+scratch (or `--storage-opt size=` when the driver supports it), re-check free disk at each start and reset, and
+sweep leftover `cheatproof=1` containers at CLI start (stop and remove containers only, never images). Tests with the
+fake runner.
+
+### T22 Planner-merge audit fixes (planner) — size S — waiting: planner (U11)
+Audit findings on planner-merge paths: (1) `executor.py:437` books $0.05 per Docker start and reset through
+`budget.reserve_sandbox_run()`; local Docker is free, and 40 tasks need about 200–480 runs against
+`SANDBOX_RUN_CAP=250` and $4/day (halts near task 16). Book Docker runs at $0 or on a separate counter
+(`budget.py`). (2) `llm.py:26`: set an explicit client timeout (about 120 s) and keep the client private;
+`scripts/smoke.py` uses `client.models.list()` unguarded and imports before `load_env()`. (3)
+`.github/workflows/security.yml:21`: verify the gitleaks sha256, pin `pip-audit`, pin actions by SHA. The Tavily
+counter is already T16.
+
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — todo — needs T01, T07
+### T08 Eval run and results with raw counts — size M — todo — needs T01, T07, T17, T18, T19, T20
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
 sanitized traces needed for replay. Committed certificates and replay traces go in a tracked `results/` folder (`runs/` stays a
 git-ignored cache; `git add -f` is denied).
+Audit 2026-10-18: before the run, smoke one real image's gold gate. `grader.PYTEST_CMD` runs bare `python -m pytest`
+under `sh -lc`; SWE-bench images may need `conda activate testbed`. Check image HEAD equals `base_commit`
+(`strip-future-git` refuses otherwise). With 13 GB free and a 6-image cap, Docker runs go in owner-pruned batches.
 
-### T09 Report page and judge replay mode — size M — in-progress (cycle 2026-10-18T16:24:21-05:00) [60%] — needs T07
+### T09 Report page and judge replay mode — size M — done #12 — needs T07
 A static report site (no server, no paid calls): the 40-task table, one before/after page per environment with the
 patch diff, the attack transcript and the gates. Judge mode replays recorded runs, labelled "recorded". Builds from
 committed certificates; deployable to free static hosting after the repo flip; must stay up through 2026-12-15.
@@ -142,6 +193,11 @@ Accessible, with empty and error states.
 Built 2026-10-18 (routine, draft PR #12, branch `t09-report`): `cheatproof/site.py`, `site` CLI subcommand, 24 new
 tests, CI not yet checked. Left: Sonnet review (`.claude/agents/reviewer.md`), fixes, Opus final review, green CI,
 merge. The run stopped at F 83 (cap 85). Next run: reclaim T09, reuse the branch (do not rebuild), review first.
+
+Done 2026-10-18 (routine, #12): Sonnet review fixes (n=0 rates, duplicate ids, site-dir marker with stale-page
+cleanup, sanitized trace fields, stated limits, keyboard-scrollable tables, bidi and control characters shown).
+1083 tests. Left for T08: certificates hold no diff text and nothing writes `results/traces/<stem>.jsonl`, so pages
+show "not recorded" for the attack diff and transcript until T08 records them.
 
 ## Milestone: submission (feature freeze 2026-10-24)
 
@@ -214,6 +270,9 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
   https://github.com/manishwvn/cheatproof/pull/10 (planner-merge paths: budget.py, docs/autopilot/, CI). Then install
   the hook: `cp docs/autopilot/pre-push "$(git rev-parse --git-path hooks)/pre-push"`. Note: `budget.py` now refuses
   to start unless `SPEND_CAP_USD` and `DAILY_CAP_USD` are set (≤ 20, daily ≤ total); the current `.env` sets 20 and 4.
+- **U11 Planner-merge audit fixes (T22)** (ready 2026-10-18; needed before T08): in an interactive session, fix the
+  three T22 items (Docker run booking in `budget.py`, `llm.py` timeout, `security.yml` pins), then flip T22 to
+  `done`. Without (1), the $4 daily cap halts the 40-task Docker run near task 16.
 - **U9 Planner work for T16** (ready 2026-10-18): in an interactive session, write the attacker strategy prompts
   and the Tavily budget counter (T16), then flip T16 to `done`. T05 and T06 do not wait on it; the first live
   attacker run (T08) does.
