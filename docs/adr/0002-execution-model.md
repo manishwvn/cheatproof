@@ -49,3 +49,20 @@ Session.close()
 - Switching backends is a config flag, so the go/no-go can pick whichever works on Oct 21.
 - With Docker only, the pitch says "Sandbox-ready" honestly and loses the preloaded-environment claim.
 - Results always record which executor produced them.
+
+## Implementation (T02)
+`cheatproof/executor.py` holds the interface (`EnvSpec`, `Result`, `Session`, `Executor`, `start()`), the local
+Docker backend and the Sandboxes stub, which raises `ExecutorUnavailable("Sandboxes access pending (U3)")` and
+imports no `contree_sdk`. `EXECUTOR` (`docker` default, or `sandbox`) picks the backend. `EnvSpec.image` must match
+`[A-Za-z0-9][A-Za-z0-9_./:@-]*`, and docker receives it after `--`. Each container is named `cheatproof-<uuid>`,
+labelled `cheatproof=1`, and runs with `--cap-drop ALL`, no swap and `nofile=1024`. A failed start removes it;
+`close()` and `reset()` raise if `docker rm -f` fails, other than "No such container", and keep the name for a retry.
+`MIN_FREE_DISK_GB` (default 10) and `DOCKER_IMAGE_CAP` (default 6) guard only a new image pull and refuse without
+deleting anything; unusable values fall back to the defaults. The host reads each stream through a pipe up to 64 KiB
+plus 4 KiB; past that it kills the client and marks the result `truncated`. `Session.diff()` builds the patch from a
+fresh index read from the start commit (`add -A -f`, `--no-replace-objects`, no system git config, no external diff
+or textconv), so a replace ref, assume-unchanged bit or commit made in the sandbox cannot hide a change. It raises
+above 8 MiB instead of truncating. `run()` caps the timeout at 1800 s and wraps the command in `timeout -s KILL` when
+the image has it. If the host must kill `docker exec` (10 s after that timeout), the result is `timed_out` and the
+sandbox is reset: the container and every process in it are removed, and files written earlier in the session are
+lost. Sandbox VERIFY items stay open until U3.
