@@ -49,3 +49,12 @@ Session.close()
 - Switching backends is a config flag, so the go/no-go can pick whichever works on Oct 21.
 - With Docker only, the pitch says "Sandbox-ready" honestly and loses the preloaded-environment claim.
 - Results always record which executor produced them.
+
+## Implementation (T02)
+`cheatproof/executor.py` holds the interface (`EnvSpec`, `Result`, `Session`, `Executor`, `start()`), the local
+Docker backend and the Sandboxes stub, which raises `ExecutorUnavailable("Sandboxes access pending (U3)")` and
+imports no `contree_sdk`. `EXECUTOR` (`docker` default, or `sandbox`) picks the backend. `MIN_FREE_DISK_GB`
+(default 10) and `DOCKER_IMAGE_CAP` (default 6) guard only a new image pull and refuse without deleting anything.
+`Session.diff()` runs `git add -A` and diffs the index against the commit recorded at start, so a commit made in
+the sandbox cannot hide changes. A host-side timeout kills only the `docker exec` client; `reset()` or `close()`
+removes the container and everything in it. Sandbox VERIFY items stay open until U3.
