@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from twindiff.budget import Budget
-from twindiff.llm import GuardedLLM
+from cheatproof.budget import Budget
+from cheatproof.llm import GuardedLLM
 
 budget = Budget.from_env()
 llm = GuardedLLM(budget)
@@ -24,9 +24,9 @@ def list_nvidia_models() -> list[str]:
     return nvidia
 
 
-def call_triage_model() -> None:
-    model = os.environ.get("TRIAGE_MODEL", "nvidia/Nemotron-3-Nano-30B-A3B")
-    resp = llm.chat(model, [{"role": "user", "content": "Reply with exactly: twin-diff ok"}], max_tokens=64)
+def call_cheap_model() -> None:
+    model = os.environ.get("CLASSIFIER_MODEL", "nvidia/Nemotron-3-Nano-30B-A3B")
+    resp = llm.chat(model, [{"role": "user", "content": "Reply with exactly: cheatproof ok"}], max_tokens=64)
     print(f"{model}: {resp.choices[0].message.content!r} usage={resp.usage}")
 
 
@@ -41,7 +41,7 @@ async def sandbox_hello() -> None:
 
 if __name__ == "__main__":
     list_nvidia_models()
-    call_triage_model()
+    call_cheap_model()
     if os.environ.get("NEBIUS_PROJECT_ID"):
         asyncio.run(sandbox_hello())
     else:

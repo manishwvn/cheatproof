@@ -35,6 +35,8 @@ Full research is in `/Users/manish/Documents/Nebius_X_Nvidia/research/` (outside
   budget in a window is wasted, so keep the routine busy.
 
 ## First tasks for the new session (in order)
+
+**All six done 2026-10-18** (PR `chore/setup-cheatproof`; see STATUS.md and LOG.md). Kept below as history.
 1. ~~Rename~~ done 2026-10-18: GitHub repo `manishwvn/cheatproof`, local folder `/Users/manish/Documents/Nebius_X_Nvidia/cheatproof`, state folder `~/.cheatproof-autopilot`, guard allow file updated. Still to do: replace `twin-diff`/`twindiff` names inside files.
 2. Rewrite CLAUDE.md, STATUS.md, PLAN.md, docs/prize-fit.md (kept), docs/pitches.md (replace with the Cheatproof
    pitch) and QUEUE.md (new tasks below), plus ADR 0002 (sandbox or Docker execution model).

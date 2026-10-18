@@ -6,10 +6,12 @@
 card is auto-charged at month start or at a billing threshold. The project must stay inside free credits, including
 during public judging (Dec 1–15) when anyone can trigger runs.
 
-**Decision.** Every paid call goes through `twindiff/budget.py`:
+**Decision.** Every paid call goes through `cheatproof/budget.py`:
 - It reserves the worst-case cost (estimated input × price, plus `max_tokens` × price) before calling, and settles
   the real cost from `usage` after.
-- Total, daily and sandbox-run caps are checked against a file-locked JSON ledger shared by all processes.
+- Total, daily and sandbox-run caps are checked against a file-locked JSON ledger shared by all processes. The
+  one total cap is **$20** (`SPEND_CAP_USD`, default in `budget.py`) against about $25 of credits; the daily cap
+  is $4. A sandbox run checks the halt flag, the run cap and the money caps and books itself under one lock.
 - HTTP 402 halts all paid calls until a person clears the flag.
 - Unknown models are priced high ($3/$10 per 1M), and failed calls still count their prompt cost.
 - Output size is bounded (`MAX_OUTPUT_TOKENS`).

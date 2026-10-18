@@ -48,10 +48,13 @@ OFAC-sanctioned places. Also excludes employees, families and households of the 
 ## Sponsor tools
 - Token Factory: OpenAI-compatible, `https://api.tokenfactory.nebius.com/v1/`. A card is required to set up billing.
   The balance is prepaid via top-up, but it can go negative, and the card is auto-charged at month start or at a
-  "configured billing threshold". There is no documented hard spend cap, so the in-app cap in `twindiff/budget.py`
-  is mandatory.
-- Credits: $25 via code `NEBIUS-DEVPOST-GLOBAL26` (balance → Top up → With promo code), plus $25 via the Nebius
-  Builders Program (expires 90 days after issue). Tavily promo `BBDEVPOST`.
+  "configured billing threshold". There is no documented hard spend cap, so the in-app cap in `cheatproof/budget.py`
+  ($20 total) is mandatory.
+- Credits: $25 via the activation code `NEBIUS-DEVPOST-GLOBAL26`, entered on the promo form opened through the Devpost
+  Resources page link (event code `2026-devpost-global-ai-hack`; the bare https://nebius.com/promo-code URL errors with
+  "no event name found"). The form emails the real promo code (then Balance → Top up → With promo code). A new
+  account starts with a $1 trial balance. The Nebius Builders Program may add $25
+  (expires 90 days after issue; unreliable, so the plan assumes $25). Tavily promo `BBDEVPOST`.
 - Sandboxes (beta): access via `tokenfactory.nebius.com/sandboxes/about` or contree@nebius.com. 50 concurrent ops.
   Networking can only be on or off. Only stdout/stderr are captured. Root in the VM. Per-run price not documented.
 - Post-training does not support Nemotron models.
