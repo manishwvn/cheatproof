@@ -12,8 +12,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --locked
-      - name: Autopilot scripts must compile on Python 3.9 (the system python3 runs them)
-        run: uv run --python 3.9 --no-project python -m py_compile docs/autopilot/lock.py docs/autopilot/next_run.py docs/autopilot/progress.py docs/autopilot/leakcheck.py
+      - name: Autopilot scripts must compile and run on Python 3.9 (the system python3 runs them)
+        run: |
+          for f in docs/autopilot/*.py; do uv run --python 3.9 --no-project python -m py_compile "$f"; done
+          uv run --python 3.9 --no-project python docs/autopilot/lock.py --help
+          uv run --python 3.9 --no-project python docs/autopilot/next_run.py --help
+          uv run --python 3.9 --no-project python docs/autopilot/leakcheck.py --help
+          uv run --python 3.9 --no-project python docs/autopilot/progress.py
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q

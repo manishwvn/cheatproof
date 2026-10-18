@@ -16,7 +16,7 @@ apart, so 30 minutes from both is impossible). Never read or touch the other pro
 - No secrets in output, logs, fixtures or commits. Never print a key; check presence by length only. Never open
   `.env` (scripts load it themselves).
 - No passwords, no public actions (posts, visibility, submissions), no new connectors, no account or settings changes.
-- No installs except `uv sync --locked` (and `uv sync` in a new worktree). A missing tool becomes a USER item.
+- No installs except `uv sync --locked`. A missing tool becomes a USER item.
 - Never open other entrants' repos, sites or demos. Never read files outside the repo, its worktrees and `S`. Never
   touch other projects, their worktrees, state folders or scheduled tasks.
 - Keep the owner's personal details out of everything.
@@ -30,7 +30,10 @@ apart, so 30 minutes from both is impossible). Never read or touch the other pro
 - Never `git restore`, `git checkout -- <file>`, `git reset --hard`, `git clean` or force-push. Direct pushes to
   `main` may change only `docs/autopilot/QUEUE.md`, `docs/autopilot/LOG.md` and `STATUS.md` (claims, done marks,
   logs); everything else goes through a PR. The versioned hook `docs/autopilot/pre-push`, installed by the planner,
-  enforces this rule.
+  is client-side, so it enforces this rule only together with these: never `git push --no-verify`, never change
+  `core.hooksPath`. At cycle start check the installed hook matches the versioned one:
+  `cmp -s docs/autopilot/pre-push "$(git rev-parse --git-path hooks)/pre-push"`. If it differs or is missing, add a
+  `## USER` item for the planner to install it (routines do not install hooks) and continue with extra care.
 
 ## 0.1 Wake gate and pause (done by the routine prompt before this file is read)
 The routine's first tool call is `python3 docs/autopilot/next_run.py --gate ~/.cheatproof-autopilot/next-wake`; exit 3
@@ -73,8 +76,8 @@ override when `weekly-cap` holds one; `--runnable` counts tasks whose status is 
    when its status is `todo`, its `after` date has passed and every id in `needs` is `done`.
 4. Claim the task on `main`: status `in-progress (cycle <START>)`, commit `chore: claim <id>`, push. Never start a
    task that a live cycle claimed. A claim from a cycle whose lock is gone is stale: reclaim it and say so in LOG.md.
-5. Build in a worktree: `git worktree add ../cheatproof-wt/<branch> -b <branch> origin/main`, then `uv sync` inside
-   it. **Model routing (owner rule, 2026-10-18; saves the Opus limit):** Opus (this session) only orchestrates (splits
+5. Build in a worktree: `git worktree add ../cheatproof-wt/<branch> -b <branch> origin/main`, then `uv sync --locked`.
+   **Model routing (owner rule, 2026-10-18; saves the Opus limit):** Opus (this session) only orchestrates (splits
    the task, writes each agent's brief, integrates, decides merges) and gives the final independent review; it writes
    no bulk code. Haiku 5.5 does almost everything else: building, tests, docs, lookups, fixes (`model: haiku`, effort
    `xhigh`; `max` allowed for Haiku only, on hard pieces of size L tasks). Sonnet takes what Haiku fails twice, the
@@ -98,12 +101,14 @@ Then run `gh pr checks <n> --watch`.
 Merge only when `uv run pytest -q`, `uv run ruff check .` and `uv run ruff format --check .` pass locally, the
 reviewer's critical and high findings are fixed, and CI checks exist and are all green (wait for checks to appear;
 never merge on pending or zero checks; `gh pr checks <n> --watch`). Order, from the main checkout:
-`git worktree remove ../cheatproof-wt/<branch>`, then `gh pr merge <n> --merge --delete-branch`, then `git pull`.
-Mark the task `done #<PR>` on `main` and update `STATUS.md`.
-**Planner-merge paths:** a PR touching `cheatproof/budget.py`, `cheatproof/llm.py`, `.github/workflows/`, `.claude/`,
-`.gitignore`, `CLAUDE.md`, `AGENTS.md`, `tests/test_budget.py`, `tests/test_autopilot_scripts.py`, `.env.example`,
-`scripts/`, `uv.lock`, all of `pyproject.toml` (not only dependencies), or anything in `docs/autopilot/` other than
-`QUEUE.md` and `LOG.md` is never merged by a routine. Open it, get the Opus final review, then add a `## USER` item:
+`git worktree remove ../cheatproof-wt/<branch>`, then `gh pr merge <n> --merge --delete-branch`, then
+`git pull --ff-only`. Mark the task `done #<PR>` on `main` and update `STATUS.md`.
+**Planner-merge paths:** a PR touching `cheatproof/budget.py`, `cheatproof/llm.py`, `cheatproof/executor.py`
+(containment, sandbox-run cap), `cheatproof/envfile.py`, `cheatproof/sanitize.py`, `.github/workflows/`, `.claude/`,
+`.gitignore`, `CLAUDE.md`, `AGENTS.md`, `tests/test_budget.py`, `tests/test_autopilot_scripts.py`,
+`tests/test_executor.py`, `tests/conftest.py`, `.env.example`, `scripts/`, `uv.lock`, all of `pyproject.toml`
+(not only dependencies), or anything in `docs/autopilot/` other than `QUEUE.md` and `LOG.md` is never merged
+by a routine. Open it, get the Opus final review, then add a `## USER` item:
 "say `review` in an interactive session to merge PR #<n>". A skipped CodeQL job (private repo) counts as passing; any
 other skipped or pending check does not.
 

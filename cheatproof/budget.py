@@ -5,10 +5,12 @@ lives here. Every call reserves its worst-case cost before it runs and settles t
 after. A crash leaves the reservation counted, which errs on the side of spending less. The
 ledger is a JSON file guarded by an OS file lock, so parallel processes share one budget.
 
-Fail closed. Both spend caps and every price must be a finite number above 0, and the sandbox
-run cap a whole number of 0 or more. A missing, empty, nan, inf, zero or negative money value,
-or a bad run cap, raises BudgetExceeded before anything is spent, because a bad value must never
-read as "unlimited". snapshot() only reads the ledger and never writes it.
+Fail closed. The total cap must be a finite number above 0 and at most MAX_TOTAL_CAP_USD. The
+daily cap must be a finite number above 0 and at most the total cap. Every price must be a finite
+number above 0, and the sandbox run cap a whole number of 0 or more. A missing, empty, nan, inf,
+zero, negative or too-large money value, or a bad run cap, raises BudgetExceeded before anything
+is spent, because a bad value must never read as "unlimited". A ledger that does not match this
+shape is refused the same way, never repaired. snapshot() only reads the ledger and never writes it.
 """
 
 from __future__ import annotations
@@ -21,6 +23,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+
+# Hard ceiling on the total cap, matching CLAUDE.md rule 1. Raising it needs a code change.
+MAX_TOTAL_CAP_USD = 20.0
 
 
 class BudgetExceeded(RuntimeError):
@@ -53,10 +58,19 @@ def _positive(name: str, value: object) -> float:
     if not isinstance(value, bool):
         try:
             number = float(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             pass
     if not math.isfinite(number) or number <= 0:
         raise BudgetExceeded(f"{name} must be a finite number above 0 (see .env.example), got {value!r}")
+    return number
+
+
+def _total_cap(value: object) -> float:
+    number = _positive("total cap (SPEND_CAP_USD)", value)
+    if number > MAX_TOTAL_CAP_USD:
+        raise BudgetExceeded(
+            f"total cap (SPEND_CAP_USD) must be at most ${MAX_TOTAL_CAP_USD:g} (see .env.example), got {value!r}"
+        )
     return number
 
 
@@ -77,12 +91,33 @@ def _checked_price(label: str, price: Price) -> Price:
 
 
 def _is_spend(value: object) -> bool:
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        and value >= 0
-    )
+    """A finite number of 0 or more. Bools, strings, nan, inf and oversized ints are not spend."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value) and value >= 0
+    except OverflowError:
+        return False
+
+
+def _tokens(name: str, value: object) -> int:
+    # A whole number of tokens, 0 or more. Floats, bools and negatives are refused, never coerced.
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise BudgetExceeded(f"{name} must be a whole number of tokens, 0 or more, got {value!r}")
+    return value
+
+
+def _priced(price: Price, input_tokens: object, output_tokens: object) -> float:
+    """The USD cost of a token count, or BudgetExceeded. Nothing that is not priceable gets booked."""
+    tokens_in = _tokens("input tokens", input_tokens)
+    tokens_out = _tokens("output tokens", output_tokens)
+    try:
+        cost = price.cost(tokens_in, tokens_out)
+    except OverflowError:
+        raise BudgetExceeded("token count is too large to price") from None
+    if not _is_spend(cost):
+        raise BudgetExceeded("cost is not a finite number of 0 or more")
+    return cost
 
 
 def _ledger_path() -> Path:
@@ -130,8 +165,13 @@ class Budget:
     ) -> None:
         # Every cap and price is checked here too, so a direct construction fails closed as well.
         self.ledger = Path(ledger)
-        self.total_cap_usd = _positive("total cap (SPEND_CAP_USD)", total_cap_usd)
+        self.total_cap_usd = _total_cap(total_cap_usd)
         self.daily_cap_usd = _positive("daily cap (DAILY_CAP_USD)", daily_cap_usd)
+        if self.daily_cap_usd > self.total_cap_usd:
+            raise BudgetExceeded(
+                f"daily cap (DAILY_CAP_USD) ${self.daily_cap_usd:g} must not exceed "
+                f"the total cap (SPEND_CAP_USD) ${self.total_cap_usd:g}"
+            )
         self.sandbox_run_cap = _run_cap(sandbox_run_cap)
         # VERIFY: per-run sandbox price is not documented; this conservative guess counts toward the money caps.
         self.sandbox_run_usd = _positive("sandbox run price (SANDBOX_RUN_USD)", sandbox_run_usd)
@@ -147,7 +187,7 @@ class Budget:
         raw_run_cap = os.environ.get("SANDBOX_RUN_CAP", "250")
         try:
             run_cap = int(raw_run_cap)
-        except ValueError:
+        except (ValueError, OverflowError):
             raise BudgetExceeded(
                 f"SANDBOX_RUN_CAP must be a whole number, 0 or more, got {raw_run_cap!r}"
             ) from None
@@ -184,15 +224,37 @@ class Budget:
     def _read(self) -> dict:
         if not self.ledger.exists():
             return {"total_usd": 0.0, "days": {}, "sandbox_runs": 0, "halted": None}
-        state = json.loads(self.ledger.read_text())
-        amounts = [state.get("total_usd"), *state.get("days", {}).values()]
+        try:
+            state = json.loads(self.ledger.read_text())
+        except ValueError:
+            raise BudgetExceeded(f"ledger {self.ledger} is not valid JSON; fix it by hand") from None
+        if not isinstance(state, dict) or not all(k in state for k in ("total_usd", "days", "sandbox_runs")):
+            # A missing field would read as zero spend or zero runs, which would loosen a cap. Refuse instead.
+            raise BudgetExceeded(
+                f"ledger {self.ledger} must hold total_usd, days and sandbox_runs; fix it by hand"
+            )
+        days = state["days"]
+        if not isinstance(days, dict):
+            raise BudgetExceeded(
+                f"ledger {self.ledger} has a days field that is not an object; fix it by hand"
+            )
+        amounts = [state["total_usd"], *days.values()]
         if not all(_is_spend(amount) for amount in amounts):
             # A nan or negative amount would make every cap comparison pass. Refuse instead.
             raise BudgetExceeded(f"ledger {self.ledger} has a non-finite or negative amount; fix it by hand")
+        runs = state["sandbox_runs"]
+        if isinstance(runs, bool) or not isinstance(runs, int) or runs < 0:
+            raise BudgetExceeded(
+                f"ledger {self.ledger} has sandbox_runs that is not a whole number, 0 or more; fix it by hand"
+            )
+        # Stored as None (not halted), a bool, or a non-empty string. An empty string would read as not halted.
+        halted = state.get("halted")
+        if halted is not None and not isinstance(halted, bool) and not (isinstance(halted, str) and halted):
+            raise BudgetExceeded(f"ledger {self.ledger} has an invalid halted value; fix it by hand")
         return state
 
     def reserve(self, model: str, input_tokens: int, max_output_tokens: int) -> Hold:
-        return self._reserve_usd(model, self.price(model).cost(input_tokens, max_output_tokens))
+        return self._reserve_usd(model, _priced(self.price(model), input_tokens, max_output_tokens))
 
     def _reserve_usd(self, model: str, worst: float) -> Hold:
         with self._locked() as s:
@@ -200,6 +262,8 @@ class Budget:
 
     def _charge(self, s: dict, model: str, worst: float) -> Hold:
         # Caller holds the ledger lock, so the checks and the booking are one atomic step.
+        if not _is_spend(worst):
+            raise BudgetExceeded(f"reserved amount must be a finite number of 0 or more, got {worst!r}")
         day = date.today().isoformat()
         if s["halted"]:
             raise BudgetExceeded(f"budget halted: {s['halted']}")
@@ -213,9 +277,13 @@ class Budget:
         return Hold(model, worst, day)
 
     def settle(self, hold: Hold, input_tokens: int, output_tokens: int) -> float:
-        actual = self.price(hold.model).cost(input_tokens, output_tokens)
+        # Bad input raises before the lock is taken, so the hold stays booked at its full amount.
+        if not _is_spend(hold.usd):
+            raise BudgetExceeded("hold amount must be a finite number of 0 or more")
+        actual = _priced(self.price(hold.model), input_tokens, output_tokens)
         with self._locked() as s:
-            delta = actual - hold.usd
+            # A refund is never larger than the hold, and a booked amount never drops below zero.
+            delta = max(actual - hold.usd, -hold.usd)
             s["total_usd"] = max(0.0, s["total_usd"] + delta)
             s["days"][hold.day] = max(0.0, s["days"].get(hold.day, 0.0) + delta)
         return actual
@@ -234,8 +302,10 @@ class Budget:
 
     def halt(self, reason: str) -> None:
         """Stop all paid calls until a person clears `halted` in the ledger file."""
+        # An empty or non-text reason would read as not halted, so it is stored as a fixed non-empty text.
+        text = reason if isinstance(reason, str) and reason.strip() else "halted"
         with self._locked() as s:
-            s["halted"] = reason
+            s["halted"] = text
 
     def snapshot(self) -> dict:
         """Read-only view of the ledger. It never writes, creates or resets a field.

@@ -225,7 +225,7 @@ def test_clean_files_exit_zero_with_no_output(tmp_path):
 
 
 def test_values_under_twelve_characters_are_ignored(tmp_path):
-    env = leak_env(tmp_path, "SHORT=elevenchars\n")
+    env = leak_env(tmp_path, f"SHORT=elevenchars\nLONG={FAKE}\n")
     f = tmp_path / "f.md"
     f.write_text("elevenchars\n")
     r = cli(LEAKCHECK, "--env", env, f)
@@ -244,7 +244,7 @@ def test_twelve_characters_are_checked_and_quotes_are_stripped(tmp_path):
 
 
 def test_commented_out_values_are_ignored(tmp_path):
-    env = leak_env(tmp_path, f"# OLD_TOKEN={FAKE}\n\n")
+    env = leak_env(tmp_path, f"# OLD_TOKEN={FAKE}\nNEW_TOKEN=fresh-value-0123\n")
     f = tmp_path / "f.md"
     f.write_text(FAKE + "\n")
     assert cli(LEAKCHECK, "--env", env, f).returncode == 0
@@ -268,6 +268,113 @@ def test_missing_env_option_is_a_usage_error(tmp_path):
     f = tmp_path / "x.md"
     f.write_text("x\n")
     assert cli(LEAKCHECK, f).returncode == 2
+
+
+def write_bytes(tmp_path, name, data):
+    path = tmp_path / name
+    path.write_bytes(data if isinstance(data, bytes) else data.encode("utf-8"))
+    return path
+
+
+@pytest.mark.parametrize("text", ["", "# only a comment\nSHORT=abc\n"])
+def test_env_file_without_a_long_value_exits_two(tmp_path, text):
+    env = leak_env(tmp_path, text)
+    f = write_bytes(tmp_path, "f.md", "abc\n")
+    r = cli(LEAKCHECK, "--env", env, f)
+    assert (r.returncode, r.stdout, r.stderr.strip()) == (2, "", "leakcheck: no values to check")
+
+
+def test_unreadable_target_exits_two_and_names_only_the_file(tmp_path):
+    env = leak_env(tmp_path, f"TEST_TOKEN={FAKE}\n")
+    leaky = write_bytes(tmp_path, "leaky.md", f"{FAKE}\n")
+    locked = tmp_path / "locked-dir"  # a directory cannot be opened for reading
+    locked.mkdir()
+    r = cli(LEAKCHECK, "--env", env, leaky, locked)
+    assert r.returncode == 2
+    assert r.stdout == f"{leaky}\n"
+    assert r.stderr == f"leakcheck: cannot read {locked}\n"
+    assert FAKE not in r.stdout + r.stderr
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root can read a mode 000 file")
+def test_mode_000_target_exits_two(tmp_path):
+    env = leak_env(tmp_path, f"TEST_TOKEN={FAKE}\n")
+    locked = write_bytes(tmp_path, "locked.md", "nothing\n")
+    locked.chmod(0)
+    try:
+        r = cli(LEAKCHECK, "--env", env, locked)
+    finally:
+        locked.chmod(0o600)
+    assert (r.returncode, r.stdout) == (2, "")
+    assert r.stderr == f"leakcheck: cannot read {locked}\n"
+
+
+def test_binary_target_with_the_value_is_detected(tmp_path):
+    env = leak_env(tmp_path, f"TEST_TOKEN={FAKE}\n")
+    blob = write_bytes(tmp_path, "blob.bin", b"\x00\xff\xfe caf\xe9 " + FAKE.encode() + b"\x80\x81")
+    r = cli(LEAKCHECK, "--env", env, blob)
+    assert (r.returncode, r.stdout) == (1, f"{blob}\n")
+
+
+def test_inline_comment_is_not_part_of_the_value(tmp_path):
+    env = leak_env(tmp_path, f"TEST_TOKEN={FAKE} # rotate this later\n")
+    leaky = write_bytes(tmp_path, "leaky.md", f"key {FAKE}\n")
+    comment_only = write_bytes(tmp_path, "comment.md", "rotate this later\n")
+    r = cli(LEAKCHECK, "--env", env, leaky, comment_only)
+    assert (r.returncode, r.stdout) == (1, f"{leaky}\n")
+
+
+def test_quoted_value_with_a_comment_is_checked(tmp_path):
+    env = leak_env(tmp_path, f'TEST_TOKEN="{FAKE}"  # note\n')
+    leaky = write_bytes(tmp_path, "leaky.md", f"{FAKE}\n")
+    assert cli(LEAKCHECK, "--env", env, leaky).returncode == 1
+
+
+def test_multi_line_double_quoted_value_is_checked_and_parsing_resumes(tmp_path):
+    env = leak_env(tmp_path, 'PEM="first-line-secret\nsecond-line-secret"\nLATER=laterlongsecret1\n')
+    pem = write_bytes(tmp_path, "pem.md", "first-line-secret\nsecond-line-secret\n")
+    later = write_bytes(tmp_path, "later.md", "laterlongsecret1\n")
+    r = cli(LEAKCHECK, "--env", env, pem, later)
+    assert (r.returncode, r.stdout) == (1, f"{pem}\n{later}\n")
+
+
+def test_double_quote_escapes_are_decoded_and_raw_text_is_checked(tmp_path):
+    env = leak_env(tmp_path, 'ESC="say \\"hi-there\\" \\\\ back\\nend"\n')
+    decoded = write_bytes(tmp_path, "decoded.md", 'say "hi-there" \\ back\nend\n')
+    raw = write_bytes(tmp_path, "raw.md", 'say \\"hi-there\\" \\\\ back\\nend\n')
+    r = cli(LEAKCHECK, "--env", env, decoded, raw)
+    assert (r.returncode, r.stdout) == (1, f"{decoded}\n{raw}\n")
+
+
+def test_single_quotes_are_literal(tmp_path):
+    env = leak_env(tmp_path, "LIT='lit\\nlit-secret-val'\n")
+    literal = write_bytes(tmp_path, "literal.md", "lit\\nlit-secret-val\n")
+    newline = write_bytes(tmp_path, "newline.md", "lit\nlit-secret-val\n")
+    r = cli(LEAKCHECK, "--env", env, literal, newline)
+    assert (r.returncode, r.stdout) == (1, f"{literal}\n")
+
+
+def test_utf16_targets_are_detected_in_both_byte_orders(tmp_path):
+    env = leak_env(tmp_path, f"TEST_TOKEN={FAKE}\n")
+    le = write_bytes(tmp_path, "le.txt", FAKE.encode("utf-16-le"))
+    be = write_bytes(tmp_path, "be.txt", b"\xfe\xff" + FAKE.encode("utf-16-be"))
+    r = cli(LEAKCHECK, "--env", env, le, be)
+    assert (r.returncode, r.stdout) == (1, f"{le}\n{be}\n")
+
+
+def test_internal_error_prints_a_generic_message_only(tmp_path, capsys, monkeypatch):
+    leakcheck = load("leakcheck")
+
+    def boom(_pairs):
+        raise RuntimeError(FAKE)
+
+    monkeypatch.setattr(leakcheck, "needles", boom)
+    env = leak_env(tmp_path, f"TEST_TOKEN={FAKE}\n")
+    f = write_bytes(tmp_path, "f.md", "x\n")
+    assert leakcheck.main(["--env", str(env), str(f)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "leakcheck: internal error; the check did not finish\n"
 
 
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
@@ -322,7 +429,9 @@ def push(repo, *lines):
 
 def test_pre_push_hook_is_executable_posix_sh():
     assert os.access(PRE_PUSH, os.X_OK)
-    assert PRE_PUSH.read_text().startswith("#!/bin/sh\n")
+    text = PRE_PUSH.read_text()
+    assert text.startswith("#!/bin/sh\n")
+    assert '"$(git rev-parse --git-path hooks)/pre-push"' in text
 
 
 @needs_git
@@ -402,3 +511,61 @@ def test_unknown_remote_sha_fails_closed(repo):
     new = commit(repo, {"STATUS.md": "s3\n"}, "allowed but unverifiable")
     r = push(repo, f"refs/heads/main {new} refs/heads/main {'1' * 40}")
     assert r.returncode == 1
+
+
+@needs_git
+def test_rename_from_a_disallowed_path_into_the_log_is_rejected(repo):
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / "docs" / "autopilot").mkdir(parents=True)
+    git(repo, "mv", "src.py", "docs/autopilot/LOG.md")
+    git(repo, "commit", "-q", "-m", "move src into the log")
+    new = git(repo, "rev-parse", "HEAD")
+    r = push(repo, f"refs/heads/main {new} refs/heads/main {base}")
+    assert r.returncode == 1 and "src.py" in r.stderr
+
+
+@needs_git
+def test_bad_main_line_is_rejected_even_when_it_is_the_second_ref(repo):
+    base = git(repo, "rev-parse", "HEAD")
+    git(repo, "branch", "feature", base)
+    new = commit(repo, {"src.py": "x = 5\n"}, "bad for main")
+    r = push(
+        repo,
+        f"refs/heads/feature {base} refs/heads/feature {ZERO}",
+        f"refs/heads/main {new} refs/heads/main {base}",
+    )
+    assert r.returncode == 1 and "src.py" in r.stderr
+
+
+@needs_git
+def test_merge_commit_on_main_that_brings_in_a_disallowed_change_is_rejected(repo):
+    base = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "-b", "feature")
+    commit(repo, {"src.py": "x = 6\n"}, "feature change")
+    git(repo, "checkout", "-q", "main")
+    commit(repo, {"STATUS.md": "s4\n"}, "allowed on main")
+    git(repo, "merge", "-q", "--no-ff", "-m", "merge feature", "feature")
+    new = git(repo, "rev-parse", "HEAD")
+    r = push(repo, f"refs/heads/main {new} refs/heads/main {base}")
+    assert r.returncode == 1 and "src.py" in r.stderr
+
+
+@needs_git
+def test_non_fast_forward_push_to_main_is_rejected(repo):
+    base = git(repo, "rev-parse", "HEAD")
+    remote_tip = commit(repo, {"STATUS.md": "remote\n"}, "remote tip")
+    git(repo, "reset", "-q", "--hard", base)
+    local_tip = commit(repo, {"STATUS.md": "local\n"}, "diverged")
+    r = push(repo, f"refs/heads/main {local_tip} refs/heads/main {remote_tip}")
+    assert r.returncode == 1 and "non-fast-forward push to main" in r.stderr
+
+
+@needs_git
+def test_submodule_pointer_change_on_main_is_rejected_even_when_diff_ignores_submodules(repo):
+    base = git(repo, "rev-parse", "HEAD")
+    git(repo, "config", "diff.ignoreSubmodules", "all")
+    git(repo, "update-index", "--add", "--cacheinfo", f"160000,{base},vendor/lib")
+    git(repo, "commit", "-q", "-m", "pin a submodule")
+    new = git(repo, "rev-parse", "HEAD")
+    r = push(repo, f"refs/heads/main {new} refs/heads/main {base}")
+    assert r.returncode == 1 and "vendor/lib" in r.stderr

@@ -1,11 +1,11 @@
 #!/bin/sh
-# Cheatproof pre-push hook. The planner installs it with:
-#   cp docs/autopilot/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
-# Git runs it with stdin lines "<local ref> <local sha> <remote ref> <remote sha>".
+# Cheatproof pre-push hook. Install from the repo root (works in a worktree too):
+#   cp docs/autopilot/pre-push "$(git rev-parse --git-path hooks)/pre-push"
+# Git runs it with stdin lines "<local ref> <local sha> <remote ref> <remote sha>" and every line is checked.
 # A push to refs/heads/main may change only docs/autopilot/QUEUE.md, docs/autopilot/LOG.md and STATUS.md.
-# Deleting main, or creating main on the remote (all-zero remote sha), is rejected. Other refs are allowed.
-# `gh pr merge` creates its merge commit on GitHub, not in a push, so this hook does not see it.
-# Exit 1 rejects the push. Needs only git and a POSIX sh.
+# It must fast-forward main; deleting main, or creating main on the remote (all-zero remote sha), is rejected.
+# Other refs are allowed. `gh pr merge` creates its merge commit on GitHub, not in a push, so this hook
+# does not see it. Exit 1 rejects the push. Needs only git and a POSIX sh.
 set -eu
 
 die() {
@@ -27,7 +27,17 @@ while read -r lref lsha rref rsha || [ -n "${rsha-}" ]; do
 	[ -n "$lsha" ] && [ -n "$rsha" ] || die "malformed push line for main"
 	is_zero "$lsha" && die "deleting main is not allowed"
 	is_zero "$rsha" && die "creating main on the remote is not allowed"
-	if ! changed=$(git --no-pager diff --no-renames --name-only "$rsha" "$lsha"); then
+	# merge-base --is-ancestor exits 0 for an ancestor, 1 when not, and more on error (unknown sha, no repo).
+	rc=0
+	git merge-base --is-ancestor "$rsha" "$lsha" || rc=$?
+	case "$rc" in
+	0) ;;
+	1) die "non-fast-forward push to main" ;;
+	*) die "cannot check that the push to main fast-forwards; fetch the remote first" ;;
+	esac
+	# --no-renames lists both sides of a rename, so a move from a disallowed path is caught. The submodule
+	# option overrides any diff.ignoreSubmodules setting, so a gitlink (submodule pointer) change is listed too.
+	if ! changed=$(git --no-pager diff --no-renames --ignore-submodules=none --name-only "$rsha" "$lsha" --); then
 		die "cannot read the pushed range $rsha..$lsha; fetch the remote first"
 	fi
 	# Whole-line match on each path: a name with spaces or a suffix cannot pass as an allowed name.
