@@ -42,3 +42,4 @@ progress 8% (1/15 tasks done, 10 days to submit)
   general-purpose agents told to follow the agent file. CLAUDE.md rule 10 ("never effort max") conflicts with
   CYCLE.md (max allowed for Haiku on hard size L pieces); the routine prompt follows CYCLE.md, planner to reconcile.
 - Learning notes caught up for #2 to #5.
+- Refused tool: `mcp__ccd_turn__wrap_up` (connector not on the routine allowlist); not retried.
