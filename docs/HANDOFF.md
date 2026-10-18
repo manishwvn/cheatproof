@@ -35,9 +35,7 @@ Full research is in `/Users/manish/Documents/Nebius_X_Nvidia/research/` (outside
   budget in a window is wasted, so keep the routine busy.
 
 ## First tasks for the new session (in order)
-1. Rename: `gh repo rename cheatproof -R manishwvn/twin-diff`, then rename the local folder to
-   `/Users/manish/Documents/Nebius_X_Nvidia/cheatproof`, and update the guard allow file and state-folder paths
-   (`~/.twin-diff-autopilot` becomes `~/.cheatproof-autopilot`; `twin-diff-wt` becomes `cheatproof-wt`).
+1. ~~Rename~~ done 2026-10-18: GitHub repo `manishwvn/cheatproof`, local folder `/Users/manish/Documents/Nebius_X_Nvidia/cheatproof`, state folder `~/.cheatproof-autopilot`, guard allow file updated. Still to do: replace `twin-diff`/`twindiff` names inside files.
 2. Rewrite CLAUDE.md, STATUS.md, PLAN.md, docs/prize-fit.md (kept), docs/pitches.md (replace with the Cheatproof
    pitch) and QUEUE.md (new tasks below), plus ADR 0002 (sandbox or Docker execution model).
 3. Rename the Python package `twindiff` → `cheatproof`; keep the budget tests green.
