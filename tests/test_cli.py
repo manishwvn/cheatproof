@@ -775,7 +775,7 @@ def test_other_key_errors_get_a_generic_message(tmp_path, capsys, key):
     assert spy.harden_calls == []
 
 
-# site: the static report site (queue T09 part B). build_site is always a fake here, so site.py is not needed.
+# site: the static report site (queue T09 part B). build_site is a fake here, except the end-to-end test at the bottom.
 
 
 def site_argv(certs: Path, out: Path, *extra: str) -> list[str]:
@@ -871,6 +871,21 @@ def test_site_write_error_exits_1_without_traceback(tmp_path, capsys):
     assert "site:" not in captured.out
 
 
+def test_site_value_error_from_build_is_a_usage_error_exits_2(tmp_path, capsys):
+    message = "refusing to build into a non-empty directory that is not a cheatproof site"
+
+    def not_a_site(cert_dir, out_dir, *, traces_dir=None):
+        raise ValueError(message)
+
+    certs = make_certs_dir(tmp_path)
+    rc = cli.main(site_argv(certs, tmp_path / "site"), deps=make_deps(Spy(), build_site=not_a_site))
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.err == f"error: {message}\n"
+    assert "Traceback" not in captured.err
+    assert "site:" not in captured.out
+
+
 def test_site_never_builds_a_budget_llm_or_executor(tmp_path):
     spy = Spy()
 
@@ -904,3 +919,27 @@ def test_default_build_site_resolves_cheatproof_site_at_call_time(tmp_path, monk
     )  # stands in for site.py, never the real file
     assert cli._build_site(tmp_path, tmp_path / "site", traces_dir=tmp_path) == "site-result"
     assert calls == [(tmp_path, tmp_path / "site", tmp_path)]
+
+
+def test_site_end_to_end_with_default_deps_writes_the_index(tmp_path, monkeypatch, capsys):
+    # Deps.default() calls load_env(), which reads the checkout's .env. Stub it so no env file is opened.
+    monkeypatch.setattr("cheatproof.envfile.load_env", lambda *args, **kwargs: False)
+    certs = tmp_path / "certs"
+    certs.mkdir()
+    cert = certify.build_certificate(
+        fixed_harden(INSTANCE),
+        make_task(),
+        image_digest=None,
+        attacker=ATTACKER_LIMITS,
+        cost_usd=0.25,
+        timestamp=CLOCK,
+    )
+    certify.write_certificate(cert, certs)
+    out = tmp_path / "site"  # does not exist yet, so the build starts from an empty directory
+
+    rc = cli.main(site_argv(certs, out))
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert (out / "index.html").is_file()
+    assert INSTANCE in (out / "index.html").read_text(encoding="utf-8")
+    assert captured.err == ""

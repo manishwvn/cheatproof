@@ -5,10 +5,19 @@ certify.score(). It writes index.html (the score, one row per environment and th
 env/<name>.html (one page per valid certificate, with its transcript when traces_dir holds one). Every rate, interval
 and count comes from certify.py. This module computes none of its own.
 
+Names and traces. <name> is the file stem with each character outside [A-Za-z0-9._-] replaced by "_"; a clash gets
+"-2", "-3" and so on. The transcript of a certificate is traces_dir/<stem>.jsonl, where <stem> is the certificate's
+own file stem (its file name without ".json"). When that file is missing, traces_dir/<name>.jsonl is tried. A later
+certificate whose instance id an earlier file (in name order) already holds is an error row, not a page.
+
 The site replays committed records. Nothing here calls a model or the network, and the pages have no JavaScript. A
 certificate, trace or diff is untrusted attacker or model text, so every value reaches a page through _cell(), which
-escapes with html.escape(quote=True). Output is deterministic: the same input gives the same bytes, and no current
-time or absolute path is written.
+escapes with html.escape(quote=True) and shows control and bidi characters as [U+XXXX]. Trace values pass through
+cheatproof.sanitize first. Output is deterministic: the same input gives the same bytes, and no current time or
+absolute path is written.
+
+out_dir gets a .cheatproof-site marker and an empty .nojekyll. A non-empty out_dir without the marker is refused. With
+the marker, the env/*.html pages of an earlier build are removed before the new pages are written.
 """
 
 from __future__ import annotations
@@ -22,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from cheatproof.certify import load_certificate, score
+from cheatproof.sanitize import sanitize
 
 BANNER = "Recorded run — replay of committed certificates, no live calls"
 NO_TRANSCRIPT = "no transcript recorded"
@@ -31,6 +41,16 @@ UNREADABLE_LINE = "unreadable line"
 RUN_COMMAND = "python -m cheatproof.cli harden <instance id> ..."
 DEFAULT_CERT_DIR = "results/certificates"
 UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
+# C0 controls except tab and newline, DEL, C1 controls and bidi controls. _cell shows each one as [U+XXXX].
+CONTROL_OR_BIDI = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+MARKER = ".cheatproof-site"  # build_site writes it; only a directory that holds it may hold an earlier site
+MARKER_TEXT = "cheatproof site, written by cheatproof.site.build_site\n"
+NOJEKYLL = ".nojekyll"  # empty: GitHub Pages serves the files as they are, without Jekyll
+TRANSCRIPT_NOTE = (
+    "Tool results are shown as digests only. This transcript is matched to the certificate by file name "
+    "and is not verified against it."
+)
+PATCH_NOTE = "Patch diff text is not recorded in the certificate; patches are listed by name."
 TRACE_HEADERS = ("Line", "Type", "Step", "Tool", "Args", "Result", "Tokens in", "Tokens out", "Error")
 CSP_META = (
     """<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">"""
@@ -102,8 +122,9 @@ class SiteResult:
 
 @dataclass(frozen=True)
 class _Entry:
-    name: str  # env/<name>.html, and the stem of its trace file
+    name: str  # env/<name>.html
     cert: dict[str, Any]
+    stem: str  # the certificate file's own stem: traces_dir/<stem>.jsonl is its transcript
 
 
 @dataclass(frozen=True)
@@ -116,33 +137,43 @@ class _Raw:
 def build_site(cert_dir: Path, out_dir: Path, *, traces_dir: Path | None = None) -> SiteResult:
     """Write the site for the certificates in cert_dir into out_dir and return what was written.
 
-    Raises FileNotFoundError when cert_dir is not a directory. A file that fails to load is listed in errors and on
-    the index, and the rest still build. traces_dir/<name>.jsonl, when it exists, is the transcript of env/<name>.html.
+    Raises FileNotFoundError when cert_dir is not a directory, and ValueError when out_dir is a non-empty directory
+    that is not a cheatproof site (nothing is written then). A file that fails to load, or repeats an instance id, is
+    listed in errors and on the index, and the rest still build. The transcript of env/<name>.html is read from
+    traces_dir as the module docstring describes.
     """
     root = Path(cert_dir)
     if not root.is_dir():
         raise FileNotFoundError(f"no certificate directory: {root}")
-    entries, errors = _load_all(root)
     out = Path(out_dir)
+    _prepare_out_dir(out)
+    entries, errors = _load_all(root)
     env_dir = out / "env"
     env_dir.mkdir(parents=True, exist_ok=True)
+    _write(out / MARKER, MARKER_TEXT)
+    _write(out / NOJEKYLL, "")
     summary = score([entry.cert for entry in entries]) if entries else None
     index = out / "index.html"
     _write(index, _document("Cheatproof report", _index_body(entries, errors, summary)))
     pages = []
     for entry in entries:
         page = env_dir / f"{entry.name}.html"
-        body = _env_body(entry.cert, _transcript_body(traces_dir, entry.name))
+        body = _env_body(entry.cert, _transcript_body(traces_dir, entry))
         _write(page, _document(f"Cheatproof: {entry.cert['task']['instance_id']}", body))
         pages.append(page)
     return SiteResult(index=index, pages=pages, errors=errors)
 
 
 def _load_all(root: Path) -> tuple[list[_Entry], list[tuple[str, str]]]:
-    """Every *.json certificate in root, in name order. A file that fails to load becomes an error row."""
+    """Every *.json certificate in root, in name order. A file that fails to load becomes an error row.
+
+    The first file (in name order) that holds an instance id is kept. Each later file with the same id is an error
+    row, and it is left out of the score and the pages.
+    """
     entries: list[_Entry] = []
     errors: list[tuple[str, str]] = []
     taken: set[str] = set()
+    first_file: dict[str, str] = {}  # instance id -> the file name that holds it first
     for path in sorted(root.glob("*.json")):
         if not path.is_file():
             continue
@@ -151,7 +182,12 @@ def _load_all(root: Path) -> tuple[list[_Entry], list[tuple[str, str]]]:
         except Exception as exc:  # noqa: BLE001 - a certificate is untrusted input: any failure is a row
             errors.append((path.name, _error_text(exc, path)))
             continue
-        entries.append(_Entry(_page_name(path.stem, taken), cert))
+        instance_id = cert["task"]["instance_id"]
+        if instance_id in first_file:
+            errors.append((path.name, f"duplicate instance id, first seen in {first_file[instance_id]}"))
+            continue
+        first_file[instance_id] = path.name
+        entries.append(_Entry(_page_name(path.stem, taken), cert, path.stem))
     return entries, errors
 
 
@@ -175,14 +211,42 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def _prepare_out_dir(out: Path) -> None:
+    """Refuse a non-empty directory that is not a cheatproof site. In one that is, remove the old env/*.html pages.
+
+    A symlink named *.html in env/ is unlinked as a link: its target is not touched, and no page is written through it.
+    """
+    if not out.is_dir():
+        return
+    if not (out / MARKER).is_file():
+        if any(out.iterdir()):
+            name = out.resolve().name  # the name only: no absolute path reaches the message
+            raise ValueError(f"output directory is not empty and is not a cheatproof site: {name}")
+        return
+    env_dir = out / "env"
+    if env_dir.is_symlink():  # cleanup and pages must stay inside the site directory
+        raise ValueError("output directory has a symlinked env/ directory")
+    if env_dir.is_dir():
+        for page in list(env_dir.glob("*.html")):
+            if page.is_symlink() or page.is_file():
+                page.unlink()
+
+
 # Escaping and table helpers. Every value that comes from a certificate or a trace passes through _cell.
 
 
 def _cell(value: Any) -> str:
-    """The escaped HTML for one value. A _Raw is markup this module wrote; anything else is _value() escaped."""
+    """The escaped HTML for one value. A _Raw is markup this module wrote; anything else is _value() escaped.
+
+    Control and bidi characters that escaping leaves alone are shown as [U+XXXX], so they cannot hide or reorder text.
+    """
     if isinstance(value, _Raw):
         return value.markup
-    return html.escape(_value(value), quote=True)
+    return CONTROL_OR_BIDI.sub(_code_point, html.escape(_value(value), quote=True))
+
+
+def _code_point(match: re.Match[str]) -> str:
+    return f"[U+{ord(match.group()):04X}]"
 
 
 def _value(value: Any) -> str:
@@ -224,6 +288,12 @@ def _row(*values: Any) -> str:
     return "<tr>" + "".join(f"<td>{_cell(value)}</td>" for value in values) + "</tr>"
 
 
+def _head_row(head: Any, *values: Any) -> str:
+    """A row whose first cell is a row header (th scope="row"); the other values are ordinary cells."""
+    cells = "".join(f"<td>{_cell(value)}</td>" for value in values)
+    return f'<tr><th scope="row">{_cell(head)}</th>{cells}</tr>'
+
+
 def _kv_row(key: str, value: Any) -> str:
     return f'<tr><th scope="row">{_cell(key)}</th><td>{_cell(value)}</td></tr>'
 
@@ -235,7 +305,7 @@ def _table(caption: str, headers: Sequence[str], rows: Sequence[str], empty: str
     head = "".join(f'<th scope="col">{_cell(header)}</th>' for header in headers)
     return "\n".join(
         [
-            '<div class="table-wrap">',
+            f'<div class="table-wrap" tabindex="0" role="region" aria-label="{_cell(caption)}">',
             "<table>",
             f"<caption>{_cell(caption)}</caption>",
             f"<thead><tr>{head}</tr></thead>",
@@ -286,8 +356,14 @@ def _document(title: str, body: str) -> str:
 
 
 def _rate_text(rate: Mapping[str, Any]) -> str:
-    """One rate as score() gives it: count of n = rate (95% CI low to high). Never recomputed here."""
-    low, high = rate["interval_95"]
+    """One rate as score() gives it: count of n = rate (95% CI low to high). Never recomputed here.
+
+    score() gives rate None when n is 0, so no certificate is conclusive. Then the text is the count and no percentage.
+    """
+    interval = rate.get("interval_95")
+    if rate.get("rate") is None or interval is None:
+        return f"{rate['count']} of {rate['n']}, no conclusive certificates"
+    low, high = interval
     return f"{rate['count']} of {rate['n']} = {rate['rate']:.1%} (95% CI {low:.1%} to {high:.1%})"
 
 
@@ -330,7 +406,7 @@ def _index_body(
     middle = (
         [_empty_state(errors)]
         if summary is None
-        else [_score_section(summary), _environments_section(entries)]
+        else [_score_section(summary, len(errors)), _environments_section(entries)]
     )
     return "\n".join([*head, *middle, _errors_section(errors)])
 
@@ -355,7 +431,16 @@ def _empty_state(errors: Sequence[tuple[str, str]]) -> str:
     )
 
 
-def _score_section(summary: Mapping[str, Any]) -> str:
+def _excluded_text(count: int) -> str:
+    """The sentence that says how many certificate files the score leaves out. Its link goes to the errors list."""
+    link = '(see <a href="#errors">errors</a>).'
+    if count == 1:
+        return f"1 certificate file failed to load and is excluded {link}"
+    return f"{count} certificate files failed to load and are excluded {link}"
+
+
+def _score_section(summary: Mapping[str, Any], excluded: int) -> str:
+    lead = f"n = {summary['n']} valid certificates. " + (_excluded_text(excluded) + " " if excluded else "")
     rate_rows = [
         _row(label, _rate_text(summary[key]), summary[key]["denominator"])
         for label, key in (
@@ -371,7 +456,7 @@ def _score_section(summary: Mapping[str, Any]) -> str:
     return _section(
         "score",
         "Hackability score",
-        f"<p>n = {summary['n']} valid certificates. A certified task is not hackable by this attacker. "
+        f"<p>{lead}A certified task is not hackable by this attacker. "
         "That is not a claim that it is secure or proven.</p>",
         _table(
             "Rates with 95% Wilson intervals",
@@ -404,7 +489,7 @@ def _environments_section(entries: Sequence[_Entry]) -> str:
         cert = entry.cert
         task, gates = cert["task"], cert["gates"]
         rows.append(
-            _row(
+            _head_row(
                 _Raw(_link_html(f"env/{entry.name}.html", task["instance_id"])),
                 task["repo"],
                 task["source"],
@@ -602,6 +687,7 @@ def _patches_section(harden: Mapping[str, Any]) -> str:
     return _section(
         "patches",
         "Patches",
+        f"<p>{_cell(PATCH_NOTE)}</p>",
         _kv_table(
             "Patches",
             [
@@ -660,7 +746,7 @@ def _diff_block(attack: Mapping[str, Any]) -> str:
     if not attack:
         return "<p>No attack ran in this round.</p>"
     diff = attack.get("final_diff")
-    text = f"<pre>{_cell(diff)}</pre>" if isinstance(diff, str) else f"<p>{NO_ATTACK_DIFF}</p>"
+    text = f'<pre tabindex="0">{_cell(diff)}</pre>' if isinstance(diff, str) else f"<p>{NO_ATTACK_DIFF}</p>"
     if attack.get("final_diff_sha256") is None:
         digest = "<p>No final diff digest was recorded.</p>"
     else:
@@ -683,23 +769,33 @@ def _rounds_section(harden: Mapping[str, Any]) -> str:
 # Transcripts
 
 
-def _transcript_body(traces_dir: Path | None, name: str) -> str:
+def _transcript_body(traces_dir: Path | None, entry: _Entry) -> str:
     """The trace table for env/<name>.html, or the sentence that says there is none."""
-    if traces_dir is None:
-        return f"<p>{NO_TRANSCRIPT}</p>"
-    path = Path(traces_dir) / f"{name}.jsonl"
-    if not path.is_file():
+    path = _trace_path(traces_dir, entry)
+    if path is None:
         return f"<p>{NO_TRANSCRIPT}</p>"
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return "<p>transcript could not be read</p>"
-    return _table(
+    table = _table(
         "One row per trace line",
         TRACE_HEADERS,
         _trace_rows(text.split("\n")),
         empty="the trace file has no lines",
     )
+    return "\n".join([f"<p>{_cell(TRANSCRIPT_NOTE)}</p>", table])
+
+
+def _trace_path(traces_dir: Path | None, entry: _Entry) -> Path | None:
+    """The trace file for an entry: traces_dir/<stem>.jsonl, else traces_dir/<name>.jsonl, else None."""
+    if traces_dir is None:
+        return None
+    for stem in (entry.stem, entry.name):
+        path = Path(traces_dir) / f"{stem}.jsonl"
+        if path.is_file():
+            return path
+    return None
 
 
 def _trace_rows(lines: Sequence[str]) -> list[str]:
@@ -720,19 +816,25 @@ def _trace_rows(lines: Sequence[str]) -> list[str]:
 
 
 def _trace_row(number: int, record: Mapping[str, Any]) -> str:
-    args = record.get("args")
+    """One trace line as a row. Every value goes through sanitize() first, so a secret in a trace is not shown."""
+    args = sanitize(record.get("args"))
     args_cell = "" if args is None else _Raw(_code_html(json.dumps(args, sort_keys=True, default=str)))
     return _row(
         number,
-        _blank(record.get("type")),
-        _blank(record.get("step")),
-        _blank(record.get("tool")),
+        _field(record, "type"),
+        _field(record, "step"),
+        _field(record, "tool"),
         args_cell,
         _result_text(record),
-        _blank(record.get("tokens_in")),
-        _blank(record.get("tokens_out")),
-        _blank(record.get("error")),
+        _field(record, "tokens_in"),
+        _field(record, "tokens_out"),
+        _field(record, "error"),
     )
+
+
+def _field(record: Mapping[str, Any], key: str) -> Any:
+    """One sanitized trace value. A missing value is an empty cell."""
+    return _blank(sanitize(record.get(key)))
 
 
 def _result_text(record: Mapping[str, Any]) -> str:
@@ -740,9 +842,9 @@ def _result_text(record: Mapping[str, Any]) -> str:
     parts = []
     digest = _map(record.get("result_digest"))
     if isinstance(digest.get("sha256"), str):
-        parts.append(f"sha256 {digest['sha256'][:12]}")
+        parts.append(f"sha256 {sanitize(digest['sha256'][:12])}")
     if "chars" in digest:
-        parts.append(f"{_value(digest['chars'])} chars")
+        parts.append(f"{_value(sanitize(digest['chars']))} chars")
     if "stop_reason" in record:
-        parts.append(f"stop {_value(record['stop_reason'])}")
+        parts.append(f"stop {_value(sanitize(record['stop_reason']))}")
     return ", ".join(parts)

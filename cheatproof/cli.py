@@ -17,7 +17,8 @@ Exit codes: 0 a certificate was written (certified or not), or the report was pr
 capped, the executor refused or was unavailable, or the certificate could not be written after a paid run. 2 usage
 error: bad flags, missing prompt, unknown or ambiguous task, missing setting, no certificates.
 site: 0 the site was written and every certificate loaded; 1 the site was written but some did not load (each
-listed on stderr), or the write failed; 2 the certificates or traces directory is missing.
+listed on stderr), or the write failed; 2 the certificates or traces directory is missing, or --out is a non-empty
+directory that is not a cheatproof site.
 
 Collaborators come from Deps. Tests inject fakes; Deps.default() imports the real ones.
 Contract with certify.score_directory: a dict with int n, n_after, hackable_before, hackable_after, certified,
@@ -106,7 +107,7 @@ def _make_llm(budget: Any) -> Any:
 
 
 def _build_site(cert_dir: Path, out_dir: Path, *, traces_dir: Path | None = None) -> Any:
-    from cheatproof.site import build_site  # lazy: this module imports even when site.py is absent
+    from cheatproof.site import build_site  # lazy: keeps harden and report from loading the site module
 
     return build_site(cert_dir, out_dir, traces_dir=traces_dir)
 
@@ -410,7 +411,9 @@ def cmd_site(args: argparse.Namespace, deps: Deps) -> int:
         result = deps.build_site(cert_dir, args.out, traces_dir=args.traces)
     except FileNotFoundError as exc:
         return _usage_error(f"site input not found: {sanitize(str(exc))[:ERROR_CHARS]}")
-    except (OSError, ValueError) as exc:
+    except ValueError as exc:  # --out is a non-empty directory that is not a cheatproof site
+        return _usage_error(sanitize(str(exc))[:ERROR_CHARS])
+    except OSError as exc:
         return _failure(exc)
     print(f"site: {len(result.pages)} pages, {len(result.errors)} errors -> {result.index}")
     for name, message in result.errors:
@@ -448,7 +451,9 @@ def build_parser() -> argparse.ArgumentParser:
     site = sub.add_parser("site", help="build the static report site from certificates; no paid calls")
     site.add_argument("--certs", type=Path, default=DEFAULT_CERT_DIR, help="certificates directory")
     site.add_argument("--out", type=Path, default=DEFAULT_SITE_DIR, help="directory for the site")
-    site.add_argument("--traces", type=Path, help="traces directory (optional)")
+    site.add_argument(
+        "--traces", type=Path, help="directory of <certificate file stem>.jsonl attacker traces (optional)"
+    )
     return parser
 
 
