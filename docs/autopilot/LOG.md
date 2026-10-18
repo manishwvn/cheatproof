@@ -60,3 +60,4 @@ progress 30% (3/16 tasks done, 10 days to submit)
   tampering noted for T06.
 - Lessons: sanitizer guard redacts 40-hex SHAs in fixtures, so tests synthesise SHAs at runtime. `git apply` runs
   repo filter drivers too; apply with GIT_DIR pointing nowhere.
+- Daily audit deferred to the next run (F 70% at 08:03, near the time limit).
