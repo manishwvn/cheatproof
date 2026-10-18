@@ -133,7 +133,7 @@ environment, failures and limits ("upper bound against this attacker, not proof"
 sanitized traces needed for replay. Committed certificates and replay traces go in a tracked `results/` folder (`runs/` stays a
 git-ignored cache; `git add -f` is denied).
 
-### T09 Report page and judge replay mode — size M — todo — needs T07
+### T09 Report page and judge replay mode — size M — in-progress (cycle 2026-10-18T14:24:26-05:00) — needs T07
 A static report site (no server, no paid calls): the 40-task table, one before/after page per environment with the
 patch diff, the attack transcript and the gates. Judge mode replays recorded runs, labelled "recorded". Builds from
 committed certificates; deployable to free static hosting after the repo flip; must stay up through 2026-12-15.
