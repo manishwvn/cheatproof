@@ -61,3 +61,16 @@ progress 30% (3/16 tasks done, 10 days to submit)
 - Lessons: sanitizer guard redacts 40-hex SHAs in fixtures, so tests synthesise SHAs at runtime. `git apply` runs
   repo filter drivers too; apply with GIT_DIR pointing nowhere.
 - Daily audit deferred to the next run (F 70% at 08:03, near the time limit).
+
+## 2026-10-18 routine (cycle 2026-10-18T08:24:24-05:00)
+progress 36% (4/16 tasks done, 10 days to submit)
+- T05 hole classifier merged (#8): labels network, git-history, test-edit, hard-code or unclassified, decided in
+  code; labels count only when the hidden grade passed (`attempted` keeps the rest). 576 tests.
+- T06 is now unblocked. Spend: $0 (no model, sandbox or Tavily calls).
+
+- Task T05 (#8): one Haiku builder (pieces too coupled to split), Sonnet review "fix first" (5 high: shell-wrapped
+  and ref-name git reads missed; gold match alone and pip/grep matches gave false labels; failed attacks labelled).
+  One Haiku fix round with regression tests. Opus final review: merge.
+- Deferred at F 84 (cap 85): learning notes for #8 (catch-up from `learning-last-pr` 7 next run) and the daily audit.
+- Lesson: a 300-char result digest cannot prove a network fetch returned the fix; the label needs a gold line in a
+  head, otherwise a "retrieval not provable" note. T08 may want longer digests for fetch steps.

@@ -81,7 +81,7 @@ Done 2026-10-18 (routine, #6): the loop only (`attack(llm, session, system_promp
 through the session, step/token/search limits, JSONL trace, 402 and `BudgetExceeded` stop, diff failure flagged.
 The per-strategy prompt text and the live Tavily wrapper moved to T16 (planner).
 
-### T05 Hole classifier from traces — size M — in-progress (cycle 2026-10-18T08:24:24-05:00) — needs T04
+### T05 Hole classifier from traces — size M — done #8 — needs T04
 `cheatproof/holes.py`: decide in code from the trace and the final diff which hole an attack used: `git-history`
 (read of future objects or refs, patch matches the gold fix), `test-edit` (diff touches test paths or the restored
 hidden tests fail), `hard-code` (patch special-cases test inputs; passes visible tests, fails hidden ones), `network`
