@@ -1,8 +1,15 @@
 """Sanitize recorded API responses before they become fixtures, and check that no secret-like value is left.
 
-Sensitive keys and secret-like strings (emails, bearer tokens, key prefixes, long key-like tokens) become
-"REDACTED". Response ids such as "chatcmpl-..." become "REDACTED" too. Model ids (org/name), usage numbers,
-content text and finish reasons are kept. Key names compare case-insensitively with "-" read as "_".
+Sensitive keys and secret-like strings become "REDACTED". A key is sensitive when its normalized name contains a
+credential word (key, token, secret, password, passwd, auth, cookie, session, credential, email) or equals one of
+a few identity names (user, org_id, project_id, request_id, ip, host, ...). Values are secret-like when they hold
+an email, bearer token, key prefix, JWT, AWS key id, URL with credentials, secret query parameter, base64 or long
+key-like run, or a local home path. Dict key names are scanned too, so a secret used as a key is replaced as well.
+Response ids such as "chatcmpl-..." become "REDACTED" too.
+
+Kept as they are: model ids (org/name), usage counters (prompt_tokens and friends), non-secret content text,
+finish reasons, and null or empty values, which carry no secret. Key names compare case-insensitively with "-"
+read as "_".
 """
 
 from __future__ import annotations
@@ -12,38 +19,60 @@ from collections.abc import Iterator
 from typing import Any
 
 REDACTED = "REDACTED"
+# Path element used in assert_clean errors in place of a key name that is itself secret-like.
+SECRET_KEY_LABEL = "<secret-key>"
 
-SENSITIVE_KEYS = frozenset(
+# A normalized key is sensitive when it contains one of these words, or equals one of SENSITIVE_NAMES.
+SENSITIVE_SUBSTRINGS = (
+    "key",
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "auth",
+    "cookie",
+    "session",
+    "credential",
+    "email",
+)
+SENSITIVE_NAMES = frozenset(
     {
-        "authorization",
-        "api_key",
-        "apikey",
-        "x_api_key",
-        "token",
-        "access_token",
-        "refresh_token",
-        "secret",
-        "client_secret",
-        "password",
-        "cookie",
-        "set_cookie",
-        "private_key",
-        "project_id",
-        "organization",
-        "org_id",
         "user",
-        "email",
+        "user_id",
+        "account_id",
+        "org_id",
+        "organization",
+        "project_id",
+        "tenant",
+        "workspace",
+        "request_id",
+        "trace_id",
+        "ip",
+        "host",
     }
 )
+# Usage counters such as prompt_tokens or completion_tokens_details hold numbers, not secrets.
+COUNTER_SUFFIXES = ("_tokens", "tokens_details")
 
 # Keys whose string value may be a model id such as "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B".
 MODEL_KEYS = frozenset({"id", "model", "root"})
+MODEL_ID = re.compile(r"[A-Za-z0-9_.\-]+/[A-Za-z0-9_.:\-]+")
+# Model-shaped values that start with these are local paths, not model ids.
+PATH_PREFIXES = ("home/", "Users/")
 
-MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._\-]*/[A-Za-z0-9][A-Za-z0-9._\-]*")
 EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 BEARER = re.compile(r"\bbearer\s+\S+", re.IGNORECASE)
 KEY_PREFIX = re.compile(r"\b(?:sk|nvapi|ghp|gho|tvly|xox[abprs])[-_][A-Za-z0-9_\-]{8,}")
+JWT = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")
+AWS_KEY_ID = re.compile(r"AKIA[0-9A-Z]{16}")
+URL_CREDENTIALS = re.compile(r"://[^/\s:@]+:[^@\s]+@")
+QUERY_SECRET = re.compile(r"[?&](?:token|key|api_key|access_token|sig|signature)=", re.IGNORECASE)
+LOCAL_PATH = re.compile(r"/Users/|/home/|[A-Za-z]:\\", re.IGNORECASE)
 LONG_TOKEN = re.compile(r"\b[A-Za-z0-9_\-]{32,}\b")
+# Base64 runs. Only runs holding +, / or a trailing = count here; pure alphanumeric runs are LONG_TOKEN.
+BASE64_RUN = re.compile(r"[A-Za-z0-9+/]{32,}={0,2}")
+
+_ALWAYS_SECRET = (EMAIL, BEARER, KEY_PREFIX, JWT, AWS_KEY_ID, URL_CREDENTIALS, QUERY_SECRET, LOCAL_PATH)
 
 
 def _norm(key: str) -> str:
@@ -56,25 +85,74 @@ def _key_name(key: Any) -> str:
     return key
 
 
+def _always_secret(text: str) -> bool:
+    return any(pattern.search(text) for pattern in _ALWAYS_SECRET)
+
+
+def _long_run(text: str) -> bool:
+    if LONG_TOKEN.search(text):
+        return True
+    return any(any(ch in "+/=" for ch in run.group()) for run in BASE64_RUN.finditer(text))
+
+
 def _secret_string(key: str | None, value: str) -> bool:
     """True when a string value must be redacted. `key` is the normalized key it sits under, if any."""
     if value == REDACTED:
         return False
-    if EMAIL.search(value) or BEARER.search(value) or KEY_PREFIX.search(value):
+    if _always_secret(value):
         return True
     if key in MODEL_KEYS and MODEL_ID.fullmatch(value):
-        return False
+        return value.startswith(PATH_PREFIXES)
     if key == "id":
         return True  # response ids such as chatcmpl-... are not kept
-    return LONG_TOKEN.search(value) is not None
+    return _long_run(value)
+
+
+def _secret_key(name: str) -> bool:
+    """Dict key names are scanned like model-id values, because map keys such as price tables hold model ids."""
+    return _secret_string("model", name)
+
+
+def _is_empty(value: Any) -> bool:
+    """Null and empty values carry no secret, so they are kept as they are."""
+    return value is None or (isinstance(value, (str, list, dict)) and not value)
+
+
+def _is_counter(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, dict):
+        return all(item is None or _is_counter(item) for item in value.values())
+    return False
+
+
+def _sensitive(name: str, value: Any) -> bool:
+    """True when the whole value under a normalized key must be replaced by REDACTED."""
+    if _is_empty(value):
+        return False
+    if name not in SENSITIVE_NAMES and not any(part in name for part in SENSITIVE_SUBSTRINGS):
+        return False
+    return not (name.endswith(COUNTER_SUFFIXES) and _is_counter(value))
+
+
+def _unique_key(taken: dict[str, Any], base: str) -> str:
+    candidate, n = base, 1
+    while candidate in taken:
+        n += 1
+        candidate = f"{base}_{n}"
+    return candidate
 
 
 def _clean(key: str | None, value: Any) -> Any:
     if isinstance(value, dict):
         out: dict[str, Any] = {}
         for raw_key, item in value.items():
-            name = _norm(_key_name(raw_key))
-            out[raw_key] = REDACTED if name in SENSITIVE_KEYS else _clean(name, item)
+            name = _key_name(raw_key)
+            norm = _norm(name)
+            safe = REDACTED if _secret_key(name) else name
+            out[_unique_key(out, safe)] = REDACTED if _sensitive(norm, item) else _clean(norm, item)
         return out
     if isinstance(value, list):
         return [_clean(key, item) for item in value]
@@ -94,12 +172,16 @@ def _leaks(key: str | None, value: Any, path: tuple[str, ...]) -> Iterator[tuple
     if isinstance(value, dict):
         for raw_key, item in value.items():
             name = _key_name(raw_key)
+            if _secret_key(name):
+                yield (*path, SECRET_KEY_LABEL)  # the secret key text itself is never reported
+                continue
+            norm = _norm(name)
             here = (*path, name)
-            if _norm(name) in SENSITIVE_KEYS:
+            if _sensitive(norm, item):
                 if item != REDACTED:
                     yield here
             else:
-                yield from _leaks(_norm(name), item, here)
+                yield from _leaks(norm, item, here)
     elif isinstance(value, list):
         for i, item in enumerate(value):
             yield from _leaks(key, item, (*path, str(i)))
@@ -114,7 +196,7 @@ def _leaks(key: str | None, value: Any, path: tuple[str, ...]) -> Iterator[tuple
 
 
 def assert_clean(obj: Any) -> None:
-    """Raise ValueError if any secret-like value remains. The message names key paths, never values."""
+    """Raise ValueError if any secret-like value or key remains. The message names key paths, never values."""
     leaks = list(_leaks(None, obj, ()))
     if leaks:
         where = "; ".join("/".join(path) or "<root>" for path in leaks[:10])

@@ -10,7 +10,7 @@ import json
 import os
 from pathlib import Path
 
-from cheatproof.budget import Budget
+from cheatproof.budget import Budget, BudgetExceeded
 from cheatproof.envfile import load_env
 from cheatproof.llm import GuardedLLM
 from cheatproof.sanitize import assert_clean, sanitize
@@ -35,9 +35,9 @@ def call_cheap_model(llm: GuardedLLM):
 
 
 async def sandbox_hello(budget: Budget) -> None:
+    budget.reserve_sandbox_run()  # the cap check comes before any SDK import or network call
     from contree_sdk import Contree
 
-    budget.reserve_sandbox_run()
     base = await Contree().images.use("alpine:3.19", strict=True)
     result = await base.run(shell="echo sandbox ok && uname -a", disposable=True)
     print(f"sandbox exit={result.exit_code} stdout={result.stdout.strip()!r}")
@@ -46,6 +46,8 @@ async def sandbox_hello(budget: Budget) -> None:
 def run_sandbox_step(budget: Budget) -> None:
     try:
         asyncio.run(sandbox_hello(budget))
+    except BudgetExceeded:
+        raise  # a tripped cap or a halt must stop the run, never turn into a skipped step
     except Exception as exc:  # noqa: BLE001 - optional step: report the class and a short, redacted message
         print(f"sandbox step skipped ({type(exc).__name__}): {sanitize(str(exc))[:200]}")
 
