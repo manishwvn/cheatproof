@@ -25,7 +25,7 @@ def list_nvidia_models() -> list[str]:
 
 
 def call_cheap_model() -> None:
-    model = os.environ.get("CLASSIFIER_MODEL", "nvidia/Nemotron-3-Nano-30B-A3B")
+    model = os.environ.get("CLASSIFIER_MODEL", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B")
     resp = llm.chat(model, [{"role": "user", "content": "Reply with exactly: cheatproof ok"}], max_tokens=64)
     print(f"{model}: {resp.choices[0].message.content!r} usage={resp.usage}")
 
