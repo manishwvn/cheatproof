@@ -3,6 +3,8 @@
 import dataclasses
 import json
 import re
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -124,6 +126,28 @@ class Spy:
         self.attack_calls: list[tuple] = []
         self.certs: list[dict] = []
         self.score_calls: list[Path] = []
+        self.site_calls: list[tuple] = []
+
+
+@dataclasses.dataclass(frozen=True)
+class FakeSiteResult:
+    """Shaped like site.SiteResult (queue T09 part A). The CLI reads only these three attributes."""
+
+    index: Path
+    pages: list
+    errors: list
+
+
+def fake_site(spy: Spy, *, pages: int = 2, errors=()):
+    def build_site(cert_dir, out_dir, *, traces_dir=None):
+        spy.site_calls.append((cert_dir, out_dir, traces_dir))
+        return FakeSiteResult(
+            index=out_dir / "index.html",
+            pages=[out_dir / f"page{i}.html" for i in range(pages)],
+            errors=list(errors),
+        )
+
+    return build_site
 
 
 def make_deps(spy: Spy, **overrides) -> cli.Deps:
@@ -170,6 +194,7 @@ def make_deps(spy: Spy, **overrides) -> cli.Deps:
         "build_certificate": build_certificate,
         "write_certificate": write_certificate,
         "score_directory": score_directory,
+        "build_site": fake_site(spy),
         "clock": lambda: CLOCK,
     }
     base.update(overrides)
@@ -748,3 +773,173 @@ def test_other_key_errors_get_a_generic_message(tmp_path, capsys, key):
     assert "lowercase_key" not in captured.err and "Not An Env Name" not in captured.err
     assert "Traceback" not in captured.err
     assert spy.harden_calls == []
+
+
+# site: the static report site (queue T09 part B). build_site is a fake here, except the end-to-end test at the bottom.
+
+
+def site_argv(certs: Path, out: Path, *extra: str) -> list[str]:
+    return ["site", "--certs", str(certs), "--out", str(out), *extra]
+
+
+def test_site_parser_defaults_and_flags():
+    parser = cli.build_parser()
+    args = parser.parse_args(["site"])
+    assert args.command == "site"
+    assert args.certs == Path("results/certificates") == cli.DEFAULT_CERT_DIR
+    assert args.out == Path("results/site") == cli.DEFAULT_SITE_DIR
+    assert args.traces is None
+    args = parser.parse_args(["site", "--certs", "c", "--out", "o", "--traces", "t"])
+    assert (args.certs, args.out, args.traces) == (Path("c"), Path("o"), Path("t"))
+
+
+def test_site_success_prints_one_summary_line_and_exits_0(tmp_path, capsys):
+    spy = Spy()
+    certs, out = make_certs_dir(tmp_path), tmp_path / "site"
+    rc = cli.main(site_argv(certs, out), deps=make_deps(spy))
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert spy.site_calls == [(certs, out, None)]
+    assert captured.out == f"site: 2 pages, 0 errors -> {out / 'index.html'}\n"
+    assert captured.err == ""
+
+
+def test_site_traces_reach_build_site_only_when_given(tmp_path):
+    spy = Spy()
+    certs, out, traces = make_certs_dir(tmp_path), tmp_path / "site", tmp_path / "traces"
+    traces.mkdir()
+    assert cli.main(site_argv(certs, out, "--traces", str(traces)), deps=make_deps(spy)) == 0
+    assert cli.main(site_argv(certs, out), deps=make_deps(spy)) == 0
+    assert spy.site_calls == [(certs, out, traces), (certs, out, None)]
+
+
+def test_site_load_errors_are_listed_on_stderr_and_exit_1(tmp_path, capsys):
+    spy = Spy()
+    certs, out = make_certs_dir(tmp_path), tmp_path / "site"
+    errors = [("broken.json", "not valid JSON: Expecting value"), ("short.json", "missing field: n")]
+    deps = make_deps(spy, build_site=fake_site(spy, pages=1, errors=errors))
+    rc = cli.main(site_argv(certs, out), deps=deps)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.out == f"site: 1 pages, 2 errors -> {out / 'index.html'}\n"
+    assert (
+        captured.err
+        == "error: broken.json: not valid JSON: Expecting value\nerror: short.json: missing field: n\n"
+    )
+    assert "Traceback" not in captured.err
+
+
+def test_site_missing_certs_dir_exits_2_without_building(tmp_path, capsys):
+    spy = Spy()
+    rc = cli.main(site_argv(tmp_path / "absent", tmp_path / "site"), deps=make_deps(spy))
+    assert rc == 2
+    assert spy.site_calls == []
+    assert "certificates directory not found" in capsys.readouterr().err
+
+
+def test_site_missing_traces_dir_exits_2_without_building(tmp_path, capsys):
+    spy = Spy()
+    certs = make_certs_dir(tmp_path)
+    argv = site_argv(certs, tmp_path / "site", "--traces", str(tmp_path / "absent"))
+    rc = cli.main(argv, deps=make_deps(spy))
+    assert rc == 2
+    assert spy.site_calls == []
+    assert "traces directory not found" in capsys.readouterr().err
+
+
+def test_site_file_not_found_from_build_exits_2(tmp_path, capsys):
+    def vanished(cert_dir, out_dir, *, traces_dir=None):
+        raise FileNotFoundError(2, "No such file or directory", str(cert_dir))
+
+    certs = make_certs_dir(tmp_path)
+    rc = cli.main(site_argv(certs, tmp_path / "site"), deps=make_deps(Spy(), build_site=vanished))
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "site input not found" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_site_write_error_exits_1_without_traceback(tmp_path, capsys):
+    def failing(cert_dir, out_dir, *, traces_dir=None):
+        raise OSError("disk full")
+
+    certs = make_certs_dir(tmp_path)
+    rc = cli.main(site_argv(certs, tmp_path / "site"), deps=make_deps(Spy(), build_site=failing))
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.err.strip() == "error: OSError: disk full"
+    assert "site:" not in captured.out
+
+
+def test_site_value_error_from_build_is_a_usage_error_exits_2(tmp_path, capsys):
+    message = "refusing to build into a non-empty directory that is not a cheatproof site"
+
+    def not_a_site(cert_dir, out_dir, *, traces_dir=None):
+        raise ValueError(message)
+
+    certs = make_certs_dir(tmp_path)
+    rc = cli.main(site_argv(certs, tmp_path / "site"), deps=make_deps(Spy(), build_site=not_a_site))
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.err == f"error: {message}\n"
+    assert "Traceback" not in captured.err
+    assert "site:" not in captured.out
+
+
+def test_site_never_builds_a_budget_llm_or_executor(tmp_path):
+    spy = Spy()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("site must not build a paid collaborator")
+
+    certs = make_certs_dir(tmp_path)
+    deps = make_deps(
+        spy,
+        make_budget=forbidden,
+        make_llm=forbidden,
+        make_executor=forbidden,
+        harden=forbidden,
+        attack=forbidden,
+    )
+    assert cli.main(site_argv(certs, tmp_path / "site"), deps=deps) == 0
+    assert len(spy.site_calls) == 1
+
+
+def test_default_build_site_resolves_cheatproof_site_at_call_time(tmp_path, monkeypatch):
+    calls = []
+    fake_module = types.ModuleType("cheatproof.site")
+
+    def build_site(cert_dir, out_dir, *, traces_dir=None):
+        calls.append((cert_dir, out_dir, traces_dir))
+        return "site-result"
+
+    fake_module.build_site = build_site
+    monkeypatch.setitem(
+        sys.modules, "cheatproof.site", fake_module
+    )  # stands in for site.py, never the real file
+    assert cli._build_site(tmp_path, tmp_path / "site", traces_dir=tmp_path) == "site-result"
+    assert calls == [(tmp_path, tmp_path / "site", tmp_path)]
+
+
+def test_site_end_to_end_with_default_deps_writes_the_index(tmp_path, monkeypatch, capsys):
+    # Deps.default() calls load_env(), which reads the checkout's .env. Stub it so no env file is opened.
+    monkeypatch.setattr("cheatproof.envfile.load_env", lambda *args, **kwargs: False)
+    certs = tmp_path / "certs"
+    certs.mkdir()
+    cert = certify.build_certificate(
+        fixed_harden(INSTANCE),
+        make_task(),
+        image_digest=None,
+        attacker=ATTACKER_LIMITS,
+        cost_usd=0.25,
+        timestamp=CLOCK,
+    )
+    certify.write_certificate(cert, certs)
+    out = tmp_path / "site"  # does not exist yet, so the build starts from an empty directory
+
+    rc = cli.main(site_argv(certs, out))
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert (out / "index.html").is_file()
+    assert INSTANCE in (out / "index.html").read_text(encoding="utf-8")
+    assert captured.err == ""
