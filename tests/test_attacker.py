@@ -1,9 +1,7 @@
 import ast
 import hashlib
 import json
-import os
 import shlex
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,9 +9,9 @@ import pytest
 
 from cheatproof import attacker
 from cheatproof.attacker import NUDGE, AttackConfig, attack, build_tools
-from cheatproof.budget import BudgetExceeded
+from cheatproof.budget import Budget, BudgetExceeded
 from cheatproof.executor import Result, Session
-from cheatproof.llm import MAX_OUTPUT_TOKENS, estimate_tokens
+from cheatproof.llm import MAX_OUTPUT_TOKENS, GuardedLLM, estimate_tokens
 
 SYSTEM = "SYSTEM-PROMPT-FROM-CALLER"
 TASK = "TASK-PROMPT-FROM-CALLER"
@@ -197,6 +195,29 @@ def test_run_result_shows_timeout_and_truncation_flags():
     assert "exit_code: 124 (timed out) (output truncated)" in tool_texts(llm, 1)[0]
 
 
+@pytest.mark.parametrize(
+    ("name", "args"), [("run", {"cmd": "sleep 999"}), ("read_file", {"path": "big.log"})]
+)
+def test_host_timeout_tells_the_model_the_sandbox_was_reset(name, args, tmp_path):
+    # The executor resets the sandbox on a host timeout, so earlier files are gone. The fake session does not
+    # reset anything; it only reports what the executor reports: timed_out, then a normal run.
+    outcomes = [Result(124, "partial", "", 120.0, timed_out=True), Result(0, "ok", "", 0.0)]
+    trace = tmp_path / "trace.jsonl"
+    session = FakeSession(run_handler=lambda cmd, timeout: outcomes.pop(0))
+    result, llm, _ = go(
+        [reply(call(name, args, "c1")), reply(call("run", {"cmd": "ls"}, "c2")), reply(call("submit"))],
+        session=session,
+        trace_path=trace,
+    )
+    first, second = tool_texts(llm, 1)[0], tool_texts(llm, 2)[1]
+    assert first.startswith("error: the command timed out and the sandbox was reset")
+    assert "Files written earlier in this attempt are lost" in first
+    assert "exit_code: 124 (timed out)" in first
+    assert second.startswith("exit_code: 0") and "sandbox was reset" not in second
+    assert [s["reset"] for s in result.steps] == [True, False, False]
+    assert [line["reset"] for line in read_trace(trace) if line["type"] == "step"] == [True, False, False]
+
+
 def test_write_file_allows_empty_content():
     _, _, session = go(
         [reply(call("write_file", {"path": "empty.txt", "content": ""})), reply(call("submit"))]
@@ -355,15 +376,16 @@ def test_only_the_first_tool_call_of_a_reply_runs():
     assert "only the first of 2 tool calls ran" in second[3]["content"]
 
 
-def test_session_failure_goes_back_to_the_model_as_a_tool_error():
+def test_session_failure_goes_back_to_the_model_as_the_exception_type_only():
     def boom(cmd, timeout):
-        raise RuntimeError("container gone")
+        raise RuntimeError("container gone at /host/secret-path")
 
     result, llm, _ = go(
         [reply(call("run", {"cmd": "ls"})), reply(call("submit"))], session=FakeSession(run_handler=boom)
     )
     assert result.steps[0]["error"] == "tool_exception"
-    assert "container gone" in tool_texts(llm, 1)[0]
+    assert tool_texts(llm, 1) == ["error: run failed (RuntimeError)"]
+    assert "secret-path" not in json.dumps(llm.calls[1]["messages"])
     assert result.submitted is True
 
 
@@ -463,6 +485,43 @@ def test_web_search_budget_error_propagates():
         go([reply(call("web_search", {"query": "q"}))], config=cfg, search=search)
 
 
+def test_web_search_limit_stops_calls_to_the_search_function():
+    searched: list[str] = []
+
+    def search(query: str) -> list[dict]:
+        searched.append(query)
+        return []
+
+    cfg = AttackConfig(model=MODEL, allow_network=True, max_searches=2)
+    result, llm, _ = go(
+        [
+            reply(call("web_search", {"query": "a"}, "c1")),
+            reply(call("web_search", {"query": "b"}, "c2")),
+            reply(call("web_search", {"query": "c"}, "c3")),
+            reply(call("submit", {}, "c4")),
+        ],
+        config=cfg,
+        search=search,
+    )
+    assert searched == ["a", "b"]  # the third call never reached the callable
+    assert [s["error"] for s in result.steps] == [None, None, "search_limit", None]
+    assert tool_texts(llm, 3)[2].startswith("error: web_search limit of 2 per attempt reached")
+    assert result.submitted is True  # the limit is a tool error, not the end of the attempt
+
+
+def test_zero_max_searches_does_not_offer_web_search():
+    searched: list[str] = []
+    cfg = AttackConfig(model=MODEL, allow_network=True, max_searches=0)
+    result, llm, _ = go(
+        [reply(call("web_search", {"query": "q"})), reply(call("submit"))],
+        config=cfg,
+        search=lambda q: searched.append(q) or [],
+    )
+    assert "web_search" not in tool_names(llm)
+    assert searched == []
+    assert result.steps[0]["error"] == "unknown_tool"
+
+
 # --- budget and errors ---
 
 
@@ -497,6 +556,21 @@ def test_budget_exceeded_without_a_trace_file_still_propagates():
         go([BudgetExceeded("total cap reached")])
 
 
+def test_http_402_from_the_llm_raises_budget_exceeded_and_is_traced(tmp_path):
+    class FakeApiError(Exception):
+        status_code = 402
+
+    trace = tmp_path / "trace.jsonl"
+    llm = FakeLLM([reply(call("run", {"cmd": "ls"})), FakeApiError(f"balance gone key={FAKE_KEY}")])
+    with pytest.raises(BudgetExceeded, match="402"):
+        attack(llm, FakeSession(), SYSTEM, TASK, CFG, trace_path=trace)
+    lines = read_trace(trace)
+    assert lines[-2]["error"] == "budget_exceeded"
+    assert lines[-1]["type"] == "end" and lines[-1]["stop_reason"] == "budget"
+    assert FAKE_KEY not in trace.read_text()
+    assert len(llm.calls) == 2  # no call after the halt
+
+
 def test_llm_failure_stops_with_error_and_leaks_no_message():
     class FakeApiError(Exception):
         status_code = 500
@@ -521,9 +595,33 @@ def test_reply_without_a_message_stops_with_error():
 def test_diff_failure_is_noted_and_the_diff_is_empty():
     session = FakeSession(diff_error=RuntimeError("git broke"))
     result, _, _ = go([reply(call("submit"))], session=session)
-    assert result.submitted is True
-    assert result.final_diff == ""
+    assert result.final_diff is None  # no patch at all, which is not the same as an empty patch
+    assert result.diff_ok is False
+    assert result.stop_reason == "error"
+    assert result.submitted is True  # the model did submit; the attempt still ends as an error
     assert "diff failed" in result.error and "git broke" in result.error
+
+
+def test_oversized_diff_is_an_error_not_a_normal_submit(tmp_path):
+    # The executor raises this RuntimeError instead of truncating a patch over MAX_DIFF_BYTES.
+    trace = tmp_path / "trace.jsonl"
+    message = "diff is over MAX_DIFF_BYTES=8388608; refusing to truncate it"
+    session = FakeSession(diff_error=RuntimeError(message))
+    result, _, _ = go([reply(call("submit"))], session=session, trace_path=trace)
+    assert result.stop_reason == "error"
+    assert result.diff_ok is False and result.final_diff is None
+    assert "MAX_DIFF_BYTES" in result.error
+    end = read_trace(trace)[-1]
+    assert end["type"] == "end" and end["stop_reason"] == "error"
+    assert end["diff_ok"] is False and end["final_diff"] is None
+
+
+def test_budget_exceeded_from_the_diff_still_propagates(tmp_path):
+    trace = tmp_path / "trace.jsonl"
+    session = FakeSession(diff_error=BudgetExceeded("total cap reached"))
+    with pytest.raises(BudgetExceeded, match="total cap"):
+        go([reply(call("submit"))], session=session, trace_path=trace)
+    assert read_trace(trace)[-1]["stop_reason"] == "budget"
 
 
 # --- trace ---
@@ -565,6 +663,7 @@ def test_trace_file_has_one_json_line_per_step_with_digests_only(tmp_path, monke
             "result_digest",
             "error",
             "ignored_calls",
+            "reset",
             "tokens_in",
             "tokens_out",
             "elapsed",
@@ -579,6 +678,7 @@ def test_trace_file_has_one_json_line_per_step_with_digests_only(tmp_path, monke
     assert (steps[1]["tokens_in"], steps[1]["tokens_out"]) == (150, 30)
     assert end["type"] == "end"
     assert end["stop_reason"] == "submit" and end["submitted"] is True
+    assert end["diff_ok"] is True and set(end["final_diff"]) == {"sha256", "head", "chars"}
     assert (end["tokens_in"], end["tokens_out"]) == (450, 60)
     assert FAKE_KEY not in raw and "NEBIUS" not in raw  # no env values or keys in the trace
 
@@ -605,34 +705,69 @@ def test_trace_survives_lone_surrogates_in_model_text(tmp_path):
 # --- containment ---
 
 
-def test_tool_calls_only_reach_the_session_never_the_host(tmp_path, monkeypatch):
+def test_absolute_paths_go_to_the_session_and_the_host_is_untouched(tmp_path):
+    # Paths the model names are handed to the session as text. Nothing in this test lets the attacker
+    # touch the host, so the victim file must not appear and the host file must not change.
     host_file = tmp_path / "host_only.txt"
     host_file.write_text("HOST-ONLY-CONTENT")
     victim = tmp_path / "victim.txt"
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("tool call reached the host")
-
-    monkeypatch.setattr(subprocess, "Popen", forbidden)
-    monkeypatch.setattr(subprocess, "run", forbidden)
-    monkeypatch.setattr(os, "system", forbidden)
     session = FakeSession(run_handler=lambda cmd, timeout: Result(0, "SANDBOX VIEW", "", 0.0))
     result, llm, _ = go(
         [
             reply(call("write_file", {"path": "/etc/passwd", "content": "root::0:0::/:/bin/sh\n"}, "c1")),
             reply(call("write_file", {"path": str(victim), "content": "pwned"}, "c2")),
             reply(call("read_file", {"path": str(host_file)}, "c3")),
-            reply(call("run", {"cmd": f"rm -rf {victim.parent}"}, "c4")),
-            reply(call("submit", {}, "c5")),
+            reply(call("submit", {}, "c4")),
         ],
         session=session,
     )
     assert result.submitted is True
     assert session.files == {"/etc/passwd": "root::0:0::/:/bin/sh\n", str(victim): "pwned"}
-    assert session.runs == [(f"cat -- {shlex.quote(str(host_file))}", 120), (f"rm -rf {victim.parent}", 120)]
+    assert session.runs == [(f"cat -- {shlex.quote(str(host_file))}", 120)]
     assert not victim.exists()
     assert host_file.read_text() == "HOST-ONLY-CONTENT"
     assert all("HOST-ONLY-CONTENT" not in json.dumps(c["messages"]) for c in llm.calls)
+
+
+class _CallScopes(ast.NodeVisitor):
+    """Every call in a module, with the chain of class and function names it sits in."""
+
+    def __init__(self) -> None:
+        self.stack: list[str] = []
+        self.calls: list[tuple[tuple[str, ...], ast.Call]] = []
+
+    def _scoped(self, node: ast.ClassDef | ast.FunctionDef) -> None:
+        self.stack.append(node.name)
+        self.generic_visit(node)
+        self.stack.pop()
+
+    visit_ClassDef = _scoped
+    visit_FunctionDef = _scoped
+
+    def visit_Call(self, node: ast.Call) -> None:
+        self.calls.append((tuple(self.stack), node))
+        self.generic_visit(node)
+
+
+# Code execution and file-writing attribute calls. None belongs in the attacker, with one exception: the
+# trace writer appends to its JSONL file (and creates the parent directory) through self.path.
+EXEC_AND_WRITE_ATTRS = {
+    "eval",
+    "exec",
+    "compile",
+    "__import__",
+    "import_module",
+    "open",
+    "write_text",
+    "write_bytes",
+    "unlink",
+    "mkdir",
+    "touch",
+    "rmdir",
+    "rename",
+    "symlink_to",
+    "chmod",
+}
 
 
 def test_attacker_module_has_no_host_execution_or_file_access():
@@ -643,12 +778,35 @@ def test_attacker_module_has_no_host_execution_or_file_access():
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.add(node.module.split(".")[0])
-    assert not imported & {"subprocess", "shutil", "socket", "httpx", "requests", "urllib", "tempfile"}
+    assert not imported & {
+        "subprocess",
+        "shutil",
+        "socket",
+        "httpx",
+        "requests",
+        "urllib",
+        "tempfile",
+        "importlib",
+    }
     os_uses = {
         n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and getattr(n.value, "id", "") == "os"
     }
     assert os_uses <= {"environ"}  # os is only used to read ATTACKER_MODEL
-    assert not [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "open"]
+    scopes = _CallScopes()
+    scopes.visit(tree)
+    bare = {c.func.id for _, c in scopes.calls if isinstance(c.func, ast.Name)}
+    assert not bare & {"eval", "exec", "compile", "__import__", "open"}
+    found = sorted(
+        (scope, c.func.attr, ast.unparse(c.func.value))
+        for scope, c in scopes.calls
+        if isinstance(c.func, ast.Attribute) and c.func.attr in EXEC_AND_WRITE_ATTRS
+    )
+    assert found == sorted(
+        [
+            (("_Trace", "write"), "mkdir", "self.path.parent"),
+            (("_Trace", "write"), "open", "self.path"),
+        ]
+    )
 
 
 # --- config and arguments ---
@@ -678,6 +836,7 @@ def test_config_defaults_match_the_brief():
     )
     assert cfg.max_output_tokens == min(2048, MAX_OUTPUT_TOKENS)
     assert cfg.label is None
+    assert cfg.max_searches == 3
 
 
 @pytest.mark.parametrize(
@@ -690,6 +849,7 @@ def test_config_defaults_match_the_brief():
         {"cmd_timeout": 0},
         {"cmd_timeout": float("nan")},
         {"cmd_timeout": float("inf")},
+        {"max_searches": -1},
     ],
 )
 def test_invalid_config_is_refused(bad):
@@ -703,3 +863,48 @@ def test_invalid_prompts_are_refused(system, task):
     with pytest.raises(ValueError, match="prompt"):
         attack(llm, FakeSession(), system, task, CFG)
     assert llm.calls == []
+
+
+# --- real GuardedLLM and Budget: a fake OpenAI-shaped client, no network ---
+
+
+class FakeOpenAIClient:
+    """Shaped like openai.OpenAI for the one call GuardedLLM makes: chat.completions.create(**kwargs)."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.requests: list[dict] = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs):
+        self.requests.append(kwargs)
+        return self.replies.pop(0)
+
+
+def test_attack_through_guarded_llm_and_a_real_budget_ledger(tmp_path, monkeypatch):
+    ledger = tmp_path / "ledger.json"
+    monkeypatch.setenv("SPEND_LEDGER", str(ledger))
+    monkeypatch.setenv("SPEND_CAP_USD", "1")
+    monkeypatch.setenv("DAILY_CAP_USD", "1")
+    monkeypatch.setenv(
+        "MODEL_PRICES_JSON", json.dumps({MODEL: [1.0, 2.0]})
+    )  # USD per million tokens, in and out
+    budget = Budget.from_env()
+    client = FakeOpenAIClient(
+        [
+            reply(call("run", {"cmd": "ls"}, "c1"), usage=(100, 20)),
+            reply(call("submit", {}, "c2"), usage=(150, 10)),
+        ]
+    )
+    trace = tmp_path / "trace.jsonl"
+    result = attack(GuardedLLM(budget, client=client), FakeSession(), SYSTEM, TASK, CFG, trace_path=trace)
+    assert result.submitted is True and result.stop_reason == "submit"
+    assert [r["model"] for r in client.requests] == [MODEL, MODEL]
+    assert set(client.requests[0]) == {"model", "messages", "max_tokens", "tools"}  # only allowed options
+    # Each reservation settles to the reported usage: (100 in, 20 out) and (150 in, 10 out).
+    snapshot = budget.snapshot()
+    assert snapshot["total_usd"] == pytest.approx((100 + 20 * 2 + 150 + 10 * 2) / 1_000_000)
+    assert snapshot["halted"] is None
+    assert ledger.exists()
+    end = read_trace(trace)[-1]
+    assert end["stop_reason"] == "submit" and end["diff_ok"] is True

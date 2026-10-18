@@ -20,7 +20,7 @@ import shlex
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, NamedTuple, Protocol
 
 from cheatproof.budget import BudgetExceeded
 from cheatproof.executor import Result, Session
@@ -32,6 +32,11 @@ DIGEST_HEAD_CHARS = 300
 ERROR_DETAIL_CHARS = 300
 MAX_CALL_ID_CHARS = 64
 NUDGE = "Use a tool or call submit."
+# The executor resets the sandbox when a run hits the host timeout (executor.Session.run). The model must know.
+RESET_NOTE = (
+    "error: the command timed out and the sandbox was reset. Files written earlier in this attempt are lost; "
+    "the sandbox is a fresh copy of the starting image."
+)
 
 StopReason = Literal["submit", "max_steps", "token_limit", "budget", "error"]
 
@@ -43,13 +48,20 @@ class ChatLLM(Protocol):
 
 
 class SearchFn(Protocol):
-    """Host-side web search (Tavily, counted against its own cap by the caller)."""
+    """Host-side web search. The caller's callable must reserve against budget.py itself, one reservation
+    per call, because each call is paid (Tavily). The attacker only counts calls, up to max_searches."""
 
     def __call__(self, query: str) -> list[dict]: ...
 
 
 @dataclass(frozen=True)
 class AttackConfig:
+    """Limits and switches for one attempt.
+
+    allow_network must match the session's EnvSpec.network. The caller sets both. This module cannot read the
+    session's network setting, so a mismatch is not detected here. web_search runs host side either way.
+    """
+
     # Empty until ATTACKER_MODEL is set; attack() refuses to start without a model.
     model: str = field(default_factory=lambda: os.environ.get("ATTACKER_MODEL", "").strip())
     max_steps: int = 15
@@ -59,6 +71,7 @@ class AttackConfig:
     label: str | None = None  # free-form tag recorded in the trace header (for example the strategy)
     allow_network: bool = False
     cmd_timeout: float = 120
+    max_searches: int = 3  # web_search calls per attempt; the search callable is not called past this
 
     def __post_init__(self) -> None:
         if self.max_steps < 1:
@@ -71,18 +84,24 @@ class AttackConfig:
             )
         if not (math.isfinite(self.cmd_timeout) and self.cmd_timeout > 0):
             raise ValueError(f"cmd_timeout must be a positive number, got {self.cmd_timeout!r}")
+        if self.max_searches < 0:
+            raise ValueError(f"max_searches must be 0 or more, got {self.max_searches!r}")
 
 
 @dataclass
 class AttackResult:
+    # True when the model's submit ran without a tool error. It stays True if the diff then fails,
+    # so check stop_reason and diff_ok too.
     submitted: bool
     # "budget" is for callers that record a halted attempt: attack() itself re-raises BudgetExceeded.
+    # "error" also covers a failed diff: the attempt has no patch to score.
     stop_reason: StopReason
     steps: list[dict]
     tokens_in: int
     tokens_out: int
-    final_diff: str
+    final_diff: str | None  # None when diff_ok is False. An empty string is a real, empty patch.
     error: str = ""
+    diff_ok: bool = True
 
 
 class _ToolError(Exception):
@@ -100,6 +119,18 @@ class _Call:
     name: str
     raw_args: object
     extra: int  # tool calls after the first in the same reply; they are not run
+
+
+class _Output(NamedTuple):
+    text: str  # the tool result the model sees
+    reset: bool = False  # True when the executor reset the sandbox during this call
+
+
+@dataclass
+class _SearchTally:
+    """web_search calls that reached the search callable in this attempt."""
+
+    made: int = 0
 
 
 def _tool(name: str, description: str, properties: dict[str, dict], required: list[str]) -> dict:
@@ -248,6 +279,13 @@ def _format_run(res: Result) -> str:
     return f"{head}\n--- stdout ---\n{res.stdout}\n--- stderr ---\n{res.stderr}"
 
 
+def _run_output(res: Result) -> _Output:
+    # A host timeout makes the executor reset the sandbox, so the reset note goes first.
+    if res.timed_out:
+        return _Output(f"{RESET_NOTE}\n{_format_run(res)}", reset=True)
+    return _Output(_format_run(res))
+
+
 def _detail(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {str(exc)[:ERROR_DETAIL_CHARS]}"
 
@@ -272,24 +310,31 @@ def _run_tool(
     session: Session,
     config: AttackConfig,
     search: SearchFn | None,
-) -> str:
+    tally: _SearchTally,
+) -> _Output:
     if name == "run":
-        return _format_run(session.run(_str_arg(args, "cmd"), config.cmd_timeout))
+        return _run_output(session.run(_str_arg(args, "cmd"), config.cmd_timeout))
     if name == "read_file":
         path = _str_arg(args, "path")
         res = session.run(f"cat -- {shlex.quote(path)}", config.cmd_timeout)
         if res.exit_code == 0 and not res.timed_out:
-            return res.stdout
-        return _format_run(res)
+            return _Output(res.stdout)
+        return _run_output(res)
     if name == "write_file":
         path = _str_arg(args, "path")
         content = _str_arg(args, "content", allow_empty=True)
         session.write_file(path, content)
-        return f"wrote {len(content.encode('utf-8', 'replace'))} bytes to {path}"
+        return _Output(f"wrote {len(content.encode('utf-8', 'replace'))} bytes to {path}")
     if name == "submit":
-        return "submitted"
+        return _Output("submitted")
     if name == "web_search" and search is not None:
         query = _str_arg(args, "query")
+        if tally.made >= config.max_searches:
+            # Checked before the callable runs, so a refused call costs nothing.
+            raise _ToolError(
+                "search_limit", f"error: web_search limit of {config.max_searches} per attempt reached"
+            )
+        tally.made += 1
         try:
             results = search(query)
         except BudgetExceeded:
@@ -299,7 +344,7 @@ def _run_tool(
             raise _ToolError("tool_exception", f"error: web_search failed ({type(exc).__name__})") from None
         if not isinstance(results, list) or not all(isinstance(r, dict) for r in results):
             raise _ToolError("tool_exception", "error: web_search returned an unexpected result")
-        return json.dumps(results, default=str)
+        return _Output(json.dumps(results, default=str))
     raise _ToolError("unknown_tool", f"error: unknown tool {name!r}")
 
 
@@ -315,7 +360,9 @@ def attack(
     """Run one attempt. Stops at submit, max_steps, the token limit or an LLM error.
 
     A step is one model call plus the one tool call it made (extra tool calls in the same reply are
-    not run). BudgetExceeded from the LLM or from a tool is written to the trace and re-raised.
+    not run). BudgetExceeded from the LLM or from a tool is written to the trace and re-raised. An HTTP 402
+    from the LLM is the same stop: GuardedLLM has halted the ledger, so this raises BudgetExceeded.
+    If the final diff cannot be taken, stop_reason is "error" and diff_ok is False, even after submit.
     """
     config = config or AttackConfig()
     if not config.model.strip():
@@ -323,9 +370,10 @@ def attack(
     if not isinstance(system_prompt, str) or not isinstance(task_prompt, str) or not task_prompt.strip():
         raise ValueError("system_prompt and task_prompt must be strings, and task_prompt must not be empty")
 
-    tools = build_tools(web_search=config.allow_network and search is not None)
+    tools = build_tools(web_search=config.allow_network and search is not None and config.max_searches > 0)
     tool_names = [t["function"]["name"] for t in tools]
     trace = _Trace(trace_path)
+    tally = _SearchTally()
     steps: list[dict] = []
     messages: list[dict] = [
         {"role": "system", "content": system_prompt},
@@ -339,6 +387,7 @@ def attack(
             "max_steps": config.max_steps,
             "max_tokens_total": config.max_tokens_total,
             "max_output_tokens": config.max_output_tokens,
+            "max_searches": config.max_searches,
             "allow_network": config.allow_network,
             "cmd_timeout": config.cmd_timeout,
             "tools": tool_names,
@@ -362,6 +411,7 @@ def attack(
         t_in: int,
         t_out: int,
         ignored: int = 0,
+        reset: bool = False,
     ) -> None:
         rec = {
             "type": "step",
@@ -371,6 +421,7 @@ def attack(
             "result_digest": _digest(result),
             "error": code,
             "ignored_calls": ignored,
+            "reset": reset,
             "tokens_in": t_in,
             "tokens_out": t_out,
             "elapsed": round(time.monotonic() - started, 3),
@@ -405,9 +456,17 @@ def attack(
                 record(step, started, None, {}, _detail(exc), "budget_exceeded", 0, 0)
             end_on_budget(exc)
             raise
-        except Exception as exc:  # noqa: BLE001 - any LLM failure ends the attempt as stop_reason error
-            # Only the type: provider error text is not trusted to be free of request details.
+        except Exception as exc:  # noqa: BLE001 - any other LLM failure ends the attempt as stop_reason error
             status = getattr(exc, "status_code", None)
+            if status == 402:
+                # Balance exhausted. GuardedLLM has already halted the ledger, so stop like a budget cap.
+                # The provider text is not used: the message is ours.
+                halt = BudgetExceeded("HTTP 402 from the LLM provider: balance exhausted, attempt halted")
+                with contextlib.suppress(OSError):
+                    record(step, started, None, {}, _detail(halt), "budget_exceeded", 0, 0)
+                end_on_budget(halt)
+                raise halt from None
+            # Only the type: provider error text is not trusted to be free of request details.
             where = f" (HTTP {status})" if _is_count(status) else ""
             stop_reason, error = "error", f"llm call failed: {type(exc).__name__}{where}"
             record(step, started, None, {}, error, "llm_error", 0, 0)
@@ -435,6 +494,7 @@ def attack(
         args: dict = {}
         sent_args = "{}"  # what the history keeps; bad JSON is not echoed back to the provider
         code: str | None = None
+        reset = False
         try:
             args = _parse_args(call.raw_args)
             if isinstance(call.raw_args, str) and call.raw_args.strip():
@@ -445,7 +505,8 @@ def attack(
                 raise _ToolError(
                     "unknown_tool", f"error: unknown tool {call.name!r}; use one of {tool_names}"
                 )
-            result = _run_tool(call.name, args, session, config, search)
+            out = _run_tool(call.name, args, session, config, search, tally)
+            result, reset = out.text, out.reset
         except _ToolError as err:
             result, code = err.message, err.code
             if err.code == "bad_json":
@@ -458,9 +519,12 @@ def attack(
             end_on_budget(exc)
             raise
         except Exception as exc:  # noqa: BLE001 - executor failures go to the model as a tool error
-            result, code = f"error: {_detail(exc)}", "tool_exception"
+            # The name of the tool is known here (unknown names were refused above). Only the type of the
+            # exception goes back: its text can carry paths or container details.
+            result = f"error: {call.name} failed ({type(exc).__name__})"
+            code = "tool_exception"
 
-        record(step, started, call.name, args, result, code, t_in, t_out, call.extra)
+        record(step, started, call.name, args, result, code, t_in, t_out, call.extra, reset)
         shown = _clip(result)
         if call.extra:
             shown += f"\n[only the first of {call.extra + 1} tool calls ran; send one tool call per step]"
@@ -482,13 +546,16 @@ def attack(
             submitted, stop_reason = True, "submit"
             break
 
-    final_diff = ""
+    final_diff: str | None = None
+    diff_ok = True
     try:
         final_diff = session.diff()
     except BudgetExceeded as exc:
         end_on_budget(exc)
         raise
-    except Exception as exc:  # noqa: BLE001 - a failed diff is noted in the result, not raised
+    except Exception as exc:  # noqa: BLE001 - a failed diff is reported in the result, not raised
+        # No patch means nothing to score. Never report a normal submit with an empty diff.
+        diff_ok, stop_reason = False, "error"
         note = f"diff failed: {_detail(exc)}"
         error = f"{error}; {note}" if error else note
 
@@ -497,11 +564,12 @@ def attack(
             "type": "end",
             "stop_reason": stop_reason,
             "submitted": submitted,
+            "diff_ok": diff_ok,
             "steps": len(steps),
             "tokens_in": tokens_in,
             "tokens_out": tokens_out,
             "error": error,
-            "final_diff": _digest(final_diff),
+            "final_diff": None if final_diff is None else _digest(final_diff),
         }
     )
     return AttackResult(
@@ -512,4 +580,5 @@ def attack(
         tokens_out=tokens_out,
         final_diff=final_diff,
         error=error,
+        diff_ok=diff_ok,
     )
