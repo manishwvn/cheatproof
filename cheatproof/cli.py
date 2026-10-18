@@ -1,18 +1,23 @@
-"""Command line for the re-attack loop and the certificate report (queue T07).
+"""Command line for the re-attack loop, the certificate report (T07) and the static site (T09).
 
     python -m cheatproof.cli harden <instance-id> --system-prompt-file PATH [--source S] [--cache-dir DIR]
         [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S]
     python -m cheatproof.cli report [--certs DIR] [--out FILE] [--format text|json]
+    python -m cheatproof.cli site [--certs DIR] [--out DIR] [--traces DIR]
 
 harden finds the task in the local cache only (never the network), runs harden() with one attacker bound to the
 given system prompt, writes one certificate and prints its path and a summary line. The attacker's task prompt is
 a description of the task (repo, instance id, failing tests). The gold and test patches never reach it.
 report prints certify.score_directory() as it is: rates with their n, raw counts, outcomes, holes and sources.
 The rates, intervals and totals are computed in certify.py only; this module does no statistics of its own.
+site builds the static report site through site.build_site from the certificate files. It is not a paid call:
+no Budget, LLM or executor is built for it.
 
 Exit codes: 0 a certificate was written (certified or not), or the report was printed. 1 the budget was halted or
 capped, the executor refused or was unavailable, or the certificate could not be written after a paid run. 2 usage
 error: bad flags, missing prompt, unknown or ambiguous task, missing setting, no certificates.
+site: 0 the site was written and every certificate loaded; 1 the site was written but some did not load (each
+listed on stderr), or the write failed; 2 the certificates or traces directory is missing.
 
 Collaborators come from Deps. Tests inject fakes; Deps.default() imports the real ones.
 Contract with certify.score_directory: a dict with int n, n_after, hackable_before, hackable_after, certified,
@@ -44,6 +49,7 @@ if TYPE_CHECKING:
 
 DEFAULT_CACHE_DIR = Path("runs/tasks")
 DEFAULT_CERT_DIR = Path("results/certificates")
+DEFAULT_SITE_DIR = Path("results/site")
 UPPER_BOUND_NOTE = "Upper bound against this attacker, not proof."
 ERROR_CHARS = 300
 ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")  # what an environment variable name looks like
@@ -66,6 +72,7 @@ class Deps:
     build_certificate: Callable[..., dict[str, Any]]
     write_certificate: Callable[[dict[str, Any], Path], Path]
     score_directory: Callable[[Path], Mapping[str, Any]]
+    build_site: Callable[..., Any]
     clock: Callable[[], str]
 
     @classmethod
@@ -87,6 +94,7 @@ class Deps:
             build_certificate=certify.build_certificate,
             write_certificate=certify.write_certificate,
             score_directory=certify.score_directory,
+            build_site=_build_site,
             clock=_utc_now,
         )
 
@@ -95,6 +103,12 @@ def _make_llm(budget: Any) -> Any:
     from cheatproof.llm import GuardedLLM  # imports the OpenAI client, so keep it out of module import
 
     return GuardedLLM(budget)
+
+
+def _build_site(cert_dir: Path, out_dir: Path, *, traces_dir: Path | None = None) -> Any:
+    from cheatproof.site import build_site  # lazy: this module imports even when site.py is absent
+
+    return build_site(cert_dir, out_dir, traces_dir=traces_dir)
 
 
 def _utc_now() -> str:
@@ -385,6 +399,26 @@ def cmd_report(args: argparse.Namespace, deps: Deps) -> int:
     return 0
 
 
+def cmd_site(args: argparse.Namespace, deps: Deps) -> int:
+    """Build the static site from the certificates. Not a paid call: no Budget, LLM or executor is built."""
+    cert_dir: Path = args.certs
+    if not cert_dir.is_dir():
+        return _usage_error(f"certificates directory not found: {cert_dir}")
+    if args.traces is not None and not args.traces.is_dir():
+        return _usage_error(f"traces directory not found: {args.traces}")
+    try:
+        result = deps.build_site(cert_dir, args.out, traces_dir=args.traces)
+    except FileNotFoundError as exc:
+        return _usage_error(f"site input not found: {sanitize(str(exc))[:ERROR_CHARS]}")
+    except (OSError, ValueError) as exc:
+        return _failure(exc)
+    print(f"site: {len(result.pages)} pages, {len(result.errors)} errors -> {result.index}")
+    for name, message in result.errors:
+        text = sanitize(str(message))[:ERROR_CHARS]
+        print(f"error: {sanitize(str(name))[:ERROR_CHARS]}: {text}", file=sys.stderr)
+    return 1 if result.errors else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m cheatproof.cli", description="Harden one task into a certificate, or report them."
@@ -410,6 +444,11 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--certs", type=Path, default=DEFAULT_CERT_DIR, help="certificates directory")
     report.add_argument("--out", type=Path, help="also write the score as JSON to this file")
     report.add_argument("--format", choices=("text", "json"), default="text")
+
+    site = sub.add_parser("site", help="build the static report site from certificates; no paid calls")
+    site.add_argument("--certs", type=Path, default=DEFAULT_CERT_DIR, help="certificates directory")
+    site.add_argument("--out", type=Path, default=DEFAULT_SITE_DIR, help="directory for the site")
+    site.add_argument("--traces", type=Path, help="traces directory (optional)")
     return parser
 
 
@@ -422,6 +461,8 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
         deps = Deps.default()
     if args.command == "harden":
         return cmd_harden(args, deps)
+    if args.command == "site":
+        return cmd_site(args, deps)
     return cmd_report(args, deps)
 
 

@@ -1,0 +1,748 @@
+"""Static report site over committed certificates (queue T09, part A).
+
+build_site() loads each *.json certificate in a directory with certify.load_certificate() and scores the valid ones with
+certify.score(). It writes index.html (the score, one row per environment and the files that failed to load) and
+env/<name>.html (one page per valid certificate, with its transcript when traces_dir holds one). Every rate, interval
+and count comes from certify.py. This module computes none of its own.
+
+The site replays committed records. Nothing here calls a model or the network, and the pages have no JavaScript. A
+certificate, trace or diff is untrusted attacker or model text, so every value reaches a page through _cell(), which
+escapes with html.escape(quote=True). Output is deterministic: the same input gives the same bytes, and no current
+time or absolute path is written.
+"""
+
+from __future__ import annotations
+
+import html
+import json
+import re
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from cheatproof.certify import load_certificate, score
+
+BANNER = "Recorded run — replay of committed certificates, no live calls"
+NO_TRANSCRIPT = "no transcript recorded"
+NOT_RECORDED = "not recorded"
+NO_ATTACK_DIFF = "attack diff not recorded in certificate"
+UNREADABLE_LINE = "unreadable line"
+RUN_COMMAND = "python -m cheatproof.cli harden <instance id> ..."
+DEFAULT_CERT_DIR = "results/certificates"
+UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
+TRACE_HEADERS = ("Line", "Type", "Step", "Tool", "Args", "Result", "Tokens in", "Tokens out", "Error")
+CSP_META = (
+    """<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">"""
+)
+CSS = """:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #57606a;
+  --line: #d0d7de;
+  --panel: #f6f8fa;
+  --link: #0a58ca;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9da7b3;
+    --line: #3d444d;
+    --panel: #161b22;
+    --link: #79b8ff;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 16px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 72rem; margin: 0 auto; }
+h1 { font-size: 1.6rem; line-height: 1.25; overflow-wrap: anywhere; }
+h2 { font-size: 1.25rem; margin: 2rem 0 0.5rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--line); }
+h3 { font-size: 1.05rem; margin: 1.5rem 0 0.25rem; }
+a { color: var(--link); overflow-wrap: anywhere; }
+.banner, .empty { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+.banner { border-left: 4px solid var(--link); }
+.label { border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; color: var(--muted); font-size: 0.875rem; }
+.table-wrap { max-width: 100%; overflow-x: auto; margin: 0.5rem 0 1rem; }
+table { width: 100%; border-collapse: collapse; }
+caption { caption-side: top; text-align: left; color: var(--muted); padding: 0.25rem 0; }
+th, td { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+thead th { border-bottom: 2px solid var(--line); }
+th[scope="row"] { font-weight: 600; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.875rem; }
+code { overflow-wrap: anywhere; }
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+"""
+
+
+@dataclass(frozen=True)
+class SiteResult:
+    """What build_site wrote: the index, one page per valid certificate, and each file that failed to load."""
+
+    index: Path
+    pages: list[Path]
+    errors: list[tuple[str, str]]  # (certificate file name, error message)
+
+
+@dataclass(frozen=True)
+class _Entry:
+    name: str  # env/<name>.html, and the stem of its trace file
+    cert: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _Raw:
+    """Markup this module wrote itself (a link or a code span). Any other cell value is escaped."""
+
+    markup: str
+
+
+def build_site(cert_dir: Path, out_dir: Path, *, traces_dir: Path | None = None) -> SiteResult:
+    """Write the site for the certificates in cert_dir into out_dir and return what was written.
+
+    Raises FileNotFoundError when cert_dir is not a directory. A file that fails to load is listed in errors and on
+    the index, and the rest still build. traces_dir/<name>.jsonl, when it exists, is the transcript of env/<name>.html.
+    """
+    root = Path(cert_dir)
+    if not root.is_dir():
+        raise FileNotFoundError(f"no certificate directory: {root}")
+    entries, errors = _load_all(root)
+    out = Path(out_dir)
+    env_dir = out / "env"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    summary = score([entry.cert for entry in entries]) if entries else None
+    index = out / "index.html"
+    _write(index, _document("Cheatproof report", _index_body(entries, errors, summary)))
+    pages = []
+    for entry in entries:
+        page = env_dir / f"{entry.name}.html"
+        body = _env_body(entry.cert, _transcript_body(traces_dir, entry.name))
+        _write(page, _document(f"Cheatproof: {entry.cert['task']['instance_id']}", body))
+        pages.append(page)
+    return SiteResult(index=index, pages=pages, errors=errors)
+
+
+def _load_all(root: Path) -> tuple[list[_Entry], list[tuple[str, str]]]:
+    """Every *.json certificate in root, in name order. A file that fails to load becomes an error row."""
+    entries: list[_Entry] = []
+    errors: list[tuple[str, str]] = []
+    taken: set[str] = set()
+    for path in sorted(root.glob("*.json")):
+        if not path.is_file():
+            continue
+        try:
+            cert = load_certificate(path)
+        except Exception as exc:  # noqa: BLE001 - a certificate is untrusted input: any failure is a row
+            errors.append((path.name, _error_text(exc, path)))
+            continue
+        entries.append(_Entry(_page_name(path.stem, taken), cert))
+    return entries, errors
+
+
+def _page_name(stem: str, taken: set[str]) -> str:
+    """A page name from a certificate's file stem. Unsafe characters become "_"; a clash gets "-2", "-3", and so on."""
+    base = UNSAFE_NAME.sub("_", stem).strip(".") or "certificate"
+    name, number = base, 2
+    while name.casefold() in taken:
+        name = f"{base}-{number}"
+        number += 1
+    taken.add(name.casefold())  # case-folded, so names do not clash on a case-insensitive file system
+    return name
+
+
+def _error_text(exc: Exception, path: Path) -> str:
+    """The error message with the full path cut to the file name, so no absolute path reaches the site."""
+    return str(exc).replace(str(path), path.name) or type(exc).__name__
+
+
+def _write(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+# Escaping and table helpers. Every value that comes from a certificate or a trace passes through _cell.
+
+
+def _cell(value: Any) -> str:
+    """The escaped HTML for one value. A _Raw is markup this module wrote; anything else is _value() escaped."""
+    if isinstance(value, _Raw):
+        return value.markup
+    return html.escape(_value(value), quote=True)
+
+
+def _value(value: Any) -> str:
+    """Plain text for one value: yes or no for a bool, a comma list for a list, "not recorded" for None."""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if value is None:
+        return NOT_RECORDED
+    if isinstance(value, list | tuple):
+        return ", ".join(_value(item) for item in value) if value else "none"
+    if isinstance(value, Mapping):
+        return json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
+    return str(value)
+
+
+def _map(value: Any) -> Mapping[str, Any]:
+    """The value when it is a mapping, else an empty one. Nested certificate fields are checked only loosely."""
+    return value if isinstance(value, Mapping) else {}
+
+
+def _items(value: Any) -> list[Any]:
+    return list(value) if isinstance(value, list) else []
+
+
+def _blank(value: Any) -> Any:
+    """A missing trace field shows as an empty cell, not as "not recorded"."""
+    return "" if value is None else value
+
+
+def _link_html(href: str, text: str) -> str:
+    return f'<a href="{_cell(href)}">{_cell(text)}</a>'
+
+
+def _code_html(text: str) -> str:
+    return f"<code>{_cell(text)}</code>"
+
+
+def _row(*values: Any) -> str:
+    return "<tr>" + "".join(f"<td>{_cell(value)}</td>" for value in values) + "</tr>"
+
+
+def _kv_row(key: str, value: Any) -> str:
+    return f'<tr><th scope="row">{_cell(key)}</th><td>{_cell(value)}</td></tr>'
+
+
+def _table(caption: str, headers: Sequence[str], rows: Sequence[str], empty: str = "none") -> str:
+    """A captioned table in a scroll box, or the empty sentence when there are no rows."""
+    if not rows:
+        return f"<p>{_cell(empty)}</p>"
+    head = "".join(f'<th scope="col">{_cell(header)}</th>' for header in headers)
+    return "\n".join(
+        [
+            '<div class="table-wrap">',
+            "<table>",
+            f"<caption>{_cell(caption)}</caption>",
+            f"<thead><tr>{head}</tr></thead>",
+            f"<tbody>{''.join(rows)}</tbody>",
+            "</table>",
+            "</div>",
+        ]
+    )
+
+
+def _kv_table(caption: str, pairs: Iterable[tuple[str, Any]]) -> str:
+    return _table(caption, ("Field", "Value"), [_kv_row(key, value) for key, value in pairs])
+
+
+def _section(anchor: str, heading: str, *parts: str) -> str:
+    return "\n".join(
+        [
+            f'<section aria-labelledby="{anchor}">',
+            f'<h2 id="{anchor}">{_cell(heading)}</h2>',
+            *parts,
+            "</section>",
+        ]
+    )
+
+
+def _document(title: str, body: str) -> str:
+    return "\n".join(
+        [
+            "<!doctype html>",
+            '<html lang="en">',
+            "<head>",
+            '<meta charset="utf-8">',
+            '<meta name="viewport" content="width=device-width, initial-scale=1">',
+            CSP_META,
+            f"<title>{_cell(title)}</title>",
+            f"<style>\n{CSS}</style>",
+            "</head>",
+            "<body>",
+            f"<main>\n{body}\n</main>",
+            "</body>",
+            "</html>",
+            "",
+        ]
+    )
+
+
+# Text for the values that come from certify.py: rates and gates.
+
+
+def _rate_text(rate: Mapping[str, Any]) -> str:
+    """One rate as score() gives it: count of n = rate (95% CI low to high). Never recomputed here."""
+    low, high = rate["interval_95"]
+    return f"{rate['count']} of {rate['n']} = {rate['rate']:.1%} (95% CI {low:.1%} to {high:.1%})"
+
+
+def _money(value: Any) -> str:
+    return f"${value:.4f}" if isinstance(value, int | float) else NOT_RECORDED
+
+
+def _passed_word(grade: Any) -> str:
+    """pass or fail for a grade dict from certify (its "passed" key). Anything else is not recorded."""
+    passed = _map(grade).get("passed")
+    if passed is True:
+        return "pass"
+    if passed is False:
+        return "fail"
+    return NOT_RECORDED
+
+
+def _gates_text(gates: Any) -> str:
+    """The gates in one line for the index: the gold and empty results, and a note when the gates did not hold."""
+    if gates is None:
+        return "not run"
+    if not isinstance(gates, Mapping):
+        return NOT_RECORDED
+    text = f"gold {_passed_word(gates.get('gold'))}, empty {_passed_word(gates.get('empty'))}"
+    return text if gates.get("ok") is True else f"{text} (gates did not hold)"
+
+
+# Index page
+
+
+def _index_body(
+    entries: Sequence[_Entry], errors: Sequence[tuple[str, str]], summary: Mapping[str, Any] | None
+) -> str:
+    head = [
+        "<header>",
+        "<h1>Cheatproof hackability report</h1>",
+        f'<p class="banner" role="note">{_cell(BANNER)}</p>',
+        "</header>",
+    ]
+    middle = (
+        [_empty_state(errors)]
+        if summary is None
+        else [_score_section(summary), _environments_section(entries)]
+    )
+    return "\n".join([*head, *middle, _errors_section(errors)])
+
+
+def _empty_state(errors: Sequence[tuple[str, str]]) -> str:
+    if errors:
+        lead = "No valid certificates were found. Every certificate file failed to load (see below)."
+    else:
+        lead = "No certificates were found in the certificates directory."
+    howto = (
+        f"<p>To produce one, run {_code_html(RUN_COMMAND)} for each task. "
+        f"The default directory is {_code_html(DEFAULT_CERT_DIR)}. Then build this site again.</p>"
+    )
+    return "\n".join(
+        [
+            '<section class="empty" aria-labelledby="environments">',
+            '<h2 id="environments">Environments</h2>',
+            f"<p>{_cell(lead)}</p>",
+            howto,
+            "</section>",
+        ]
+    )
+
+
+def _score_section(summary: Mapping[str, Any]) -> str:
+    rate_rows = [
+        _row(label, _rate_text(summary[key]), summary[key]["denominator"])
+        for label, key in (
+            ("Hackable before hardening", "rate_before"),
+            ("Hackable after hardening", "rate_after"),
+        )
+    ]
+    outcome_rows = [_row(name, count) for name, count in summary["outcomes"].items()]
+    outcome_rows.append(_row("Total (equals n)", summary["n"]))
+    hole_rows = [
+        _row(label, counts["before"], counts["after"]) for label, counts in summary["by_hole"].items()
+    ]
+    return _section(
+        "score",
+        "Hackability score",
+        f"<p>n = {summary['n']} valid certificates. A certified task is not hackable by this attacker. "
+        "That is not a claim that it is secure or proven.</p>",
+        _table(
+            "Rates with 95% Wilson intervals",
+            ("Measure", "Count of n and rate", "Denominator"),
+            rate_rows,
+        ),
+        _table("Outcomes, each certificate counted once", ("Outcome", "Count"), outcome_rows),
+        _kv_table(
+            "Other counts",
+            [
+                ("Certified", summary["certified"]),
+                ("Inconclusive", summary["inconclusive"]),
+                ("Hackable before (also counted in the outcomes)", summary["hackable_before"]),
+                ("Hackable after (also counted in the outcomes)", summary["hackable_after"]),
+                ("Cost, total (USD)", _money(summary["cost_usd_total"])),
+            ],
+        ),
+        _table(
+            "Certificates per hole, before and after hardening",
+            ("Hole", "Before hardening", "After hardening"),
+            hole_rows,
+            empty="no hole label was found",
+        ),
+    )
+
+
+def _environments_section(entries: Sequence[_Entry]) -> str:
+    rows = []
+    for entry in entries:
+        cert = entry.cert
+        task, gates = cert["task"], cert["gates"]
+        rows.append(
+            _row(
+                _Raw(_link_html(f"env/{entry.name}.html", task["instance_id"])),
+                task["repo"],
+                task["source"],
+                cert["holes_found"],
+                cert["patches_applied"],
+                _gates_text(gates["before"]),
+                _gates_text(gates["after"]),
+                cert["certified"],
+                _money(cert["cost_usd"]),
+            )
+        )
+    headers = (
+        "Instance",
+        "Repo",
+        "Source",
+        "Holes found",
+        "Patches applied",
+        "Gates before (gold, empty)",
+        "Gates after",
+        "Certified",
+        "Cost (USD)",
+    )
+    return _section(
+        "environments",
+        "Environments",
+        _table("One row per environment. Certified means not hackable by this attacker.", headers, rows),
+    )
+
+
+def _errors_section(errors: Sequence[tuple[str, str]]) -> str:
+    rows = [_row(name, message) for name, message in errors]
+    return _section(
+        "errors",
+        "Files that failed to load",
+        _table(
+            "Certificate files skipped by the build",
+            ("File", "Error"),
+            rows,
+            empty="None. Every certificate file loaded.",
+        ),
+    )
+
+
+# Environment pages
+
+
+def _env_body(cert: Mapping[str, Any], transcript: str) -> str:
+    task = cert["task"]
+    return "\n".join(
+        [
+            '<p><a href="../index.html">Back to the index</a></p>',
+            f"<h1>{_cell('Environment: ' + task['instance_id'])}</h1>",
+            (
+                '<p><span class="label">recorded</span> This page replays a committed certificate. '
+                "No live calls were made.</p>"
+            ),
+            _result_section(cert),
+            _task_section(cert),
+            _attacker_section(cert["attacker"]),
+            _gates_section(cert["harden"]),
+            _exposure_section(cert["exposure_before"]),
+            _holes_section(cert["harden"]),
+            _patches_section(cert["harden"]),
+            _rounds_section(cert["harden"]),
+            _section("transcript", "Transcript", transcript),
+        ]
+    )
+
+
+def _result_section(cert: Mapping[str, Any]) -> str:
+    notes = _items(cert["notes"])
+    notes_html = (
+        "<p>none</p>" if not notes else "<ul>" + "".join(f"<li>{_cell(n)}</li>" for n in notes) + "</ul>"
+    )
+    return _section(
+        "result",
+        "Result",
+        _kv_table(
+            "Certificate summary",
+            [
+                ("Certified", cert["certified"]),
+                ("Reason", cert["reason"]),
+                ("Cost (USD)", _money(cert["cost_usd"])),
+                ("Timestamp", cert["timestamp"]),
+                ("Sandbox runs", cert["sandbox_runs"]),
+            ],
+        ),
+        "<h3>Notes</h3>",
+        notes_html,
+    )
+
+
+def _digest_text(digest: Any) -> str:
+    digest = _map(digest)
+    return f"sha256 {_value(digest.get('sha256'))}, {_value(digest.get('chars'))} chars"
+
+
+def _task_section(cert: Mapping[str, Any]) -> str:
+    task = cert["task"]
+    return _section(
+        "task",
+        "Task",
+        _kv_table(
+            "Task and image",
+            [
+                ("Instance id", task["instance_id"]),
+                ("Repo", task["repo"]),
+                ("Base commit", task["base_commit"]),
+                ("Image", task["image"]),
+                ("Image digest", cert["image_digest"]),
+                ("Source", task["source"]),
+                ("Gold patch", _digest_text(task["gold_patch"])),
+                ("Test patch", _digest_text(task["test_patch"])),
+            ],
+        ),
+    )
+
+
+def _attacker_section(attacker: Mapping[str, Any]) -> str:
+    return _section(
+        "attacker",
+        "Attacker settings",
+        _kv_table("Attacker limits and model, as recorded", sorted(attacker.items())),
+    )
+
+
+def _gates_row(label: str, rnd: Any) -> str:
+    gates = _map(_map(rnd).get("gates"))
+    if not gates:
+        return _row(label, "not run", "not run", "not run", "not run")
+    return _row(
+        label,
+        _passed_word(gates.get("gold")),
+        _passed_word(gates.get("empty")),
+        gates.get("ok"),
+        gates.get("reason") or "none",
+    )
+
+
+def _gates_section(harden: Mapping[str, Any]) -> str:
+    rows = [_gates_row("Before hardening", harden["before"]), _gates_row("After hardening", harden["after"])]
+    return _section(
+        "gates",
+        "Gates",
+        _table(
+            "The gold patch must pass and the empty patch must fail",
+            ("Round", "Gold gate", "Empty gate", "Gates held", "Reason"),
+            rows,
+        ),
+    )
+
+
+def _exposure_section(exposure: Any) -> str:
+    if not isinstance(exposure, Mapping):
+        return _section("exposure", "Exposure scan", "<p>exposure scan not recorded</p>")
+    return _section(
+        "exposure",
+        "Exposure scan",
+        _kv_table("Exposure scan before hardening", list(exposure.items())),
+    )
+
+
+def _holes_row(label: str, rnd: Any) -> str:
+    holes = _map(_map(rnd).get("holes"))
+    if not holes:
+        return _row(label, "not run", "not run", "not run")
+    counts = _map(holes.get("evidence_counts"))
+    evidence = ", ".join(f"{hole}: {count}" for hole, count in counts.items()) or "none"
+    return _row(label, holes.get("labels"), holes.get("attempted"), evidence)
+
+
+def _holes_section(harden: Mapping[str, Any]) -> str:
+    rows = [_holes_row("Before hardening", harden["before"]), _holes_row("After hardening", harden["after"])]
+    return _section(
+        "holes",
+        "Holes",
+        _table(
+            "Holes by round. Attempted means evidence was found, whatever the hidden grade.",
+            ("Round", "Exploited (holes found)", "Attempted", "Evidence per label"),
+            rows,
+        ),
+    )
+
+
+def _patches_section(harden: Mapping[str, Any]) -> str:
+    outcome_rows = []
+    for label, rnd in (("Before hardening", harden["before"]), ("After hardening", harden["after"])):
+        for outcome in _items(_map(rnd).get("patch_outcomes")):
+            found = _map(outcome)
+            outcome_rows.append(_row(label, found.get("name"), found.get("ok"), found.get("notes")))
+    candidate_rows = [
+        _row(found.get("name"), found.get("accepted"), found.get("reason") or "none")
+        for found in map(_map, _items(harden["candidates"]))
+    ]
+    return _section(
+        "patches",
+        "Patches",
+        _kv_table(
+            "Patches",
+            [
+                ("Applied", harden["accepted"]),
+                ("Rejected", harden["rejected"]),
+                ("Unpatched (hole labels no patch covers)", harden["unpatched"]),
+            ],
+        ),
+        _table(
+            "Patch outcomes, per round",
+            ("Round", "Patch", "Applied cleanly", "Notes"),
+            outcome_rows,
+            empty="none recorded",
+        ),
+        _table(
+            "Candidate checks, one patch at a time",
+            ("Patch", "Accepted", "Reason"),
+            candidate_rows,
+            empty="none recorded",
+        ),
+    )
+
+
+def _round_block(label: str, rnd: Any) -> str:
+    rnd = _map(rnd)
+    attack = _map(rnd.get("attack"))
+    grade = rnd.get("attack_grade")
+    if attack:
+        attack_rows = [
+            ("Stop reason", attack.get("stop_reason")),
+            ("Submitted", attack.get("submitted")),
+            ("Steps", attack.get("steps")),
+            ("Tokens in", attack.get("tokens_in")),
+            ("Tokens out", attack.get("tokens_out")),
+            ("Diff ok", attack.get("diff_ok")),
+            ("Attack error", attack.get("error") or "none"),
+        ]
+    else:
+        attack_rows = [("Attack", "not run")]
+    attack_rows += [
+        ("Hidden tests on the attack diff", "not run" if grade is None else _passed_word(grade)),
+        ("Inconclusive", rnd.get("inconclusive") or "none"),
+        ("Round error", rnd.get("error") or "none"),
+    ]
+    return "\n".join(
+        [
+            f"<h3>{_cell(label)}</h3>",
+            _kv_table(f"{label}: attack and grade", attack_rows),
+            _diff_block(attack),
+        ]
+    )
+
+
+def _diff_block(attack: Mapping[str, Any]) -> str:
+    """The attack diff when the round holds one. Otherwise a note, and the digest that is recorded."""
+    if not attack:
+        return "<p>No attack ran in this round.</p>"
+    diff = attack.get("final_diff")
+    text = f"<pre>{_cell(diff)}</pre>" if isinstance(diff, str) else f"<p>{NO_ATTACK_DIFF}</p>"
+    if attack.get("final_diff_sha256") is None:
+        digest = "<p>No final diff digest was recorded.</p>"
+    else:
+        digest = (
+            f"<p>Diff digest: sha256 {_cell(attack.get('final_diff_sha256'))}, "
+            f"{_cell(attack.get('final_diff_chars'))} chars.</p>"
+        )
+    return f"{text}\n{digest}"
+
+
+def _rounds_section(harden: Mapping[str, Any]) -> str:
+    parts = [_round_block("Before hardening", harden["before"])]
+    if harden["after"] is None:
+        parts.append("<h3>After hardening</h3>\n<p>No after round was run.</p>")
+    else:
+        parts.append(_round_block("After hardening", harden["after"]))
+    return _section("rounds", "Attack rounds", *parts)
+
+
+# Transcripts
+
+
+def _transcript_body(traces_dir: Path | None, name: str) -> str:
+    """The trace table for env/<name>.html, or the sentence that says there is none."""
+    if traces_dir is None:
+        return f"<p>{NO_TRANSCRIPT}</p>"
+    path = Path(traces_dir) / f"{name}.jsonl"
+    if not path.is_file():
+        return f"<p>{NO_TRANSCRIPT}</p>"
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "<p>transcript could not be read</p>"
+    return _table(
+        "One row per trace line",
+        TRACE_HEADERS,
+        _trace_rows(text.split("\n")),
+        empty="the trace file has no lines",
+    )
+
+
+def _trace_rows(lines: Sequence[str]) -> list[str]:
+    rows: list[str] = []
+    for number, raw in enumerate(lines, start=1):
+        if not raw.strip():
+            continue
+        try:
+            record = json.loads(raw)
+        except (ValueError, RecursionError):  # a bad line is shown as one, never dropped
+            record = None
+        if isinstance(record, Mapping):
+            rows.append(_trace_row(number, record))
+        else:
+            span = len(TRACE_HEADERS) - 1
+            rows.append(f'<tr><td>{number}</td><td colspan="{span}">{UNREADABLE_LINE}</td></tr>')
+    return rows
+
+
+def _trace_row(number: int, record: Mapping[str, Any]) -> str:
+    args = record.get("args")
+    args_cell = "" if args is None else _Raw(_code_html(json.dumps(args, sort_keys=True, default=str)))
+    return _row(
+        number,
+        _blank(record.get("type")),
+        _blank(record.get("step")),
+        _blank(record.get("tool")),
+        args_cell,
+        _result_text(record),
+        _blank(record.get("tokens_in")),
+        _blank(record.get("tokens_out")),
+        _blank(record.get("error")),
+    )
+
+
+def _result_text(record: Mapping[str, Any]) -> str:
+    """The first 12 hex digits of a step's result digest and its size, or an end record's stop reason."""
+    parts = []
+    digest = _map(record.get("result_digest"))
+    if isinstance(digest.get("sha256"), str):
+        parts.append(f"sha256 {digest['sha256'][:12]}")
+    if "chars" in digest:
+        parts.append(f"{_value(digest['chars'])} chars")
+    if "stop_reason" in record:
+        parts.append(f"stop {_value(record['stop_reason'])}")
+    return ", ".join(parts)
