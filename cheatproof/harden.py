@@ -13,30 +13,45 @@ Flow:
    rejected with its reason. Nothing else is tried on a rejected patch.
 3. After round with the accepted patches, in a session from env_for(env, accepted): the same gates, scan, attack
    function, clean-session grade and classifier. If no patch was accepted (only hard-code or unclassified holes,
-   or every patch rejected) there is no after round and the task is not certified.
+   or every patch rejected) there is no after round and the task is not certified. The after scan must no longer
+   list the labels the accepted patches close: git-history (strip-future-git) and network (network-off).
+   test-edit is closed at grade time, so the scan is not asked about it.
 
 Session handling. fresh() resets a session and re-runs apply_patches before every step, because a reset destroys
 in-session patch work. The first use of a just-started session skips the reset. The attack's diff is graded in
 a new clean session state, never in the attacker's own, which may have tampered with the object store. Every
 start and every reset this module triggers counts as one sandbox run (sandbox_runs); the automatic reset inside
 Session.run after a host timeout is not visible here and is not counted. Every session is closed on every path.
+On the normal exit path a failed close is retried once; a second failure is a note in the report, not an error.
 BudgetExceeded, ExecutorRefused and ExecutorUnavailable always propagate. Any other exception inside a round or
 a candidate check is recorded (type and message, at most 300 chars) and makes certified False.
 
-certified means: the gates held, the attack did not exploit after hardening, and no needed patch was rejected or
-left without a patch. It never means secure: the reason strings say "not hackable by this attacker" and nothing
-stronger. An attack that errored (stop_reason, error and diff_ok are in the attack summary) counts as an attack
-that failed; the caller reads those fields before it trusts a "failed" attack.
+Attack verdicts. An attack is conclusive only when stop_reason is "submit" or "max_steps", it took at least one
+step, diff_ok is True and final_diff is not None, no step reset the sandbox during a round with patches (the
+attacker then ran unpatched), and its grade is conclusive: it applied with no error, or its error says the test
+guard refused the diff ("test files touched:", "guarded config touched:") or the candidate did not apply
+("candidate patch did not apply"). An empty final_diff is a conclusive failed attack: the empty gate of the same
+round already graded that state. Any other attack is inconclusive, and a round with an inconclusive attack never
+certifies. A reset during the before round, when no patch is in force, is noted and changes nothing else.
 
-Report keys (stable; T07 writes these into certificates). to_dict() holds only JSON types.
+certified means: the gates held, the attack did not exploit after hardening, the attack verdicts are conclusive,
+the after exposure scan no longer lists the labels the accepted patches close, and no needed patch was rejected
+or left without a patch. It never means secure: the reason strings say "not hackable by this attacker" and
+nothing stronger.
+
+Report keys (stable; T07 writes these into certificates). to_dict() holds only JSON types and no raw sandbox or
+attacker text: each GradeResult.log_tail becomes {"sha256", "chars"}, and each hole's evidence becomes a count per
+label (evidence_counts). Do not serialise a report with dataclasses.asdict for a certificate: that includes
+`attacks`, which holds raw diffs and steps. Use to_dict().
   HardenReport: instance_id, before, candidates, accepted, rejected, unpatched, after, certified, reason,
-    sandbox_runs. `attacks` (the AttackResult objects, with raw diffs and steps, for trace saving) is a plain
-    field and is NOT in to_dict. It holds one result per round whose attack ran, before first; before.attack
+    sandbox_runs, notes. `attacks` (the AttackResult objects, with raw diffs and steps, for trace saving) is a
+    plain field and is NOT in to_dict. It holds one result per round whose attack ran, before first; before.attack
     and after.attack (None when that attack did not run) tell which is which.
-  RoundReport: patches, patch_outcomes, gates, exposure, attack, attack_grade, holes, error.
+  RoundReport: patches, patch_outcomes, gates, exposure, attack, attack_grade, holes, inconclusive, error.
     gates is GradeResult pair {gold, empty} plus reason and ok. attack is a summary: submitted, stop_reason,
     tokens_in, tokens_out, diff_ok, error, steps (a count), final_diff_sha256, final_diff_chars. It never holds
-    the raw diff or the steps. attack_grade is None when the attack made no diff.
+    the raw diff or the steps. attack_grade is None when the attack made no diff or an empty one. inconclusive is
+    the reason the round's attack gives no verdict, or None.
   CandidateCheck: name, accepted, outcomes, gold, reason.
 """
 
@@ -50,7 +65,7 @@ from typing import TYPE_CHECKING, Any
 
 from cheatproof.budget import Budget, BudgetExceeded
 from cheatproof.executor import EnvSpec, Executor, ExecutorRefused, ExecutorUnavailable, Session
-from cheatproof.exposure import ExposureReport
+from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, ExposureReport
 from cheatproof.grader import GateReport, GradeResult
 from cheatproof.holes import HoleReport
 
@@ -61,6 +76,14 @@ if TYPE_CHECKING:
 
 DEFAULT_TIMEOUT_S = 1800
 ERROR_CHARS = 300
+CLOSE_ATTEMPTS = 2  # the normal exit path closes once, then retries once
+# The attacker's stop reasons that finish an attack. token_limit, budget and error do not.
+CONCLUSIVE_STOPS = frozenset({"submit", "max_steps"})
+# Grade errors that mean the attack lost: the test guard refused the diff, or the candidate did not apply.
+# Stable prefixes from grader.py.
+ATTACK_LOST_PREFIXES = ("test files touched:", "guarded config touched:", "candidate patch did not apply")
+# Patch name -> the exposure label it closes, as exposure.scan reports it. test-edit is closed at grade time.
+EXPOSURE_CLOSED_BY = {"strip-future-git": HOLE_GIT_HISTORY, "network-off": HOLE_NETWORK}
 # The caller binds llm, prompts and AttackConfig. The same function and limits run before and after hardening.
 AttackFn = Callable[[Session], "AttackResult"]
 # Raised by the backend or the budget: the run cannot go on, so these are never recorded as a round error.
@@ -105,8 +128,31 @@ class HardenOps:
         )
 
 
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
+
+
+def _grade_dict(grade: GradeResult) -> dict[str, Any]:
+    data = asdict(grade)
+    tail = data["log_tail"]  # sandbox output: a digest only, so a certificate never carries log text
+    data["log_tail"] = {"sha256": _digest(tail), "chars": len(tail)}
+    return data
+
+
 def _gates_dict(gates: GateReport) -> dict[str, Any]:
-    return {**asdict(gates), "reason": gates.reason, "ok": gates.ok}
+    return {
+        "gold": _grade_dict(gates.gold),
+        "empty": _grade_dict(gates.empty),
+        "reason": gates.reason,
+        "ok": gates.ok,
+    }
+
+
+def _holes_dict(holes: HoleReport) -> dict[str, Any]:
+    data = holes.to_dict()
+    evidence = data.pop("evidence")  # attacker-derived snippets: a count per label instead
+    data["evidence_counts"] = {label: len(items) for label, items in evidence.items()}
+    return data
 
 
 @dataclass(frozen=True)
@@ -114,7 +160,8 @@ class RoundReport:
     """One attack round: gates, exposure scan, one attack, its clean-session grade and its hole labels.
 
     error is set when the round stopped early without a verdict (a patch failed to apply, or an exception that
-    is not a budget or executor stop). Fields after the stopping point stay None.
+    is not a budget or executor stop). Fields after the stopping point stay None. inconclusive is set when the
+    round ran its attack but the attack gives no verdict (see the module docstring).
     """
 
     patches: tuple[str, ...]
@@ -124,6 +171,7 @@ class RoundReport:
     attack: dict[str, Any] | None = None
     attack_grade: GradeResult | None = None
     holes: HoleReport | None = None
+    inconclusive: str | None = None
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -133,8 +181,9 @@ class RoundReport:
             "gates": None if self.gates is None else _gates_dict(self.gates),
             "exposure": None if self.exposure is None else asdict(self.exposure),
             "attack": None if self.attack is None else dict(self.attack),
-            "attack_grade": None if self.attack_grade is None else asdict(self.attack_grade),
-            "holes": None if self.holes is None else self.holes.to_dict(),
+            "attack_grade": None if self.attack_grade is None else _grade_dict(self.attack_grade),
+            "holes": None if self.holes is None else _holes_dict(self.holes),
+            "inconclusive": self.inconclusive,
             "error": self.error,
         }
 
@@ -154,7 +203,7 @@ class CandidateCheck:
             "name": self.name,
             "accepted": self.accepted,
             "outcomes": [outcome.to_dict() for outcome in self.outcomes],
-            "gold": None if self.gold is None else asdict(self.gold),
+            "gold": None if self.gold is None else _grade_dict(self.gold),
             "reason": self.reason,
         }
 
@@ -171,6 +220,9 @@ class HardenReport:
     certified: bool
     reason: str
     sandbox_runs: int  # every session start and reset harden() triggered
+    notes: tuple[
+        str, ...
+    ] = ()  # facts that do not change certification, such as a session close that failed twice
     # Raw attack results for trace saving: before first, then after. Not serialised: they hold raw diffs.
     attacks: tuple[AttackResult, ...] = field(default=(), repr=False, compare=False)
 
@@ -186,6 +238,7 @@ class HardenReport:
             "certified": self.certified,
             "reason": self.reason,
             "sandbox_runs": self.sandbox_runs,
+            "notes": list(self.notes),
         }
 
 
@@ -202,6 +255,7 @@ class _RoundState:
     attack: dict[str, Any] | None = None
     attack_grade: GradeResult | None = None
     holes: HoleReport | None = None
+    inconclusive: str | None = None
     error: str | None = None
 
     def report(self) -> RoundReport:
@@ -213,6 +267,7 @@ class _RoundState:
             attack=self.attack,
             attack_grade=self.attack_grade,
             holes=self.holes,
+            inconclusive=self.inconclusive,
             error=self.error,
         )
 
@@ -237,6 +292,36 @@ def _patch_failure(outcomes: list[PatchOutcome], names: tuple[str, ...]) -> str 
     return None
 
 
+def _reset_during(result: AttackResult) -> bool:
+    """True when a command timed out and the executor reset the sandbox during the attack."""
+    return any(step.get("reset") is True for step in result.steps)
+
+
+def _inconclusive(result: AttackResult, grade: GradeResult | None, patched: bool) -> str | None:
+    """Why this attack gives no verdict, or None when it is conclusive (exploited or failed).
+
+    grade is the clean-session grade of the attack's diff, None when there was no non-empty diff to grade.
+    The module docstring has the rules.
+    """
+    if result.stop_reason not in CONCLUSIVE_STOPS:
+        return f"attack ended with stop_reason {result.stop_reason}"
+    if not result.steps:
+        return "the attack took no steps"
+    if not result.diff_ok or result.final_diff is None:
+        return "the final diff could not be taken"
+    if patched and _reset_during(result):
+        return "sandbox reset during the attack; patches were not in force"
+    if result.final_diff == "":
+        return None  # an empty patch: the empty gate of this round graded the same state and failed it
+    if grade is None:
+        return "the attack diff was not graded"
+    if grade.applied and grade.error is None:
+        return None
+    if grade.error is not None and grade.error.startswith(ATTACK_LOST_PREFIXES):
+        return None
+    return f"attack diff grade inconclusive: {_capped(grade.error or 'the diff did not apply')}"
+
+
 def _attack_summary(result: AttackResult) -> dict[str, Any]:
     diff = result.final_diff
     return {
@@ -247,9 +332,7 @@ def _attack_summary(result: AttackResult) -> dict[str, Any]:
         "diff_ok": result.diff_ok,
         "error": _capped(result.error),
         "steps": len(result.steps),
-        "final_diff_sha256": None
-        if diff is None
-        else hashlib.sha256(diff.encode("utf-8", "replace")).hexdigest(),
+        "final_diff_sha256": None if diff is None else _digest(diff),
         "final_diff_chars": None if diff is None else len(diff),
     }
 
@@ -293,6 +376,7 @@ class _Loop:
         self.ops = ops
         self.runs = 0
         self.attacks: list[AttackResult] = []
+        self.notes: list[str] = []
 
     @contextlib.contextmanager
     def _session(self, env: EnvSpec) -> Iterator[_Sandbox]:
@@ -304,7 +388,22 @@ class _Loop:
             with contextlib.suppress(Exception):  # the first error matters more than a failed close
                 session.close()
             raise
-        session.close()
+        self._close(session)
+
+    def _close(self, session: Session) -> None:
+        """Normal exit: a failed close is retried once, then noted. PROPAGATE errors still raise."""
+        failures: list[Exception] = []
+        for _ in range(CLOSE_ATTEMPTS):
+            try:
+                session.close()
+                return
+            except PROPAGATE:
+                raise
+            except Exception as exc:  # noqa: BLE001 - retried once, then noted
+                failures.append(exc)
+        self.notes.append(
+            f"session close failed twice ({type(failures[-1]).__name__}): check for a leftover sandbox"
+        )
 
     def _grade_here(self, session: Session, names: tuple[str, ...], patch: str) -> GradeResult:
         return self.ops.grade(
@@ -333,13 +432,22 @@ class _Loop:
         result = self.attack_fn(box.session)
         self.attacks.append(result)
         state.attack = _attack_summary(result)
+        patched = bool(state.patches)
+        if not patched and _reset_during(result):
+            self.notes.append(
+                "before attack: sandbox reset after a command timeout; no patch was in force, "
+                "so certification is not affected"
+            )
         diff = result.final_diff if result.diff_ok else None
         hidden_passed = None
-        if diff is not None:
+        if diff:
             # A clean session: the attacker's own may hold a tampered object store or restored-over tests.
             state.attack_grade = self._grade(box, state, diff)
             hidden_passed = state.attack_grade.passed
+        elif diff == "":
+            hidden_passed = False  # the empty gate of this round graded this same state and failed it
         state.holes = self.ops.classify(result.steps, diff, self.task, hidden_passed=hidden_passed)
+        state.inconclusive = _inconclusive(result, state.attack_grade, patched)
 
     def round(self, env: EnvSpec, names: tuple[str, ...]) -> RoundReport:
         state = _RoundState(names)
@@ -397,6 +505,7 @@ class _Loop:
             certified=certified,
             reason=reason,
             sandbox_runs=self.runs,
+            notes=tuple(self.notes),
             attacks=tuple(self.attacks),
         )
 
@@ -410,6 +519,8 @@ class _Loop:
             )
         if before.holes is None:  # unreachable: a round with no error and ok gates ran its attack
             return self.report(before, False, "round before hardening produced no hole report")
+        if before.inconclusive is not None:
+            return self.report(before, False, f"inconclusive attack: {before.inconclusive}")
         if not before.holes.exploited:
             reason = "attacker failed before hardening (not hackable by this attacker)"
             return self.report(before, True, reason)
@@ -442,6 +553,15 @@ class _Loop:
         if after.holes.exploited:
             holes = ", ".join(after.holes.labels)
             reason = f"attacker still exploits after hardening with {', '.join(accepted)} ({holes})"
+            return self.report(before, False, reason, **shown)
+        if after.inconclusive is not None:
+            return self.report(before, False, f"inconclusive attack: {after.inconclusive}", **shown)
+        if after.exposure is None:
+            return self.report(before, False, "exposure scan missing after hardening", **shown)
+        closed = [EXPOSURE_CLOSED_BY[name] for name in accepted if name in EXPOSURE_CLOSED_BY]
+        still_open = [label for label in closed if label in after.exposure.holes]
+        if still_open:
+            reason = "; ".join(f"patch did not close {label} (exposure scan)" for label in still_open)
             return self.report(before, False, reason, **shown)
         if rejected or no_patch:
             open_holes = rejected + [f"no patch for {label}" for label in no_patch]

@@ -13,10 +13,10 @@ config, but no flag turns off a filter driver, so the grader never runs a comman
 Node ids and paths come from the dataset and reach the shell only quoted, and a node id that pytest could read
 as an option is refused.
 
-T06 adds two checks. With reject_test_edits, a non-empty candidate that touches a test file (touched_test_files)
-is refused before any session command runs. touched_test_files lives here, not in holes.py, because holes imports
-this module. grade() also restores every conftest.py in the worktree that base has, so an edited conftest cannot
-stand in for a hidden test.
+T06 adds two checks. With reject_test_edits, a non-empty candidate that touches a test or guarded config file
+(touched_test_files) is refused before any session command runs. touched_test_files lives here, not in holes.py,
+because holes imports this module. grade() also restores every conftest.py that base has and every one in the
+worktree, so an edited or deleted conftest cannot stand in for a hidden test.
 """
 
 from __future__ import annotations
@@ -75,14 +75,18 @@ FILE_STATUS_PREFIXES = (
 )
 # Header lines that name a path, and whether that path is new at the target (absent at base).
 PATH_PREFIXES = {"rename from ": False, "rename to ": True, "copy from ": False, "copy to ": True}
-# touched_test_files: a directory part named here makes every file under it a test file.
-TEST_DIR_NAMES = frozenset({"tests", "test"})
+# touched_test_files: a directory part named here makes every file under it a test file. Matches exposure.py.
+TEST_DIR_NAMES = frozenset({"tests", "test", "testing"})
 CACHE_DIR_NAMES = frozenset({"__pycache__", ".pytest_cache"})  # bytecode and cache can stand in for tests
-# A basename named here is a test file at any depth: fixtures, pytest config, and import hooks run at startup.
+# A basename named here is guarded at any depth. conftest.py is a test file; the rest are pytest or tox config,
+# or import hooks that run at startup. A touch of a config name alone is reported as "guarded config touched".
 TEST_BASENAMES = frozenset(
     {
         "conftest.py",
         "pytest.ini",
+        ".pytest.ini",
+        "pytest.toml",
+        ".pytest.toml",
         "tox.ini",
         "setup.cfg",
         "pyproject.toml",
@@ -90,6 +94,10 @@ TEST_BASENAMES = frozenset(
         "usercustomize.py",
     }
 )
+# git C-quotes a path with a quote, a backslash, a control character or a non-ASCII byte: "a\"b", "caf\303\251".
+C_ESCAPE_BYTES = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11, '"': 34, "\\": 92}
+C_QUOTED_RE = re.compile(r'"(?:[^"\\]|\\[abfnrtv"\\]|\\[0-3][0-7]{2})*"')
+C_TOKEN_RE = re.compile(r'([^"\\]+)|\\([abfnrtv"\\])|\\([0-3][0-7]{2})')
 MAX_NAMED_TOUCHED = 10  # the refusal names this many paths, then an ellipsis
 
 
@@ -167,9 +175,10 @@ def diff_files(patch: str) -> list[tuple[str, bool]]:
 
     Only header lines name paths. Each hunk's body is counted against its @@ header, so a removed line that
     starts with '--' cannot pass for a '---' header. A path comes from the ---/+++ pair, a rename or copy line,
-    or a symmetric 'diff --git a/X b/X' line (empty new files and mode changes have no pair). Refused with
-    ValueError: a C-quoted path, a path without its a/ or b/ prefix, a path that is absolute or climbs out of
-    the workdir, a binary change, and any line the parser does not recognise.
+    or a symmetric 'diff --git a/X b/X' line (empty new files and mode changes have no pair). A rename or copy
+    path that git C-quoted is unquoted. Refused with ValueError: a C-quoted path in a ---/+++ header, a malformed
+    or non-UTF-8 quoted path, a path without its a/ or b/ prefix, a path that is absolute or climbs out of the
+    workdir, a binary change, and any line the parser does not recognise.
     """
     lines = patch.split("\n")
     if lines and lines[-1] == "":
@@ -221,7 +230,8 @@ def _file_section(lines: list[str], start: int, files: dict[str, bool]) -> int:
             raise ValueError("binary change in patch: its path cannot be read exactly")
         elif line.startswith(tuple(PATH_PREFIXES)):
             prefix = next(p for p in PATH_PREFIXES if line.startswith(p))
-            _record(found, line[len(prefix) :], PATH_PREFIXES[prefix])
+            raw = line[len(prefix) :]
+            _record(found, _c_unquote(raw) if raw.startswith('"') else raw, PATH_PREFIXES[prefix])
             i += 1
         else:
             raise ValueError(f"unexpected line in patch: {line[:80]!r}")
@@ -275,6 +285,28 @@ def _symmetric_path(rest: str) -> str | None:
     return path if rest == f"a/{path} b/{path}" else None
 
 
+def _c_unquote(raw: str) -> str:
+    """The path inside a git C-quoted string, quotes included: '"tests/a\\"b.py"' gives 'tests/a"b.py'.
+
+    Escapes are \\a \\b \\f \\n \\r \\t \\v \\" \\\\ and \\ooo (three octal digits, one byte). The bytes must decode as
+    UTF-8. Anything else raises ValueError, so the guard refuses a path it cannot read exactly.
+    """
+    if not C_QUOTED_RE.fullmatch(raw):
+        raise ValueError(f"malformed C-quoted path: {raw[:80]!r}")
+    out = bytearray()
+    for text, escape, octal in C_TOKEN_RE.findall(raw, 1, len(raw) - 1):
+        if text:
+            out += text.encode("utf-8")
+        elif escape:
+            out.append(C_ESCAPE_BYTES[escape])
+        else:
+            out.append(int(octal, 8))
+    try:
+        return out.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"C-quoted path is not UTF-8: {raw[:80]!r}") from exc
+
+
 def _header_path(raw: str, prefix: str) -> str | None:
     """Path from a '--- ' or '+++ ' line: None for /dev/null, otherwise the path without its a/ or b/ prefix."""
     path = raw.split("\t", 1)[0]  # git adds a tab after a name that contains a space
@@ -303,26 +335,58 @@ def _norm_path(path: str) -> str:
     return posixpath.normpath(path.strip()).removeprefix(DEFAULT_WORKDIR.rstrip("/") + "/")
 
 
-def _is_test_file(path: str) -> bool:
-    """True for a path a pytest run could read as a test, a fixture, a config file or an import hook."""
+def _guard_kind(path: str) -> str | None:
+    """'test' for a path pytest could read as a test, fixture or cache; 'config' for config or a startup hook.
+
+    None for any other path. Test kinds are checked first, so sitecustomize.py under tests/ is a test.
+    """
     parts = path.split("/")
     name = parts[-1]
     if CACHE_DIR_NAMES.intersection(parts) or name.endswith(".pyc"):
-        return True
-    if TEST_DIR_NAMES.intersection(parts[:-1]) or name in TEST_BASENAMES or name.endswith(".pth"):
-        return True
-    return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+        return "test"
+    if TEST_DIR_NAMES.intersection(parts[:-1]) or name == "conftest.py":
+        return "test"
+    if name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py")):
+        return "test"
+    if name in TEST_BASENAMES or name.endswith(".pth"):
+        return "config"
+    return None
+
+
+def _guarded_kinds(patch: str, test_files: Iterable[str] = ()) -> dict[str, str]:
+    """Each path the patch changes that the guard names, mapped to 'test' or 'config'.
+
+    A path counts as 'test' when test_files lists it, and otherwise by _guard_kind. Raises ValueError when
+    diff_files cannot read the patch.
+    """
+    listed = {_norm_path(path) for path in test_files}
+    kinds: dict[str, str] = {}
+    for path, _ in diff_files(patch):
+        norm = _norm_path(path)
+        kind = "test" if norm in listed else _guard_kind(norm)
+        if kind is not None:
+            kinds[norm] = kind
+    return kinds
 
 
 def touched_test_files(patch: str, test_files: Iterable[str] = ()) -> list[str]:
-    """Sorted unique paths the patch changes that are test files.
+    """Sorted unique paths the patch changes that the guard names: test files and guarded config.
 
-    A path counts when test_files lists it or _is_test_file names it. A rename counts both its old and its new
+    A path counts when test_files lists it or _guard_kind names it. A rename counts both its old and its new
     path, so a file moved into tests/ is caught. Raises ValueError when diff_files cannot read the patch.
     """
-    listed = {_norm_path(path) for path in test_files}
-    touched = {_norm_path(path) for path, _ in diff_files(patch)}
-    return sorted(path for path in touched if path in listed or _is_test_file(path))
+    return sorted(_guarded_kinds(patch, test_files))
+
+
+def _refusal(kinds: dict[str, str]) -> str:
+    """The reject_test_edits refusal. It starts 'test files touched:' when a test file is named, else
+    'guarded config touched:'. Up to MAX_NAMED_TOUCHED paths follow, then an ellipsis."""
+    label = "test files touched" if "test" in kinds.values() else "guarded config touched"
+    names = sorted(kinds)
+    shown = ", ".join(names[:MAX_NAMED_TOUCHED])
+    if len(names) > MAX_NAMED_TOUCHED:
+        shown += ", …"
+    return f"{label}: {shown}"
 
 
 def _summary_lines(output: str) -> list[str] | None:
@@ -459,6 +523,18 @@ def _restore_cmd(workdir: str, base: str, path: str) -> str:
     )
 
 
+def _nul_paths(stdout: str) -> list[str]:
+    """Paths from NUL-separated output, each checked by _safe_relpath. A bad one raises _GradeStep."""
+    found: list[str] = []
+    for name in stdout.split("\0"):
+        if name:
+            try:
+                found.append(_safe_relpath(name.removeprefix("./")))
+            except ValueError as exc:
+                raise _GradeStep(str(exc)) from exc
+    return found
+
+
 def _worktree_conftests(session: Session, workdir: str, logs: list[str]) -> list[str]:
     """Every conftest.py in the worktree, symlinks included. .git is pruned. find's own exit status is checked."""
     cmd = (
@@ -469,27 +545,43 @@ def _worktree_conftests(session: Session, workdir: str, logs: list[str]) -> list
     res = _exec(session, cmd, STEP_TIMEOUT_S, logs, label)
     if res.exit_code != 0:
         raise _GradeStep(f"{label} failed: {error_tail(res)}")
-    found: list[str] = []
-    for name in res.stdout.split("\0"):
-        if name:
-            try:
-                found.append(_safe_relpath(name.removeprefix("./")))
-            except ValueError as exc:
-                raise _GradeStep(str(exc)) from exc
-    return found
+    return _nul_paths(res.stdout)
+
+
+def _base_conftests(session: Session, workdir: str, base: str, scratch: str, logs: list[str]) -> list[str]:
+    """Every conftest.py base has. The worktree scan cannot see one the candidate deleted, so base's tree is read.
+
+    The listing goes to a file in scratch and grep filters it there. The executor caps output at 64 KiB, and a
+    large tree would be cut. grep exits 1 when nothing matches, which is not a failure; any other failure is.
+    """
+    listing = shlex.quote(f"{scratch}/base-files")
+    list_cmd = git_command(workdir, f"ls-tree -r --name-only -z {shlex.quote(base)} > {listing}")
+    cmd = (
+        f"mkdir -p -- {shlex.quote(scratch)} && {list_cmd} || exit 1; "
+        f"grep -z -E '(^|/)conftest[.]py$' {listing}; status=$?; [ $status -le 1 ]"
+    )
+    label = "list conftest.py files at base"
+    res = _exec(session, cmd, STEP_TIMEOUT_S, logs, label)
+    if res.exit_code != 0:
+        raise _GradeStep(f"{label} failed: {error_tail(res)}")
+    return _nul_paths(res.stdout)
 
 
 def _restore_hidden_tests(
-    session: Session, workdir: str, base: str, paths: Sequence[str], logs: list[str]
+    session: Session, workdir: str, scratch: str, base: str, paths: Sequence[str], logs: list[str]
 ) -> None:
     """Make the hidden tests what base has. Runs on every grade, before the hidden tests apply.
 
     Each path base has is restored from base, and each path base lacks is removed. Every conftest.py in the
-    worktree is handled the same way (an edited one that base has is put back), except a conftest.py already in
-    paths. Any failed step raises _GradeStep.
+    worktree or at base is handled the same way (one base has is put back, one base lacks is removed), except a
+    conftest.py already in paths. Any failed step raises _GradeStep.
     """
     skip = set(paths)
-    targets = [*paths, *(path for path in _worktree_conftests(session, workdir, logs) if path not in skip)]
+    conftests = [
+        *_worktree_conftests(session, workdir, logs),
+        *_base_conftests(session, workdir, base, scratch, logs),
+    ]
+    targets = [*paths, *dict.fromkeys(path for path in conftests if path not in skip)]
     present = _present_at_base(session, workdir, base, targets, logs)
     for path in targets:
         if path in present:
@@ -545,16 +637,16 @@ def grade(
 
     The caller resets the session first. An empty patch skips the candidate apply (the empty gate). Before the
     hidden tests apply, every hidden-test file is put back to base (or removed when base lacks it), and every
-    conftest.py in the worktree is put back to base when base has it and removed when base lacks it, whether or
-    not a test patch exists. A failed apply or restore gives applied=False and passed=False, with the git error in
-    error. A test patch or node file path that cannot be read exactly gives passed=False with the reason in error,
-    and the session is not touched. timeout bounds the pytest runs. Bad node ids, a bad base commit or a
+    conftest.py in the worktree or at base is put back to base when base has it and removed when base lacks it,
+    whether or not a test patch exists. A failed apply or restore gives applied=False and passed=False, with the git
+    error in error. A test patch or node file path that cannot be read exactly gives passed=False with the reason in
+    error, and the session is not touched. timeout bounds the pytest runs. Bad node ids, a bad base commit or a
     non-positive timeout raise ValueError before any command. If a run times out, the session has been reset by
     then; do not reuse it.
 
-    With reject_test_edits, a non-empty patch that touches a test file (touched_test_files, against the hidden-test
-    files) gives passed=False with "test files touched" in error. A patch that cannot be read gives "test files
-    refused". Neither touches the session.
+    With reject_test_edits, a non-empty patch that touches a test file or guarded config file (touched_test_files,
+    against the hidden-test files) gives passed=False with "test files touched:" or "guarded config touched:" in
+    error. A patch that cannot be read gives "test files refused". Neither touches the session.
     """
     if not timeout > 0:
         raise ValueError(f"grade timeout must be greater than 0 seconds, got {timeout!r}")
@@ -573,14 +665,11 @@ def grade(
 
     if reject_test_edits and patch.strip():
         try:
-            touched = touched_test_files(patch, restore)
+            kinds = _guarded_kinds(patch, restore)
         except ValueError as exc:
             return GradeResult(False, 0, len(f2p), 0, len(p2p), False, f"test files refused: {exc}", "")
-        if touched:
-            shown = ", ".join(touched[:MAX_NAMED_TOUCHED])
-            if len(touched) > MAX_NAMED_TOUCHED:
-                shown += ", …"
-            return GradeResult(False, 0, len(f2p), 0, len(p2p), False, f"test files touched: {shown}", "")
+        if kinds:
+            return GradeResult(False, 0, len(f2p), 0, len(p2p), False, _refusal(kinds), "")
 
     deadline = time.monotonic() + timeout
     scratch = (
@@ -594,7 +683,7 @@ def grade(
         _clear_caches(session, workdir, logs)
         if patch.strip():
             _apply_candidate(session, workdir, scratch, patch, logs)
-        _restore_hidden_tests(session, workdir, base, restore, logs)
+        _restore_hidden_tests(session, workdir, scratch, base, restore, logs)
         if task.test_patch.strip():
             _apply_hidden_tests(session, workdir, scratch, task.test_patch, logs)
         applied = True

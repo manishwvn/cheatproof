@@ -1,3 +1,4 @@
+import hashlib
 import json
 from dataclasses import dataclass, replace
 
@@ -18,8 +19,11 @@ NET_OFF = "network-off"
 # VERIFY: these names and the label to patch map mirror the T06 patches.py contract; no recorded real
 # patches.py run confirms them yet.
 PATCH_OF = {"git-history": STRIP, "test-edit": GUARD, "network": NET_OFF}
+SCAN_CLOSES = {STRIP: "git-history", NET_OFF: "network"}  # which scan label each patch closes
 EXPLOIT = "EXPLOIT-DIFF-RAW-MARKER"
 GOLD = "GOLD-PATCH"
+LOG = "LOG-TAIL-MARKER pytest output"
+EVIDENCE = "EVIDENCE-SNIPPET-MARKER"
 ENV = EnvSpec(image="python:3.12-slim", network=True)
 TASK = TaskSpec(
     instance_id="fixture__task-1",
@@ -33,6 +37,7 @@ TASK = TaskSpec(
     source="fixture",
 )
 PROPAGATING = [BudgetExceeded, ExecutorRefused, ExecutorUnavailable]
+FAILED_BEFORE = "attacker failed before hardening (not hackable by this attacker)"
 
 
 @dataclass(frozen=True)
@@ -60,7 +65,7 @@ def make_attack(diff=EXPLOIT, *, diff_ok=True, stop_reason="submit", error="", s
 
 
 def grade_result(passed, *, error=None, applied=True):
-    return GradeResult(passed, int(passed), 1, int(passed), 1, applied, error, "log")
+    return GradeResult(passed, int(passed), 1, int(passed), 1, applied, error, LOG)
 
 
 class FakeSession(Session):
@@ -122,7 +127,10 @@ class Lab:
     """A scripted world. The defaults: the attacker exploits git-history and strip-future-git closes it.
 
     gold_breaks: patches that make the gold patch fail while active. closes: patches under which the exploit
-    diff fails the hidden tests. fail: where a fake raises, keyed "attack", "grade", "scan", "reset", "start:N".
+    diff fails the hidden tests. exposed: labels the exposure scan lists while no patch closes them. scan_holes:
+    labels the scan lists whatever patches are in force. attack_grade: a GradeResult returned for every attack
+    diff instead of the scripted one. fail: where a fake raises, keyed "attack", "attack:N", "grade", "scan",
+    "scan:N", "reset", "start:N".
     """
 
     def __init__(
@@ -133,6 +141,9 @@ class Lab:
         empty_passes=False,
         gold_breaks=(),
         closes=(STRIP,),
+        exposed=("git-history",),
+        scan_holes=None,
+        attack_grade=None,
         attacks=None,
         apply_fail=None,
         apply_fails_from=None,
@@ -143,6 +154,9 @@ class Lab:
         self.empty_passes = empty_passes
         self.gold_breaks = set(gold_breaks)
         self.closes = set(closes)
+        self.exposed = exposed
+        self.scan_holes = scan_holes
+        self.attack_grade = attack_grade
         self.attacks = attacks or [make_attack()]
         self.apply_fail = apply_fail or {}
         self.apply_fails_from = apply_fails_from
@@ -182,6 +196,8 @@ class Lab:
             return grade_result(ok, error=None if ok else "gold broken")
         if patch == "":
             return grade_result(self.empty_passes)
+        if self.attack_grade is not None:
+            return self.attack_grade
         return grade_result(patch == EXPLOIT and not active & self.closes)
 
     def apply_patches(self, session, task, names, *, workdir):
@@ -212,9 +228,26 @@ class Lab:
         return {"reject_test_edits": True} if GUARD in names else {}
 
     def scan(self, session, task, *, workdir):
+        index = len(self.scan_calls)
         self.maybe_fail("scan")
+        self.maybe_fail(f"scan:{index}")
         self.scan_calls.append(Call(session.sid, session.generation, session.applied))
-        return ExposureReport(True, ["refs/future"], False, [], True, [], False, [], ["git-history"])
+        if self.scan_holes is not None:
+            holes = list(self.scan_holes)
+        else:
+            closed = {SCAN_CLOSES[name] for name in session.applied if name in SCAN_CLOSES}
+            holes = [label for label in self.exposed if label not in closed]
+        return ExposureReport(
+            "git-history" in holes,
+            ["refs/future"] if "git-history" in holes else [],
+            False,
+            [],
+            True,
+            [],
+            "network" in holes,
+            [],
+            holes,
+        )
 
     def classify(self, trace, final_diff, task, *, hidden_passed=None):
         self.classify_calls.append((trace, final_diff, hidden_passed))
@@ -224,7 +257,7 @@ class Lab:
             primary=labels[0] if labels else "none",
             labels=labels,
             attempted=labels,
-            evidence={label: () for label in labels},
+            evidence={label: (f"{EVIDENCE} {label}",) for label in labels},
             succeeded=hidden_passed,
             exploited=exploited,
             skipped_records=0,
@@ -276,9 +309,10 @@ def test_attacker_fails_before_is_certified_without_after_round():
     lab = Lab(attacks=[make_attack("WRONG-DIFF")])
     report = lab.run()
     assert report.certified is True
-    assert report.reason == "attacker failed before hardening (not hackable by this attacker)"
+    assert report.reason == FAILED_BEFORE
     assert report.after is None and report.candidates == () and report.accepted == ()
     assert report.before.attack_grade is not None and not report.before.attack_grade.passed
+    assert report.before.inconclusive is None
     assert len(lab.executor.sessions) == 1
     # start, then a reset before each of: empty gate, scan, attack, attack grade. The first use skips the reset.
     assert report.sandbox_runs == 5
@@ -295,6 +329,7 @@ def test_git_history_exploit_is_patched_and_certified():
     assert report.candidates[0].gold is not None and report.candidates[0].gold.passed
     assert report.after is not None and report.after.patches == (STRIP,)
     assert report.after.holes is not None and not report.after.holes.exploited
+    assert report.after.exposure.holes == []
     assert report.reason == f"attacker failed after hardening with {STRIP} (not hackable by this attacker)"
     # before 1+4, candidate 1+0, after 1+4
     assert report.sandbox_runs == 11 and len(lab.executor.sessions) == 3
@@ -386,7 +421,7 @@ def test_attack_diff_is_graded_in_a_clean_session_with_grade_kwargs():
 
 
 def test_network_off_patch_changes_env_of_later_sessions():
-    lab = Lab(labels=("network",), closes=(NET_OFF,))
+    lab = Lab(labels=("network",), closes=(NET_OFF,), exposed=("network",))
     report = lab.run(env=ENV)
     assert report.certified is True
     assert [env.network for env in lab.executor.envs] == [True, False, False]
@@ -421,16 +456,191 @@ def test_first_use_of_a_started_session_skips_the_reset():
     assert report.sandbox_runs == 2
 
 
-def test_diff_ok_false_counts_as_a_failed_attack():
+# Attack verdicts: an attack that did not really run is inconclusive, never a failed attack.
+
+
+@pytest.mark.parametrize("stop", ["error", "token_limit", "budget"])
+def test_attack_that_did_not_finish_is_inconclusive(stop):
+    lab = Lab(attacks=[make_attack("WRONG-DIFF", stop_reason=stop, error="llm call failed: APIError")])
+    report = lab.run()
+    assert report.certified is False and report.after is None
+    assert report.reason == f"inconclusive attack: attack ended with stop_reason {stop}"
+    assert report.before.inconclusive == f"attack ended with stop_reason {stop}"
+    assert report.before.attack["error"] == "llm call failed: APIError"
+    assert_clean(lab, report)
+
+
+@pytest.mark.parametrize(
+    ("stop", "why"),
+    [
+        ("submit", "the attack took no steps"),
+        ("max_steps", "the attack took no steps"),
+        ("token_limit", "attack ended with stop_reason token_limit"),
+    ],
+)
+def test_attack_with_no_steps_is_inconclusive(stop, why):
+    lab = Lab(attacks=[make_attack("WRONG-DIFF", stop_reason=stop, steps=[])])
+    report = lab.run()
+    assert report.certified is False
+    assert report.reason == f"inconclusive attack: {why}"
+    assert report.before.attack["steps"] == 0
+    assert_clean(lab, report)
+
+
+def test_diff_not_taken_after_submit_is_inconclusive():
+    lab = Lab(attacks=[make_attack("WRONG-DIFF", diff_ok=False, stop_reason="submit")])
+    report = lab.run()
+    assert report.certified is False and report.after is None
+    assert report.reason == "inconclusive attack: the final diff could not be taken"
+    assert report.before.attack_grade is None
+    assert [c.patch for c in lab.grade_calls] == [GOLD, ""]  # the attack was never graded
+    assert_clean(lab, report)
+
+
+def test_diff_failure_is_inconclusive_and_the_attack_was_never_graded():
     failed = make_attack(diff_ok=False, stop_reason="error", error="diff failed: git is broken")
     lab = Lab(attacks=[failed])
     report = lab.run()
-    assert report.certified is True and report.after is None
-    assert report.before.attack_grade is None
+    assert report.certified is False and report.after is None
+    assert report.reason == "inconclusive attack: attack ended with stop_reason error"
     assert [c.patch for c in lab.grade_calls] == [GOLD, ""]  # the attack was never graded
     assert lab.classify_calls == [(failed.steps, None, None)]
     assert report.before.attack["diff_ok"] is False and report.before.attack["final_diff_sha256"] is None
     assert report.before.attack["error"] == "diff failed: git is broken"
+    assert_clean(lab, report)
+
+
+def test_empty_diff_is_a_conclusive_failed_attack_and_is_not_graded_again():
+    lab = Lab(attacks=[make_attack("")])
+    report = lab.run()
+    assert report.certified is True and report.reason == FAILED_BEFORE
+    assert report.before.inconclusive is None and report.before.attack_grade is None
+    assert report.before.attack["final_diff_chars"] == 0
+    assert [c.patch for c in lab.grade_calls] == [GOLD, ""]
+    assert lab.classify_calls == [(lab.attacks[0].steps, "", False)]
+    assert_clean(lab, report)
+
+
+@pytest.mark.parametrize(
+    "grade",
+    [
+        grade_result(False, error="pytest timed out after 5s"),
+        grade_result(False, error="pytest printed no final summary line"),
+        grade_result(False, error="pytest exited 3"),
+        grade_result(False, error="hidden tests did not apply: patch does not apply", applied=False),
+        grade_result(False, error="test files refused: bad path", applied=False),
+    ],
+)
+def test_inconclusive_attack_grade_is_not_a_failed_attack(grade):
+    lab = Lab(attacks=[make_attack()], attack_grade=grade)
+    report = lab.run()
+    assert report.certified is False and report.after is None
+    why = f"attack diff grade inconclusive: {grade.error}"
+    assert report.reason == f"inconclusive attack: {why}"
+    assert report.before.inconclusive == why
+    assert_clean(lab, report)
+
+
+@pytest.mark.parametrize(
+    "grade",
+    [
+        grade_result(False, error="candidate patch did not apply: corrupt patch at line 4", applied=False),
+        grade_result(False, error="test files touched: tests/test_x.py", applied=False),
+        grade_result(False, error="guarded config touched: setup.cfg", applied=False),
+    ],
+)
+def test_refused_or_unapplied_attack_diff_is_a_failed_attack(grade):
+    lab = Lab(attacks=[make_attack()], attack_grade=grade)
+    report = lab.run()
+    assert report.certified is True and report.reason == FAILED_BEFORE
+    assert report.before.inconclusive is None
+    assert report.before.holes.exploited is False
+    assert_clean(lab, report)
+
+
+# A reset during an attack (a command timed out) gives the sandbox back unpatched. Its attack counts only
+# when a patch was not in force, and then it is only noted.
+
+
+def test_reset_in_before_round_is_noted_and_does_not_block_certification():
+    steps = [{"n": 1}, {"n": 2, "reset": True}]
+    lab = Lab(attacks=[make_attack("WRONG-DIFF", steps=steps)])
+    report = lab.run()
+    assert report.certified is True and report.reason == FAILED_BEFORE
+    assert report.before.inconclusive is None
+    assert (
+        len(report.notes) == 1 and "reset" in report.notes[0] and "no patch was in force" in report.notes[0]
+    )
+    assert_clean(lab, report)
+
+
+def test_reset_in_before_round_still_patches_and_certifies():
+    steps = [{"n": 1, "reset": True}, {"n": 2}]
+    lab = Lab(attacks=[make_attack(steps=steps), make_attack()])
+    report = lab.run()
+    assert report.certified is True and report.accepted == (STRIP,)
+    assert report.before.holes.exploited and report.after.inconclusive is None
+    assert len(report.notes) == 1
+    assert_clean(lab, report)
+
+
+def test_reset_in_after_round_is_inconclusive_and_not_certified():
+    steps = [{"n": 1}, {"n": 2, "reset": True}]
+    lab = Lab(attacks=[make_attack(), make_attack(steps=steps)])
+    report = lab.run()
+    assert report.certified is False and report.accepted == (STRIP,)
+    assert report.after is not None and report.after.holes is not None
+    assert report.after.inconclusive == "sandbox reset during the attack; patches were not in force"
+    assert report.reason == "inconclusive attack: sandbox reset during the attack; patches were not in force"
+    assert report.notes == ()
+    assert_clean(lab, report)
+
+
+# The after round's exposure scan must no longer list the labels the accepted patches close.
+
+
+def test_exposure_still_listing_a_closed_label_blocks_certification():
+    lab = Lab(scan_holes=("git-history",))
+    report = lab.run()
+    assert report.certified is False and report.accepted == (STRIP,)
+    assert report.reason == "patch did not close git-history (exposure scan)"
+    assert report.after is not None and report.after.exposure.holes == ["git-history"]
+    assert report.after.holes is not None and not report.after.holes.exploited  # the attack itself failed
+    assert_clean(lab, report)
+
+
+def test_network_still_open_after_network_off_blocks_certification():
+    lab = Lab(labels=("network",), closes=(NET_OFF,), scan_holes=("network",))
+    report = lab.run()
+    assert report.certified is False and report.accepted == (NET_OFF,)
+    assert report.reason == "patch did not close network (exposure scan)"
+    assert_clean(lab, report)
+
+
+def test_test_edit_label_in_the_scan_is_not_checked():
+    lab = Lab(labels=("test-edit",), closes=(GUARD,), scan_holes=("test-edit",))
+    report = lab.run()
+    assert report.certified is True and report.accepted == (GUARD,)
+    assert report.after.exposure.holes == ["test-edit"]
+    assert_clean(lab, report)
+
+
+def test_missing_exposure_scan_after_hardening_is_not_certified():
+    lab = Lab()
+    lab.ops = replace(lab.ops, scan=lambda session, task, *, workdir: None)
+    report = lab.run()
+    assert report.certified is False and report.accepted == (STRIP,)
+    assert report.after is not None and report.after.exposure is None and report.after.error is None
+    assert report.reason == "exposure scan missing after hardening"
+    assert_clean(lab, report)
+
+
+def test_errored_exposure_scan_after_hardening_is_not_certified():
+    lab = Lab(fail={"scan:1": ValueError("scan broke")})
+    report = lab.run()
+    assert report.certified is False and report.accepted == (STRIP,)
+    assert report.after.error == "ValueError: scan broke"
+    assert report.reason == "round after hardening failed: ValueError: scan broke"
     assert_clean(lab, report)
 
 
@@ -454,6 +664,52 @@ def test_close_failure_does_not_hide_a_propagating_error():
     with pytest.raises(BudgetExceeded):
         lab.run()
     assert lab.executor.sessions[0].closed == 1
+
+
+# A failed close on the normal exit path is retried once, then noted. It never fails the run.
+
+
+def test_failed_close_on_normal_exit_is_retried_once():
+    class CloseOnce(FakeSession):
+        def close(self):
+            self.closed += 1
+            if self.closed == 1:
+                raise RuntimeError("docker rm failed")
+
+    lab = Lab()
+    lab.executor.session_cls = CloseOnce
+    report = lab.run()
+    assert report.certified is True and report.notes == ()
+    assert [session.closed for session in lab.executor.sessions] == [2, 2, 2]
+    assert report.sandbox_runs == 11
+
+
+def test_close_that_fails_twice_is_noted_and_does_not_raise():
+    class CloseBroken(FakeSession):
+        def close(self):
+            self.closed += 1
+            raise RuntimeError("docker rm failed")
+
+    lab = Lab()
+    lab.executor.session_cls = CloseBroken
+    report = lab.run()
+    assert report.certified is True
+    assert report.reason == f"attacker failed after hardening with {STRIP} (not hackable by this attacker)"
+    assert len(report.notes) == 3  # one per session: before, candidate, after
+    assert all(note.startswith("session close failed twice (RuntimeError)") for note in report.notes)
+    assert [session.closed for session in lab.executor.sessions] == [2, 2, 2]
+
+
+def test_budget_raised_by_close_on_normal_exit_propagates():
+    class CloseBudget(FakeSession):
+        def close(self):
+            self.closed += 1
+            raise BudgetExceeded()
+
+    lab = Lab()
+    lab.executor.session_cls = CloseBudget
+    with pytest.raises(BudgetExceeded):
+        lab.run()
 
 
 @pytest.mark.parametrize("where", ["attack", "grade", "scan", "reset"])
@@ -492,12 +748,13 @@ def test_patch_failure_inside_the_after_round_ends_the_round():
     assert_clean(lab, report)
 
 
-def test_to_dict_is_json_and_holds_no_raw_diff():
+def test_to_dict_is_json_and_holds_no_raw_diff_log_text_or_evidence():
     lab = Lab()
     report = lab.run()
     data = report.to_dict()
     text = json.dumps(data)
     assert EXPLOIT not in text and "attacks" not in data
+    assert LOG not in text and EVIDENCE not in text
     assert set(data) == {
         "instance_id",
         "before",
@@ -509,6 +766,7 @@ def test_to_dict_is_json_and_holds_no_raw_diff():
         "certified",
         "reason",
         "sandbox_runs",
+        "notes",
     }
     assert set(data["before"]) == {
         "patches",
@@ -518,6 +776,7 @@ def test_to_dict_is_json_and_holds_no_raw_diff():
         "attack",
         "attack_grade",
         "holes",
+        "inconclusive",
         "error",
     }
     attack = data["before"]["attack"]
@@ -538,12 +797,25 @@ def test_to_dict_is_json_and_holds_no_raw_diff():
     assert data["candidates"][0]["outcomes"] == [{"name": STRIP, "ok": True, "notes": []}]
     assert data["after"]["patch_outcomes"][0]["name"] == STRIP
     assert data["sandbox_runs"] == 11 and data["instance_id"] == "fixture__task-1"
+    assert data["notes"] == []
+    log_digest = {"sha256": hashlib.sha256(LOG.encode()).hexdigest(), "chars": len(LOG)}
+    assert data["before"]["gates"]["gold"]["log_tail"] == log_digest
+    assert data["before"]["attack_grade"]["log_tail"] == log_digest
+    assert data["candidates"][0]["gold"]["log_tail"] == log_digest
+    assert data["before"]["holes"]["evidence_counts"] == {"git-history": 1}
+    assert "evidence" not in data["before"]["holes"]
+    assert data["before"]["holes"]["labels"] == ["git-history"]
     assert isinstance(report, HardenReport)
     assert report.attacks[0].final_diff == EXPLOIT and report.attacks[0].steps == [{"n": 1}, {"n": 2}]
 
 
 def test_to_dict_of_a_stopped_run_is_json():
-    for lab in (Lab(gold_ok=False), Lab(labels=("hard-code",)), Lab(fail={"attack": KeyError("k")})):
+    for lab in (
+        Lab(gold_ok=False),
+        Lab(labels=("hard-code",)),
+        Lab(fail={"attack": KeyError("k")}),
+        Lab(attacks=[make_attack("WRONG-DIFF", stop_reason="error")]),
+    ):
         data = lab.run().to_dict()
         assert json.loads(json.dumps(data)) == data
 

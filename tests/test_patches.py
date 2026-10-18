@@ -1,8 +1,19 @@
-"""Tests for cheatproof/patches.py (T06). Fake sessions only: nothing here runs a shell, git, docker or the network."""
+"""Tests for cheatproof/patches.py (T06).
+
+Most tests use fake sessions: nothing there runs a shell, git, docker or the network. The real-git tests at the end
+run the generated scripts with `sh -c` in a tmp_path repository. They need git on the scripts' PATH and touch no
+network. Their git calls get a clean environment with no system or global config.
+"""
 
 import json
+import os
 import re
 import shlex
+import shutil
+import subprocess
+import time
+from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +22,7 @@ from cheatproof.executor import EnvSpec, ExecutorRefused, ExecutorUnavailable, R
 from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT
 from cheatproof.grader import GIT_PREFIX, STEP_TIMEOUT_S
 from cheatproof.patches import (
+    _SCRIPT_PATH,
     HOLE_PATCHES,
     PATCH_NETWORK_OFF,
     PATCH_ORDER,
@@ -29,15 +41,27 @@ BASE = "71fb12cefda5a3e1e223ed837bca468f8bdab874"
 FUTURE = "9676c1085a90cf604df7cc56977abe773bae86b1"
 IMAGE = "python:3.12-slim"
 GUARD_NOTE = "enforced at grade time (reject_test_edits)"
-NO_CHANGE_NOTE = "unreachable blobs/trees left: 0 (a note, not a failure)"
-# The needles that route a fake reply to one strip step. Each script contains exactly one of the first two.
 VERIFY_NEEDLE = "--batch-all-objects"
 STRIP_NEEDLE = "repack"
 CHECK_NEEDLE = "cat-file -e"
 MARKER = re.compile(r"cheatproof-strip ([0-9a-f]{32}) done")
-FORBIDDEN_GIT_SUBCOMMANDS = re.compile(
-    r"\b(checkout|reset|clean|read-tree|stash|add|rm|restore|switch|apply)\b"
+FORBIDDEN_GIT_SUBCOMMANDS = re.compile(r"\b(checkout|reset|clean|stash|add|rm|restore|switch|apply)\b")
+SCRUB_LINE = (
+    f"PATH={_SCRIPT_PATH}; export PATH; unset -f git sort comm sed find wc head cat rm mkdir tr grep "
+    "2>/dev/null; hash -r 2>/dev/null"
 )
+UNSET_LINE = (
+    "unset GIT_DIR GIT_COMMON_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES "
+    "GIT_INDEX_FILE GIT_NAMESPACE GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_EXEC_PATH GIT_GRAFT_FILE "
+    "GIT_SHALLOW_FILE GIT_NO_REPLACE_OBJECTS GIT_CEILING_DIRECTORIES"
+)
+GIT_TEST_ENV = {
+    **{key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+}
+GIT_BIN = shutil.which("git", path=_SCRIPT_PATH)
+needs_git = pytest.mark.skipif(GIT_BIN is None, reason="git is not on the scripts' PATH")
 
 
 def make_task(**overrides) -> TaskSpec:
@@ -64,6 +88,16 @@ def token_of(cmd: str) -> str:
 
 def done_reply(cmd: str) -> Result:
     return Result(0, f"cheatproof-strip {token_of(cmd)} done\n", "", 0.0)
+
+
+def check_reply(head: str = BASE):
+    """A reply for the base commit check: it prints HEAD (empty when unresolved) and the completion line."""
+
+    def answer(cmd: str) -> Result:
+        token = token_of(cmd)
+        return Result(0, f"cheatproof-strip {token} head={head}\ncheatproof-strip {token} done\n", "", 0.0)
+
+    return answer
 
 
 # The verification output for a clean strip. Each test overrides one value.
@@ -139,8 +173,12 @@ class RaisingSession(FakeSession):
         raise self.error
 
 
-def clean_rules(verify=None):
-    return [(VERIFY_NEEDLE, verify_reply(verify)), (STRIP_NEEDLE, done_reply), (CHECK_NEEDLE, done_reply)]
+def clean_rules(verify=None, head=BASE):
+    return [
+        (VERIFY_NEEDLE, verify_reply(verify)),
+        (STRIP_NEEDLE, done_reply),
+        (CHECK_NEEDLE, check_reply(head)),
+    ]
 
 
 def strip_session(*, verify=None, first=()) -> FakeSession:
@@ -272,10 +310,10 @@ def test_no_names_runs_nothing():
 # strip-future-git: verdicts from the verification output
 
 
-def test_clean_strip_is_ok_and_reports_zero_unreachable_as_a_note():
+def test_clean_strip_is_ok_with_no_notes():
     session = strip_session()
     outcome = strip(session)
-    assert outcome == PatchOutcome(PATCH_STRIP_GIT, True, (NO_CHANGE_NOTE,))
+    assert outcome == PatchOutcome(PATCH_STRIP_GIT, True, ())
     assert len(session.commands) == 3  # base check, strip, verification
 
 
@@ -300,6 +338,7 @@ def test_extra_commit_samples_are_capped_and_non_sha_lines_are_dropped():
         ({"refs": "2"}, "2 ref(s) left after the strip"),
         ({"loose_refs": "1"}, "1 loose ref file(s) left"),
         ({"remote_keys": "2"}, "2 remote config key(s) left"),
+        ({"unreachable_objects": "3"}, "3 unreachable blob/tree object(s) left after prune"),
         ({"leftover": ["packed-refs", "logs"]}, "still present in .git: packed-refs, logs"),
         ({"head": FUTURE}, f"HEAD is not at base: {FUTURE}"),
         ({"head": None}, "HEAD is not at base: no value printed"),
@@ -309,12 +348,6 @@ def test_each_left_over_ref_object_or_config_fails_the_patch(changes, note):
     outcome = strip(strip_session(verify=changes))
     assert outcome.ok is False
     assert note in outcome.notes
-
-
-def test_unreachable_blobs_and_trees_are_a_note_not_a_failure():
-    outcome = strip(strip_session(verify={"unreachable_objects": "3"}))
-    assert outcome.ok is True
-    assert "unreachable blobs/trees left: 3 (a note, not a failure)" in outcome.notes
 
 
 def test_submodule_dirs_are_a_note_not_a_failure():
@@ -335,6 +368,12 @@ def test_a_missing_count_fails_closed():
     assert outcome.notes == ("unverified: strip verification printed no usable tags",)
 
 
+def test_a_missing_unreachable_count_fails_closed():
+    outcome = strip(strip_session(verify={"unreachable_objects": None}))
+    assert outcome.ok is False
+    assert outcome.notes == ("unverified: strip verification printed no usable unreachable_objects",)
+
+
 def test_lines_with_another_runs_token_are_ignored():
     def with_forged_line(cmd: str) -> Result:
         genuine = verify_reply()(cmd)
@@ -349,6 +388,32 @@ def test_login_profile_noise_before_the_result_is_ignored():
         return Result(0, "profile says hi\n" + clean.stdout, "", 0.0)
 
     assert strip(strip_session(first=[(VERIFY_NEEDLE, noisy)])).ok is True
+
+
+# strip-future-git: HEAD must be base before anything changes
+
+
+def test_head_off_base_refuses_before_any_change():
+    session = strip_session(first=[(CHECK_NEEDLE, check_reply(FUTURE))])
+    outcome = strip(session)
+    assert outcome == PatchOutcome(
+        PATCH_STRIP_GIT, False, (f"HEAD is {FUTURE}, not the task base; refusing to strip",)
+    )
+    assert len(session.commands) == 1  # only the read-only check ran
+
+
+def test_unresolved_head_refuses_before_any_change():
+    session = strip_session(first=[(CHECK_NEEDLE, check_reply(""))])
+    outcome = strip(session)
+    assert outcome.notes == ("HEAD is unresolved, not the task base; refusing to strip",)
+    assert len(session.commands) == 1
+
+
+def test_base_check_without_a_head_line_fails_closed():
+    session = strip_session(first=[(CHECK_NEEDLE, done_reply)])
+    outcome = strip(session)
+    assert outcome.notes == ("unverified: base commit check printed no HEAD",)
+    assert len(session.commands) == 1
 
 
 # strip-future-git: failed, timed out or truncated steps
@@ -462,17 +527,33 @@ def test_base_is_quoted_in_the_base_check():
     assert shlex.quote(f"{BASE}^{{commit}}") in session.commands[0]
 
 
+def test_every_script_starts_by_fixing_path_and_dropping_shadowed_tools():
+    session = strip_session()
+    strip(session)
+    for cmd in session.commands:
+        assert cmd.splitlines()[0] == SCRUB_LINE
+
+
+def test_scripts_unset_every_variable_that_could_redirect_git():
+    session = strip_session()
+    strip(session)
+    for cmd in session.commands:
+        assert UNSET_LINE in cmd.splitlines()
+
+
 def test_every_line_that_calls_git_carries_the_grader_prefix():
     session = strip_session()
     strip(session)
     for cmd in session.commands:
-        git_lines = [line for line in cmd.splitlines() if re.search(r"\bgit\b", line)]
+        git_lines = [
+            line for line in cmd.splitlines() if re.search(r"\bgit\b", line) and "unset -f" not in line
+        ]
         assert git_lines, "each step calls git"
         for line in git_lines:
             assert GIT_PREFIX in line, line
 
 
-def test_no_command_checks_out_resets_hard_cleans_or_touches_the_index():
+def test_no_command_checks_out_resets_hard_or_cleans():
     session = strip_session()
     strip(session)
     for cmd in session.commands:
@@ -483,18 +564,20 @@ def test_no_command_checks_out_resets_hard_cleans_or_touches_the_index():
                 assert not FORBIDDEN_GIT_SUBCOMMANDS.search(line.replace(GIT_PREFIX, "")), line
 
 
+def test_index_is_rebuilt_from_base_with_read_tree_before_the_repack():
+    session = strip_session()
+    strip(session)
+    strip_script = session.commands[1]
+    read_tree_lines = [line for line in strip_script.splitlines() if "read-tree" in line]
+    assert read_tree_lines == [f"{GIT_PREFIX}read-tree {BASE}"]
+    assert strip_script.index("read-tree") < strip_script.index("repack -a -d")
+
+
 def test_scripts_use_posix_sh_only():
     session = strip_session()
     strip(session)
     for cmd in session.commands:
         assert "[[" not in cmd and "pipefail" not in cmd and "<(" not in cmd and "$'" not in cmd
-
-
-def test_scripts_unset_the_variables_that_could_redirect_git():
-    session = strip_session()
-    strip(session)
-    for cmd in session.commands:
-        assert "unset GIT_DIR " in cmd and "GIT_ALTERNATE_OBJECT_DIRECTORIES" in cmd
 
 
 def test_scratch_dir_is_host_chosen_and_removed_on_exit():
@@ -508,7 +591,7 @@ def test_scratch_dir_is_host_chosen_and_removed_on_exit():
         assert f"mkdir -m 700 -- {scratch}" in cmd
 
 
-def test_the_strip_removes_refs_reflogs_grafts_alternates_and_keeps_marks_out():
+def test_the_strip_removes_refs_reflogs_grafts_alternates_and_state_files():
     session = strip_session()
     strip(session)
     strip_script = session.commands[1]
@@ -516,9 +599,12 @@ def test_the_strip_removes_refs_reflogs_grafts_alternates_and_keeps_marks_out():
     assert "update-ref --no-deref -d" in strip_script
     for name in ("logs", "info/grafts", "packed-refs", "worktrees", "ORIG_HEAD", "FETCH_HEAD"):
         assert f'"$gitdir/{name}"' in strip_script or f'"$common/{name}"' in strip_script, name
+    for name in ("COMMIT_EDITMSG", "MERGE_MSG", "SQUASH_MSG", "TAG_EDITMSG", "MERGE_MODE"):
+        assert f'"$gitdir/{name}"' in strip_script, name
+    assert '"$common/objects/pack/multi-pack-index.d"' in strip_script
     assert "objects/info/alternates" in strip_script
     assert "*.keep" in strip_script and "*.promisor" in strip_script
-    assert "remove-section" in strip_script
+    assert "remove-section" in strip_script and '"$gitdir/config.worktree"' in strip_script
     assert "repack -a -d" in strip_script and "prune --expire=now" in strip_script
 
 
@@ -529,12 +615,22 @@ def test_workdir_is_quoted_in_every_step():
     assert all("cd '/work space'" in cmd for cmd in session.commands)
 
 
-def test_verification_checks_base_against_the_fetched_history():
+def test_verification_checks_base_against_the_fetched_history_and_gates_on_head():
     session = strip_session()
     strip(session)
     verify = session.commands[2]
     assert f"rev-list {BASE} >" in verify
     assert "comm -23" in verify and "LC_ALL=C sort -u" in verify
+    assert f'[ "$head_sha" = {BASE} ] || ' in verify and "exit 1" in verify
+
+
+def test_every_generated_script_passes_sh_n():
+    session = strip_session()
+    strip(session)
+    assert len(session.commands) == 3
+    for cmd in session.commands:
+        done = subprocess.run(["sh", "-n", "-c", cmd], capture_output=True, text=True, check=False)
+        assert done.returncode == 0, done.stderr
 
 
 # network-off: the probe verdict
@@ -575,3 +671,184 @@ def test_probe_that_cannot_run_becomes_unverified():
     assert outcome == PatchOutcome(
         PATCH_NETWORK_OFF, False, ("unverified: network probe could not run: closed",)
     )
+
+
+# strip-future-git against real git. Each test builds a repo in tmp_path and runs the generated scripts with sh -c.
+
+
+def _text(value: bytes | str | None) -> str:
+    if value is None:
+        return ""
+    return value.decode("utf-8", "replace") if isinstance(value, bytes) else value
+
+
+class LocalSession(Session):
+    """Runs each command with sh -c in a local directory, so the generated scripts meet real git."""
+
+    def __init__(self, workdir: Path) -> None:
+        self.workdir = workdir
+
+    def run(self, cmd: str, timeout: float) -> Result:
+        started = time.monotonic()
+        try:
+            done = subprocess.run(
+                ["sh", "-c", cmd],
+                cwd=self.workdir,
+                env=GIT_TEST_ENV,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return Result(
+                124, _text(exc.stdout), _text(exc.stderr), time.monotonic() - started, timed_out=True
+            )
+        return Result(done.returncode, _text(done.stdout), _text(done.stderr), time.monotonic() - started)
+
+    def write_file(self, path, data):
+        target = self.workdir / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data.encode("utf-8") if isinstance(data, str) else data)
+
+    def diff(self):
+        raise NotImplementedError("LocalSession does not build diffs")
+
+    def reset(self):
+        raise NotImplementedError("LocalSession cannot reset")
+
+    def close(self):
+        pass
+
+
+def git(repo: Path, *args: str) -> str:
+    """Runs git in repo for the fixture. Raises if git fails."""
+    return _git_run(repo, args).stdout.strip()
+
+
+def git_exit(repo: Path, *args: str) -> int:
+    return _git_run(repo, args, check=False).returncode
+
+
+def _git_run(repo: Path, args: tuple[str, ...], *, check: bool = True) -> subprocess.CompletedProcess:
+    argv = [GIT_BIN, "-C", str(repo), "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid"]
+    return subprocess.run(
+        [*argv, *args], env=GIT_TEST_ENV, capture_output=True, text=True, check=check, timeout=60
+    )
+
+
+def snapshot(root: Path) -> dict[str, bytes]:
+    """Every file under root, by relative path. Equal snapshots mean the tree did not change."""
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()
+    }
+
+
+@dataclass(frozen=True)
+class Fixture:
+    repo: Path
+    base: str
+    future: str
+    tag_object: str
+    secret_blob: str
+
+
+def build_repo(root: Path) -> Fixture:
+    """A repo with HEAD on base and every kind of future state the strip must remove."""
+    repo = root / "repo"
+    repo.mkdir()
+    gitdir = repo / ".git"
+    git(repo, "init", "-q")
+    git(repo, "symbolic-ref", "HEAD", "refs/heads/main")
+    (repo / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    git(repo, "add", "calc.py")
+    git(repo, "commit", "-q", "-m", "base")
+    base = git(repo, "rev-parse", "HEAD")
+    # The future commit lives on its own branch, with an annotated tag on it.
+    git(repo, "checkout", "-q", "-b", "future")
+    (repo / "future.py").write_text("FIX = 1\n")
+    git(repo, "add", "future.py")
+    git(repo, "commit", "-q", "-m", "fix")
+    future = git(repo, "rev-parse", "HEAD")
+    git(repo, "tag", "-a", "v1", "-m", "release")
+    tag_object = git(repo, "rev-parse", "refs/tags/v1")
+    git(repo, "checkout", "-q", "main")
+    # A stash entry, a note on base, and a replace ref that hides the future commit.
+    (repo / "calc.py").write_text("def add(a, b):\n    return a - b\n")
+    git(repo, "stash", "push", "-q", "-m", "wip")
+    git(repo, "notes", "add", "-m", "a note", base)
+    git(repo, "replace", future, base)
+    # Everything into one pack, then a .keep marker on it, which the strip must remove before the repack.
+    git(repo, "repack", "-a", "-d", "-q")
+    (pack,) = (gitdir / "objects/pack").glob("pack-*.pack")
+    pack.with_suffix(".keep").write_text("")
+    # A blob staged in the index only. It stays reachable through the index until the strip rebuilds it.
+    (repo / "secret.txt").write_text("staged from the future\n")
+    git(repo, "add", "secret.txt")
+    secret_blob = git(repo, "rev-parse", ":secret.txt")
+    # Commit text and merge state, a multi-pack-index chain directory, and remote sections in both config files.
+    (gitdir / "COMMIT_EDITMSG").write_text("fix\n")
+    for name in ("MERGE_MSG", "SQUASH_MSG", "TAG_EDITMSG"):
+        (gitdir / name).write_text("text\n")
+    (gitdir / "MERGE_MODE").write_text("")
+    (gitdir / "objects/pack/multi-pack-index.d").mkdir()
+    git(repo, "config", "remote.origin.url", "https://example.invalid/origin.git")
+    git(repo, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+    git(
+        repo,
+        "config",
+        "--file",
+        str(gitdir / "config.worktree"),
+        "remote.wt.url",
+        "https://example.invalid/wt",
+    )
+    return Fixture(repo=repo, base=base, future=future, tag_object=tag_object, secret_blob=secret_blob)
+
+
+def strip_local(fx: Fixture, task: TaskSpec) -> PatchOutcome:
+    (outcome,) = apply_patches(LocalSession(fx.repo), task, [PATCH_STRIP_GIT], workdir=str(fx.repo))
+    return outcome
+
+
+@needs_git
+def test_strip_removes_future_history_refs_and_state(tmp_path):
+    fx = build_repo(tmp_path)
+    gitdir = fx.repo / ".git"
+    # The fixture really holds the future state, so the checks after the strip cannot pass vacuously.
+    assert git(fx.repo, "rev-parse", "HEAD") == fx.base
+    assert git_exit(fx.repo, "cat-file", "-e", fx.future) == 0
+    assert git_exit(fx.repo, "cat-file", "-e", fx.tag_object) == 0
+    assert git_exit(fx.repo, "cat-file", "-e", fx.secret_blob) == 0
+    assert len(git(fx.repo, "for-each-ref").splitlines()) >= 4  # main, future, tag v1, stash, notes, replace
+    assert git(fx.repo, "stash", "list") != ""
+    assert list((gitdir / "objects/pack").glob("*.keep"))
+    assert (gitdir / "COMMIT_EDITMSG").exists()
+    assert 'remote "origin"' in (gitdir / "config").read_text()
+    assert 'remote "wt"' in (gitdir / "config.worktree").read_text()
+
+    outcome = strip_local(fx, make_task(base_commit=fx.base))
+    assert outcome == PatchOutcome(PATCH_STRIP_GIT, True, ())
+    assert git(fx.repo, "rev-parse", "HEAD") == fx.base
+    assert git(fx.repo, "for-each-ref") == ""
+    for obj in (fx.future, fx.tag_object, fx.secret_blob):
+        assert git_exit(fx.repo, "cat-file", "-e", obj) != 0, obj
+    for name in ("COMMIT_EDITMSG", "MERGE_MSG", "SQUASH_MSG", "TAG_EDITMSG", "MERGE_MODE"):
+        assert not (gitdir / name).exists(), name
+    assert not list((gitdir / "objects/pack").glob("*.keep"))
+    assert not (gitdir / "objects/pack/multi-pack-index.d").exists()
+    assert 'remote "origin"' not in (gitdir / "config").read_text()
+    worktree_config = gitdir / "config.worktree"
+    assert not worktree_config.exists() or 'remote "wt"' not in worktree_config.read_text()
+
+
+@needs_git
+def test_head_off_base_refuses_and_leaves_the_repo_unchanged(tmp_path):
+    fx = build_repo(tmp_path)
+    git(fx.repo, "commit", "-q", "--allow-empty", "-m", "child of base")
+    child = git(fx.repo, "rev-parse", "HEAD")
+    before = snapshot(fx.repo / ".git")
+    outcome = strip_local(fx, make_task(base_commit=fx.base))
+    assert outcome == PatchOutcome(
+        PATCH_STRIP_GIT, False, (f"HEAD is {child}, not the task base; refusing to strip",)
+    )
+    assert snapshot(fx.repo / ".git") == before
+    assert git_exit(fx.repo, "cat-file", "-e", fx.future) == 0

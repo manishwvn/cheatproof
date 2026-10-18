@@ -1,6 +1,9 @@
+import os
 import re
 import shlex
+import subprocess
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +12,9 @@ from cheatproof.grader import (
     LOG_TAIL_CHARS,
     GateReport,
     GradeResult,
+    _base_conftests,
+    _c_unquote,
+    _GradeStep,
     diff_files,
     empty_gate,
     gold_gate,
@@ -451,6 +457,103 @@ def test_conftest_scan_failure_fails_closed():
     assert session.cmds("pytest") == []
 
 
+def base_conftests(*paths: str) -> Result:
+    """Answer for the base conftest listing: the given paths, NUL-separated like the grep -z filter prints them."""
+    return Result(0, "".join(path + "\0" for path in paths), "", 0.0)
+
+
+def test_base_conftest_the_candidate_deleted_gets_its_restore_command():
+    session = FakeSession(
+        [
+            ("grep -z", base_conftests("tests/conftest.py")),
+            ("ls-tree --name-only -z", base_tree("tests/conftest.py", TEST_FILE)),
+            ("pytest", all_pass),
+        ]
+    )
+    result = grade(session, make_task(), GOLD)
+    restore = f"cat-file blob {BASE}:tests/conftest.py > tests/conftest.py"
+    assert session.cmds(restore)
+    assert first_command(session, restore) < first_command(session, "hidden-tests.diff")
+    assert not [cmd for cmd, _ in session.commands if cmd.endswith(" rm -f -- tests/conftest.py")]
+    assert result.passed is True
+
+
+def test_base_conftest_listing_failing_fails_closed():
+    session = FakeSession([("grep -z", Result(2, "", "grep: boom", 0.0)), ("pytest", all_pass)])
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert result.applied is False
+    assert result.error == "list conftest.py files at base failed: grep: boom"
+    assert session.cmds("pytest") == []
+
+
+class ShellSession(FakeSession):
+    """Runs each command with sh -c on this machine, so the grader's git and grep lines run for real."""
+
+    def run(self, cmd, timeout):
+        self.commands.append((cmd, timeout))
+        proc = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True, timeout=60, check=False)
+        return Result(proc.returncode, proc.stdout, proc.stderr, 0.0)
+
+
+def git_repo_with(path: Path, files: list[str]) -> str:
+    """A git repo at path whose one commit holds files (each with one line). Returns the commit id."""
+    env = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+    }
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=path, env=env, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    path.mkdir(parents=True)
+    git("init", "-q")
+    for name in files:
+        (path / name).parent.mkdir(parents=True, exist_ok=True)
+        (path / name).write_text("x\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "base")
+    return git("rev-parse", "HEAD")
+
+
+def test_base_conftests_finds_every_conftest_at_any_depth_and_no_other_file(tmp_path):
+    files = [
+        "conftest.py",
+        "tests/conftest.py",
+        "pkg/sub/conftest.py",
+        "dir with space/conftest.py",
+        "src/conftest_helpers.py",
+        "pkg/contest.py",
+        "tests/test_a.py",
+    ]
+    sha = git_repo_with(tmp_path / "repo", files)
+    found = _base_conftests(ShellSession(), str(tmp_path / "repo"), sha, str(tmp_path / "scratch"), [])
+    assert sorted(found) == [
+        "conftest.py",
+        "dir with space/conftest.py",
+        "pkg/sub/conftest.py",
+        "tests/conftest.py",
+    ]
+
+
+def test_base_without_any_conftest_is_an_empty_list_not_an_error(tmp_path):
+    sha = git_repo_with(tmp_path / "repo", ["tests/test_a.py"])
+    assert _base_conftests(ShellSession(), str(tmp_path / "repo"), sha, str(tmp_path / "scratch"), []) == []
+
+
+def test_base_conftest_listing_of_an_unknown_commit_fails_closed(tmp_path):
+    git_repo_with(tmp_path / "repo", ["conftest.py"])
+    with pytest.raises(_GradeStep, match="list conftest.py files at base failed"):
+        _base_conftests(ShellSession(), str(tmp_path / "repo"), "1234567", str(tmp_path / "scratch"), [])
+
+
 # grade: quoting, hardening and ordering
 
 
@@ -648,6 +751,11 @@ def test_empty_patch_is_unaffected_by_the_flag(patch):
         "tox.ini",
         "sub/setup.cfg",
         "pyproject.toml",
+        ".pytest.ini",
+        "pytest.toml",
+        ".pytest.toml",
+        "testing/helper.py",
+        "pkg/testing/x.py",
         ".pytest_cache/v/cache/nodeids",
         "lib/sitecustomize.py",
         "usercustomize.py",
@@ -710,6 +818,153 @@ def test_rename_across_a_test_dir_names_the_test_side(old, new, expected):
 def test_touched_test_files_raises_for_a_patch_it_cannot_read():
     with pytest.raises(ValueError):
         touched_test_files("not a patch\n")
+
+
+# touched_test_files: C-quoted rename and copy paths, unsafe paths, mode and binary changes
+
+
+def header_name(prefix: str, name: str) -> str:
+    """A diff header's name for a rename line's path. git puts a/ or b/ inside the quotes when it quotes."""
+    return '"' + prefix + name[1:] if name.startswith('"') else prefix + name
+
+
+def pure_rename(old: str, new: str, kind: str = "rename") -> str:
+    """A rename or copy with no content change. old and new are the rename lines' paths, quoted as git writes them."""
+    return (
+        f"diff --git {header_name('a/', old)} {header_name('b/', new)}\n"
+        f"similarity index 100%\n{kind} from {old}\n{kind} to {new}\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ('"src/a\\"b.py"', '"tests/a\\"b.py"', ['tests/a"b.py']),  # quoted, moved into tests/
+        ('"tests/a\\"b.py"', '"src/a\\"b.py"', ['tests/a"b.py']),  # quoted, moved out: old path counts
+        ('"src/a\\"b.py"', '"src/c\\"d.py"', []),  # quoted on both sides, neither a test
+        ("src/a.py", '"tests/caf\\303\\251 x.py"', ["tests/café x.py"]),  # octal UTF-8 and a space
+        ('"src/caf\\303\\251 x.py"', "src/b.py", []),
+    ],
+)
+def test_quoted_rename_lines_are_unquoted_before_the_guard(old, new, expected):
+    assert touched_test_files(pure_rename(old, new)) == expected
+
+
+def test_quoted_copy_into_tests_is_touched():
+    patch = pure_rename('"src/c\\"d.py"', '"tests/c\\"d.py"', kind="copy")
+    assert touched_test_files(patch) == ['tests/c"d.py']
+
+
+def test_quoted_rename_reports_the_unquoted_paths_from_diff_files():
+    patch = pure_rename('"src/caf\\303\\251 x.py"', '"tests/caf\\303\\251 x.py"')
+    assert diff_files(patch) == [("src/café x.py", False), ("tests/café x.py", True)]
+
+
+@pytest.mark.parametrize(
+    ("raw", "text"),
+    [
+        ('"\\101\\102"', "AB"),  # octal bytes
+        ('"a\\\\b\\"c"', 'a\\b"c'),  # backslash and quote escapes
+        ('"caf\\303\\251"', "café"),  # octal bytes that form UTF-8
+        ('"\\a\\b\\f\\v"', "\a\b\f\v"),  # control escapes
+    ],
+)
+def test_c_unquote_decodes_the_escapes_git_writes(raw, text):
+    assert _c_unquote(raw) == text
+
+
+@pytest.mark.parametrize(
+    "new",
+    [
+        '"tests/a\\tb.py"',  # decodes to a tab, which is unsafe
+        '"tests/a\\qb.py"',  # not a git escape
+        '"tests/bad\\377.py"',  # one byte that is not UTF-8
+        '"tests/big\\400.py"',  # octal past one byte
+        '"tests/unclosed.py',  # no closing quote
+        '"tests/x"y.py"',  # an unescaped quote inside
+    ],
+)
+def test_malformed_quoted_rename_path_is_refused_before_any_command(new):
+    patch = pure_rename("src/a.py", new)
+    with pytest.raises(ValueError):
+        touched_test_files(patch)
+    session = FakeSession()
+    result = grade(session, make_task(), patch, reject_test_edits=True)
+    assert result.passed is False
+    assert result.error is not None and result.error.startswith("test files refused: ")
+    assert session.commands == []
+
+
+def test_quoted_header_lines_stay_refused_for_the_guard():
+    with pytest.raises(ValueError, match="C-quoted"):
+        touched_test_files(QUOTED)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("src/a.py", "../tests/a.py"),
+        ('"src/a.py"', '"../tests/a.py"'),
+        ('"../tests/a.py"', "src/a.py"),
+    ],
+)
+def test_rename_that_climbs_out_of_the_workdir_is_refused(old, new):
+    with pytest.raises(ValueError, match="unsafe path"):
+        touched_test_files(pure_rename(old, new))
+    session = FakeSession()
+    result = grade(session, make_task(), pure_rename(old, new), reject_test_edits=True)
+    assert result.error is not None and result.error.startswith("test files refused: unsafe path")
+    assert session.commands == []
+
+
+MODE_ONLY_TEST = "diff --git a/tests/x.py b/tests/x.py\nold mode 100644\nnew mode 100755\n"
+BINARY_TEST = (
+    "diff --git a/tests/x.png b/tests/x.png\nindex 1..2 100644\n"
+    "Binary files a/tests/x.png and b/tests/x.png differ\n"
+)
+
+
+def test_mode_change_only_on_a_test_file_is_touched():
+    assert touched_test_files(MODE_ONLY_TEST) == ["tests/x.py"]
+    session = FakeSession()
+    result = grade(session, make_task(), MODE_ONLY_TEST, reject_test_edits=True)
+    assert result == GradeResult(False, 0, 1, 0, 1, False, "test files touched: tests/x.py", "")
+    assert session.commands == []
+
+
+def test_binary_change_to_a_test_file_is_refused_before_any_command():
+    with pytest.raises(ValueError, match="binary"):
+        touched_test_files(BINARY_TEST)
+    session = FakeSession()
+    result = grade(session, make_task(), BINARY_TEST, reject_test_edits=True)
+    assert result.error is not None and result.error.startswith("test files refused: binary change")
+    assert session.commands == []
+
+
+# grade: guarded config is named apart from test files
+
+
+@pytest.mark.parametrize("path", [".pytest.ini", "pytest.toml", ".pytest.toml", "setup.cfg", "tox.ini"])
+def test_config_only_touch_is_reported_as_guarded_config(path):
+    session = FakeSession([("pytest", all_pass)])
+    result = grade(session, make_task(), edit_patch(path), reject_test_edits=True)
+    assert result == GradeResult(False, 0, 1, 0, 1, False, f"guarded config touched: {path}", "")
+    assert session.commands == []
+
+
+def test_gold_patch_that_edits_pyproject_is_reported_as_guarded_config():
+    task = make_task(gold_patch=edit_patch("pyproject.toml"))
+    report = run_gates(FakeSession([("pytest", fixed_only)]), task, reject_test_edits=True)
+    assert report.gold.error == "guarded config touched: pyproject.toml"
+    assert report.reason == "gold gate failed: guarded config touched: pyproject.toml"
+
+
+def test_config_and_test_file_in_one_patch_lead_with_test_files_and_name_both():
+    session = FakeSession()
+    patch = edit_patch("tests/test_x.py") + edit_patch("pytest.ini")
+    result = grade(session, make_task(), patch, reject_test_edits=True)
+    assert result.error == "test files touched: pytest.ini, tests/test_x.py"
+    assert session.commands == []
 
 
 # diff_files: only header lines name paths

@@ -1,8 +1,9 @@
 """In-session hardening patches for one task (queue T06, ADR 0002). Code only, no model.
 
 Each patch closes one hole that cheatproof/exposure.py reports:
-  strip-future-git  git-history. Deletes every ref, reflog, pseudo-ref, graft, alternate and object that base cannot
-                    reach, so the fix cannot be read from .git. A verification run then checks the result.
+  strip-future-git  git-history. Refuses unless HEAD is exactly the task base. Then deletes every ref, reflog,
+                    pseudo-ref, graft, alternate and object that base cannot reach, so the fix cannot be read from
+                    .git. A verification run then checks the result.
   test-edit-guard   test-edit. Runs no command. The grader refuses a candidate that edits a test file when it is
                     graded with reject_test_edits=True (grade_kwargs returns that flag).
   network-off       network. EnvSpec.network=False turns the network off at start (env_for). Here a probe checks
@@ -14,17 +15,23 @@ Why patches run again after every reset: reset() destroys the sandbox and starts
 every in-session change is lost. Call apply_patches after each reset, and build the EnvSpec with env_for for each
 start.
 
-Safety. Every command is POSIX sh (run through sh -lc), with each argument shlex-quoted. Every git call carries
-grader.GIT_PREFIX, which turns off hooks, fsmonitor, external diff and the system and global config. The strip never
-runs checkout, reset --hard or clean, and never writes the working tree or the index. The output is parsed strictly:
-a step that exits non-zero, times out, is truncated, or does not finish its output gives ok=False, and nothing is
-read as success. BudgetExceeded and the executor errors propagate. Only RuntimeError and OSError from a sandbox call
-become ok=False.
+Safety. Every command is POSIX sh (run through sh -lc), with each argument shlex-quoted. Each script first sets PATH
+to fixed system directories and drops the shell functions and git variables that the image's login profile may
+have set (see _SCRUB_LINE and _UNSET_GIT_ENV). Every git call carries grader.GIT_PREFIX, which turns off hooks,
+fsmonitor, external diff and the system and global config. The strip never runs checkout, reset --hard or clean,
+and never writes the working tree. It rebuilds the index from base with read-tree, which replaces only the index.
+The output is parsed strictly: a step that exits non-zero, times out, is truncated, or does not finish its output
+gives ok=False, and nothing is read as success. BudgetExceeded and the executor errors propagate. Only RuntimeError
+and OSError from a sandbox call become ok=False.
+
+Residual risk. A sandbox with a trojaned /usr/bin/git can still lie. The fixed PATH and the strict output parse do
+not stop a git that fakes its answers. The exposure scan in harden is the second check, and that residual risk is
+stated here, not closed.
 
 Limits. Only the workdir's repository is stripped, and its alternates are removed after the repack, so base objects
 that live in a borrowed store are copied first. Submodule git dirs under .git/modules and other clones in the image
-are not stripped; the verification reports submodules as a note. The image's login profile runs before every
-command, as it does for the grader, so a hostile image can still change PATH.
+are not stripped; the verification reports submodules as a note. The image's login profile runs before each
+script's first line, so the scrub and the exposure scan are the only limits on what it can change.
 """
 
 from __future__ import annotations
@@ -59,16 +66,24 @@ FULL_SHA_LEN = 40
 FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
 MAX_EXTRA_SHAS = 5  # leftover commit SHAs quoted in a note
 
-# Environment that would point git at another repository or inject config. The image's login profile runs first,
-# so every script unsets these before its first git call.
+# The path every script uses, and the tools they may call. The image's login profile runs before a script's first
+# line and may have set PATH or defined shell functions with these names, so the first line resets both. tr and grep
+# are not called yet. They stay on the list so a later edit cannot pick up a shadowed copy.
+_SCRIPT_PATH = "/usr/local/bin:/usr/bin:/bin"
+_SCRUBBED_TOOLS = "git sort comm sed find wc head cat rm mkdir tr grep"
+_SCRUB_LINE = f"PATH={_SCRIPT_PATH}; export PATH; unset -f {_SCRUBBED_TOOLS} 2>/dev/null; hash -r 2>/dev/null"
+# Environment that would point git at another repository or inject config. Every script unsets these before its
+# first git call.
 _UNSET_GIT_ENV = (
     "GIT_DIR GIT_COMMON_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES "
-    "GIT_INDEX_FILE GIT_NAMESPACE GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS"
+    "GIT_INDEX_FILE GIT_NAMESPACE GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_EXEC_PATH GIT_GRAFT_FILE "
+    "GIT_SHALLOW_FILE GIT_NO_REPLACE_OBJECTS GIT_CEILING_DIRECTORIES"
 )
 # The same path in a plain clone. For a linked worktree the per-worktree dir and the common dir differ.
 _GIT_ROOTS = ("$gitdir", "$common")
 # Removed from both git roots. Reflogs, linked-worktree state, leftover operation state, grafts, the dumb-HTTP ref
-# list and the packed refs all name objects or refs. commit-graph and multi-pack-index can name pruned commits.
+# list and the packed refs all name objects or refs. commit-graph and multi-pack-index (file or .d chain) can name
+# pruned commits.
 _STALE_NAMES = (
     "logs",
     "worktrees",
@@ -83,6 +98,7 @@ _STALE_NAMES = (
     "objects/info/commit-graph",
     "objects/info/commit-graphs",
     "objects/pack/multi-pack-index",
+    "objects/pack/multi-pack-index.d",
 )
 # Pseudo-refs that can name a commit or tree. Only the per-worktree git dir holds them.
 _PSEUDO_REFS = (
@@ -95,10 +111,20 @@ _PSEUDO_REFS = (
     "REBASE_HEAD",
     "BISECT_HEAD",
 )
+# Per-worktree files that hold commit or tag text, or merge state. Commit text can name objects, so they go too.
+_EDIT_FILES = ("COMMIT_EDITMSG", "MERGE_MSG", "SQUASH_MSG", "TAG_EDITMSG", "MERGE_MODE")
+_PER_WORKTREE_FILES = (*_PSEUDO_REFS, *_EDIT_FILES)
 # Paths the verification must find absent. Alternates are removed after the repack, not in the strip's first pass.
-_LEFTOVER_NAMES = (*_STALE_NAMES, *_PSEUDO_REFS, "objects/info/alternates", "objects/info/http-alternates")
-# Remote config keys. A remote section names a URL and fetch refspecs, so the strip removes every such section.
+_LEFTOVER_NAMES = (
+    *_STALE_NAMES,
+    *_PER_WORKTREE_FILES,
+    "objects/info/alternates",
+    "objects/info/http-alternates",
+)
+# Remote config keys. A remote section names a URL and fetch refspecs, so the strip removes every such section,
+# from .git/config and from the per-worktree config.worktree.
 _REMOTE_KEY_RE = shlex.quote("^remote[.]")
+_WORKTREE_CONFIG = '"$gitdir/config.worktree"'
 _SECTION_SED = shlex.quote("s/[.][^.]*$//")  # drops the last key component, leaving the section name
 _REF_FORMAT = shlex.quote("--format=%(refname)")
 _COMMIT_SED = shlex.quote("s/^commit //p")
@@ -199,13 +225,23 @@ def _strip_future_git(session: Session, task: TaskSpec, workdir: str) -> PatchOu
         )
     token = uuid.uuid4().hex  # tags every line this strip prints, so stray output cannot pass for a result
     try:
-        _step(session, _check_script(workdir, base, token), token, "base commit check")
+        _check_head(session, workdir, base, token)
         _step(session, _strip_script(workdir, base, token), token, "strip")
         fields = _step(session, _verify_script(workdir, base, token), token, "strip verification")
         failures, notes = _judge(fields, base)
     except _StepFailed as exc:
         return PatchOutcome(PATCH_STRIP_GIT, False, (str(exc),))
     return PatchOutcome(PATCH_STRIP_GIT, not failures, (*failures, *notes))
+
+
+def _check_head(session: Session, workdir: str, base: str, token: str) -> None:
+    """Refuses the strip unless HEAD is exactly base. The check only reads, so a refusal changes nothing."""
+    fields = _step(session, _check_script(workdir, base, token), token, "base commit check")
+    head = fields.get("head", [])
+    if len(head) != 1:
+        raise _StepFailed("unverified: base commit check printed no HEAD")
+    if head[0] != base:
+        raise _StepFailed(f"HEAD is {head[0] or 'unresolved'}, not the task base; refusing to strip")
 
 
 def _run(session: Session, cmd: str, label: str) -> Result:
@@ -262,6 +298,7 @@ def _judge(fields: dict[str, list[str]], base: str) -> tuple[list[str], list[str
         ("refs", "ref(s) left after the strip"),
         ("loose_refs", "loose ref file(s) left"),
         ("remote_keys", "remote config key(s) left"),
+        ("unreachable_objects", "unreachable blob/tree object(s) left after prune"),
     ):
         count = _count(fields, key)
         if count:
@@ -272,7 +309,7 @@ def _judge(fields: dict[str, list[str]], base: str) -> tuple[list[str], list[str
     head = fields.get("head", [])
     if head != [base]:
         failures.append(f"HEAD is not at base: {head[0] if head else 'no value printed'}")
-    notes = [f"unreachable blobs/trees left: {_count(fields, 'unreachable_objects')} (a note, not a failure)"]
+    notes: list[str] = []
     if _count(fields, "submodules"):
         notes.append("submodule git dirs under .git/modules were not stripped")
     return failures, notes
@@ -288,27 +325,55 @@ def _scratch(token: str) -> str:
 
 
 def _header(workdir: str) -> list[str]:
-    return ["set -eu", f"unset {_UNSET_GIT_ENV}", f"cd {shlex.quote(workdir)}"]
+    return [_SCRUB_LINE, "set -eu", f"unset {_UNSET_GIT_ENV}", f"cd {shlex.quote(workdir)}"]
 
 
 def _done(token: str) -> str:
     return f'echo "cheatproof-strip {token} done"'
 
 
+def _remote_key_lines(out: str) -> list[str]:
+    """Shell lines that write every remote.* key name, from .git/config and config.worktree, to out."""
+    local = _git(f"config --local --name-only --get-regexp {_REMOTE_KEY_RE} > {out}")
+    worktree = _git(f"config --file {_WORKTREE_CONFIG} --name-only --get-regexp {_REMOTE_KEY_RE} >> {out}")
+    # Exit 1 means no key matched, which is fine. Anything above 1 is a read failure.
+    return [
+        "rc=0",
+        f"{local} || rc=$?",
+        f"if [ -f {_WORKTREE_CONFIG} ]; then {worktree} || rc=$?; fi",
+        'if [ "$rc" -gt 1 ]; then echo "config read failed" >&2; exit 1; fi',
+    ]
+
+
 def _check_script(workdir: str, base: str, token: str) -> str:
     base_rev = shlex.quote(f"{base}^{{commit}}")
-    return "\n".join([*_header(workdir), _git(f"cat-file -e {base_rev}"), _done(token)])
+    # Read-only. It prints HEAD so _check_head can refuse the strip before anything is changed.
+    head = f"head_sha=$({_git('rev-parse --verify --quiet HEAD')} || true)"
+    return "\n".join(
+        [
+            *_header(workdir),
+            _git(f"cat-file -e {base_rev}"),
+            head,
+            f'echo "cheatproof-strip {token} head=$head_sha"',
+            _done(token),
+        ]
+    )
 
 
 def _strip_script(workdir: str, base: str, token: str) -> str:
     scratch = _scratch(token)
     delete_ref = _git('update-ref --no-deref -d "$ref"')
     stale = " ".join(f'"{root}/{name}"' for name in _STALE_NAMES for root in _GIT_ROOTS)
-    pseudo = " ".join(f'"$gitdir/{name}"' for name in _PSEUDO_REFS)
+    per_worktree = " ".join(f'"$gitdir/{name}"' for name in _PER_WORKTREE_FILES)
     remote_keys = f"{scratch}/remote-keys"
     sections = f"{scratch}/remote-sections"
     # A section that is already gone is fine. A section that survives is caught by the verification.
-    remove_section = _git('config --local --remove-section "$sec"') + " || true"
+    remove_local = _git('config --local --remove-section "$sec"') + " || true"
+    remove_worktree = _git(f'config --file {_WORKTREE_CONFIG} --remove-section "$sec"') + " || true"
+    remove_sections = (
+        f"while IFS= read -r sec; do {remove_local}; "
+        f"if [ -f {_WORKTREE_CONFIG} ]; then {remove_worktree}; fi; done < {sections}"
+    )
     return "\n".join(
         [
             *_header(workdir),
@@ -323,14 +388,14 @@ def _strip_script(workdir: str, base: str, token: str) -> str:
             'rm -rf -- "$gitdir/refs" "$common/refs"',
             'mkdir -p -- "$gitdir/refs/heads" "$gitdir/refs/tags" "$common/refs/heads" "$common/refs/tags"',
             f"rm -rf -- {stale}",
-            f'rm -f -- {pseudo} "$gitdir"/BISECT_*',
-            # Remote sections: remove the section of every remote.* key.
-            "rc=0",
-            _git(f"config --local --name-only --get-regexp {_REMOTE_KEY_RE} > {remote_keys}") + " || rc=$?",
-            'if [ "$rc" -gt 1 ]; then echo "config read failed" >&2; exit 1; fi',
+            f'rm -f -- {per_worktree} "$gitdir"/BISECT_*',
+            *_remote_key_lines(remote_keys),
             f"sed {_SECTION_SED} {remote_keys} > {sections}.raw",
             f"LC_ALL=C sort -u {sections}.raw > {sections}",
-            f"while IFS= read -r sec; do {remove_section}; done < {sections}",
+            remove_sections,
+            # Index: rebuild it from base, so a blob staged from the future is no longer referenced. read-tree
+            # replaces only the index. The working tree and HEAD are not touched.
+            _git(f"read-tree {base}"),
             # Expire, then drop keep and promisor marks so the repack can drop objects, then repack and prune.
             _git("reflog expire --expire=now --all"),
             'rm -f -- "$common"/objects/pack/*.keep "$common"/objects/pack/*.promisor',
@@ -360,6 +425,11 @@ def _verify_script(workdir: str, base: str, token: str) -> str:
         'if [ -e "$gitdir/modules" ] || [ -e "$common/modules" ]; then '
         f'echo "cheatproof-strip {token} submodules=1"; else echo "cheatproof-strip {token} submodules=0"; fi'
     )
+    # The last check: HEAD must still be base. Exit 1 fails the step, whatever the printed counts say.
+    head_gate = (
+        f'[ "$head_sha" = {shlex.quote(base)} ] || '
+        '{ echo "HEAD is not the task base after the strip" >&2; exit 1; }'
+    )
     return "\n".join(
         [
             *_header(workdir),
@@ -372,9 +442,7 @@ def _verify_script(workdir: str, base: str, token: str) -> str:
             _git(f"rev-list --objects {base} > {s}/base-objects"),
             _git(f"for-each-ref > {s}/refs"),
             _git(f"rev-parse --verify --quiet HEAD > {s}/head"),
-            "rc=0",
-            _git(f"config --local --name-only --get-regexp {_REMOTE_KEY_RE} > {s}/remote") + " || rc=$?",
-            'if [ "$rc" -gt 1 ]; then echo "config read failed" >&2; exit 1; fi',
+            *_remote_key_lines(f"{s}/remote"),
             # Commits in the object store that base cannot reach are the extra ones.
             f"LC_ALL=C sort -u {s}/base-list > {s}/base-commits",
             f"sed -n {_COMMIT_SED} {s}/objects > {s}/commit-ids",
@@ -382,7 +450,7 @@ def _verify_script(workdir: str, base: str, token: str) -> str:
             f"LC_ALL=C comm -23 {s}/commits {s}/base-commits > {s}/extra-commits",
             f"head -n {MAX_EXTRA_SHAS} {s}/extra-commits > {s}/extra-sample",
             f"sed -n {_TAG_SED} {s}/objects > {s}/tags",
-            # Blobs and trees the store holds that base's history does not reach: a note, not a failure.
+            # Blobs and trees the store holds that base's history does not reach. Left after the prune, they fail.
             f"sed {_OBJECT_ID_SED} {s}/base-objects > {s}/base-object-ids",
             f"LC_ALL=C sort -u {s}/base-object-ids > {s}/base-objs",
             f"sed -n -e {_BLOB_SED} -e {_TREE_SED} {s}/objects > {s}/object-ids",
@@ -408,6 +476,7 @@ def _verify_script(workdir: str, base: str, token: str) -> str:
             pack_loop,
             submodules,
             _git(f"cat-file -e {base_rev}"),
+            head_gate,
             _done(token),
         ]
     )
