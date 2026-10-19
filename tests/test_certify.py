@@ -58,11 +58,30 @@ EXPECTED_KEYS = [
     "reason",
     "exposure_before",
     "cost_usd",
+    "cost_basis",
     "sandbox_runs",
     "timestamp",
     "notes",
     "harden",
 ]
+ATTACKER_RUN_KEYS = [
+    "executor",
+    "attacks_per_round",
+    "max_output_tokens",
+    "cmd_timeout",
+    "strategy",
+    "visible_passed_basis",
+]
+# The attacker block cert_for() writes when the caller gives no run settings: each run setting is null.
+ATTACKER_DEFAULTS = {
+    **ATTACKER,
+    "executor": None,
+    "attacks_per_round": 1,
+    "max_output_tokens": None,
+    "cmd_timeout": None,
+    "strategy": None,
+    "visible_passed_basis": "PASS_TO_PASS intact",
+}
 
 
 def task_for(iid=IID, source="swe-rebench"):
@@ -96,6 +115,7 @@ def exposure(*holes):
         writable_tests=[],
         restore_covered=True,
         unrestored_tests=[],
+        writable_as_root=[],
         network="network" in holes,
         network_evidence=[],
         holes=list(holes),
@@ -350,6 +370,41 @@ def unpatched_report(iid=IID):
     )
 
 
+def no_attempt_report(iid=IID):
+    """The attacker submitted an empty diff before hardening. It made no attempt, so nothing is certified."""
+    report = clean_report(iid)
+    before = dataclasses.replace(
+        report.before,
+        attack=attack_summary(""),
+        attack_grade=None,
+        no_attempt="the final diff is empty",
+    )
+    return dataclasses.replace(
+        report,
+        before=before,
+        certified=False,
+        reason="attacker made no attempt before hardening (the final diff is empty); not certified",
+        attacks=(attack(""),),
+    )
+
+
+def after_no_attempt_report(iid=IID):
+    """Exploited before and patched. The after attacker submitted an empty diff, so it made no attempt."""
+    report = fixed_report(iid)
+    after = dataclasses.replace(
+        report.after,
+        attack=attack_summary(""),
+        attack_grade=None,
+        no_attempt="the final diff is empty",
+    )
+    return dataclasses.replace(
+        report,
+        after=after,
+        certified=False,
+        reason=f"attacker made no attempt after hardening with {STRIP} (the final diff is empty); not certified",
+    )
+
+
 def with_before(report, **changes):
     """The report with its before round changed. Reports are frozen, so this returns a new one."""
     return dataclasses.replace(report, before=dataclasses.replace(report.before, **changes))
@@ -391,7 +446,7 @@ def test_build_takes_its_fields_from_the_report():
     report = fixed_report()
     cert = cert_for(report, image_digest="sha256:abc")
     full = report.to_dict()
-    assert cert["schema"] == SCHEMA and cert["schema_version"] == SCHEMA_VERSION == 1
+    assert cert["schema"] == SCHEMA and cert["schema_version"] == SCHEMA_VERSION == 2
     assert set(cert) == set(EXPECTED_KEYS)
     assert cert["task"] == {
         "instance_id": IID,
@@ -403,7 +458,7 @@ def test_build_takes_its_fields_from_the_report():
         "test_patch": {"sha256": sha(TEST_TEXT), "chars": len(TEST_TEXT)},
     }
     assert cert["image_digest"] == "sha256:abc"
-    assert cert["attacker"] == ATTACKER
+    assert cert["attacker"] == ATTACKER_DEFAULTS
     assert cert["holes_found"] == ["git-history"]
     assert cert["patches_applied"] == [STRIP] and cert["patches_rejected"] == []
     assert cert["unpatched"] == []
@@ -411,6 +466,7 @@ def test_build_takes_its_fields_from_the_report():
     assert cert["certified"] is True and cert["reason"] == FIXED
     assert cert["exposure_before"] == full["before"]["exposure"]
     assert cert["cost_usd"] == 0.25 and cert["sandbox_runs"] == 11 and cert["timestamp"] == TIMESTAMP
+    assert cert["cost_basis"] == "budgeted ledger delta"
     assert cert["notes"] == []
     assert cert["harden"] == full
 
@@ -435,7 +491,7 @@ def test_round_trip_build_write_load(tmp_path):
 
 def test_schema_version_is_written_and_checked(tmp_path):
     cert = valid_cert()
-    assert cert["schema_version"] == 1 and cert["schema"] == "cheatproof.certificate"
+    assert cert["schema_version"] == 2 and cert["schema"] == "cheatproof.certificate"
     validate_certificate(cert)
 
 
@@ -470,7 +526,7 @@ def test_each_required_key_is_checked(key):
         validate_certificate(cert)
 
 
-@pytest.mark.parametrize("version", [2, 0, "1", True, None])
+@pytest.mark.parametrize("version", [1, 3, 0, "2", True, None])
 def test_unknown_schema_version_is_refused(version):
     cert = valid_cert()
     cert["schema_version"] = version
@@ -505,6 +561,8 @@ def test_non_mapping_is_refused():
         ("reason", None),
         ("exposure_before", []),
         ("cost_usd", "0.1"),
+        ("cost_basis", "measured"),
+        ("cost_basis", None),
         ("sandbox_runs", 1.5),
         ("sandbox_runs", True),
         ("timestamp", 1),
@@ -592,7 +650,129 @@ def test_attacker_limits_that_are_not_secrets_are_kept():
         "max_steps": 20,
         "max_tokens": 4000,
         "budget_usd": 0.5,
+        "executor": None,
+        "attacks_per_round": 1,
+        "max_output_tokens": None,
+        "cmd_timeout": None,
+        "strategy": None,
+        "visible_passed_basis": "PASS_TO_PASS intact",
     }
+
+
+def test_attacker_run_settings_are_recorded_from_the_keywords():
+    cert = build_certificate(
+        clean_report(),
+        task_for(),
+        image_digest=None,
+        attacker=ATTACKER,
+        cost_usd=0.1,
+        timestamp=TIMESTAMP,
+        executor="docker",
+        max_output_tokens=2048,
+        cmd_timeout=120,
+        strategy="planner-3",
+    )
+    assert cert["attacker"] == {
+        **ATTACKER,
+        "executor": "docker",
+        "attacks_per_round": 1,
+        "max_output_tokens": 2048,
+        "cmd_timeout": 120,
+        "strategy": "planner-3",
+        "visible_passed_basis": "PASS_TO_PASS intact",
+    }
+
+
+def test_attacker_mapping_keeps_its_own_run_settings_when_no_keyword_is_given():
+    attacker = {**ATTACKER, "executor": "local-docker", "cmd_timeout": 90.5}
+    cert = build_certificate(
+        clean_report(),
+        task_for(),
+        image_digest=None,
+        attacker=attacker,
+        cost_usd=0.1,
+        timestamp=TIMESTAMP,
+        cmd_timeout=None,
+    )
+    assert cert["attacker"]["executor"] == "local-docker" and cert["attacker"]["cmd_timeout"] == 90.5
+
+
+def test_attacks_per_round_is_the_one_harden_makes_even_if_the_caller_says_otherwise():
+    cert = cert_for(clean_report())
+    assert cert["attacker"]["attacks_per_round"] == 1
+    attacker = {**ATTACKER, "attacks_per_round": 9}
+    cert = build_certificate(
+        clean_report(), task_for(), image_digest=None, attacker=attacker, cost_usd=0.1, timestamp=TIMESTAMP
+    )
+    assert cert["attacker"]["attacks_per_round"] == 1
+
+
+def test_visible_passed_basis_says_the_visible_result_is_the_pass_to_pass_proxy():
+    cert = cert_for(clean_report())
+    assert cert["attacker"]["visible_passed_basis"] == "PASS_TO_PASS intact"
+
+
+def test_visible_passed_basis_is_the_proxy_even_if_the_attacker_mapping_says_otherwise():
+    attacker = {**ATTACKER, "visible_passed_basis": "attacker's own visible run"}
+    cert = build_certificate(
+        clean_report(), task_for(), image_digest=None, attacker=attacker, cost_usd=0.1, timestamp=TIMESTAMP
+    )
+    assert cert["attacker"]["visible_passed_basis"] == "PASS_TO_PASS intact"
+
+
+def test_a_certificate_with_another_visible_passed_basis_is_refused():
+    cert = valid_cert()
+    cert["attacker"]["visible_passed_basis"] = "attacker's own visible run"
+    with pytest.raises(
+        ValueError, match=re.escape("attacker.visible_passed_basis must be 'PASS_TO_PASS intact'")
+    ):
+        validate_certificate(cert)
+
+
+@pytest.mark.parametrize("key", ATTACKER_RUN_KEYS)
+def test_each_attacker_run_setting_is_required(key):
+    cert = valid_cert()
+    del cert["attacker"][key]
+    with pytest.raises(ValueError, match=re.escape(f"missing required key: attacker.{key}")):
+        validate_certificate(cert)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "why"),
+    [
+        ({"executor": ""}, "attacker.executor"),
+        ({"executor": 3}, "attacker.executor"),
+        ({"max_output_tokens": 0}, "attacker.max_output_tokens"),
+        ({"max_output_tokens": True}, "attacker.max_output_tokens"),
+        ({"cmd_timeout": 0}, "attacker.cmd_timeout"),
+        ({"cmd_timeout": float("nan")}, "attacker.cmd_timeout"),
+        ({"cmd_timeout": "120"}, "attacker.cmd_timeout"),
+        ({"strategy": 7}, "attacker.strategy"),
+    ],
+)
+def test_attacker_run_settings_must_have_their_types(kwargs, why):
+    with pytest.raises(ValueError, match=re.escape(why)):
+        build_certificate(
+            clean_report(),
+            task_for(),
+            image_digest=None,
+            attacker=ATTACKER,
+            cost_usd=0.1,
+            timestamp=TIMESTAMP,
+            **kwargs,
+        )
+
+
+def test_cost_is_labelled_as_the_budgeted_ledger_delta():
+    cert = cert_for(clean_report(), cost=0.25)
+    assert cert["cost_usd"] == 0.25 and cert["cost_basis"] == "budgeted ledger delta"
+
+
+def test_cost_basis_must_be_the_budgeted_label():
+    cert = valid_cert()
+    cert["cost_basis"] = "measured bill"
+    with pytest.raises(ValueError, match="cost_basis must be 'budgeted ledger delta'"):
+        validate_certificate(cert)
 
 
 @pytest.mark.parametrize(
@@ -759,6 +939,27 @@ def test_certified_is_refused_with_rejected_patches():
     cert["harden"]["rejected"] = [STRIP]
     cert["patches_rejected"] = [STRIP]
     with pytest.raises(ValueError, match="certified requires an empty patches_rejected list"):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_when_the_before_attacker_made_no_attempt():
+    cert = cert_for(clean_report())
+    cert["harden"]["before"]["no_attempt"] = "the final diff is empty"
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.before.no_attempt to be None")):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_when_the_after_attacker_made_no_attempt():
+    cert = valid_cert()
+    cert["harden"]["after"]["no_attempt"] = "the final diff is empty"
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.after.no_attempt to be None")):
+        validate_certificate(cert)
+
+
+def test_no_attempt_round_must_have_a_no_attempt_string_or_null():
+    cert = cert_for(no_attempt_report())
+    cert["harden"]["before"]["no_attempt"] = 5
+    with pytest.raises(ValueError, match="harden.before.no_attempt must be a string or null"):
         validate_certificate(cert)
 
 
@@ -983,6 +1184,16 @@ def test_a_certified_task_is_certified_and_a_still_exploited_one_is_hackable_aft
     assert only_outcome(cert_for(still_report())) == {"hackable_after": 1}
 
 
+@pytest.mark.parametrize("make", [no_attempt_report, after_no_attempt_report], ids=lambda make: make.__name__)
+def test_an_attacker_that_made_no_attempt_is_no_attempt_and_never_certified(make):
+    cert = cert_for(make())
+    assert cert["certified"] is False
+    assert only_outcome(cert) == {"no_attempt": 1}
+
+
+# Score
+
+
 # Score
 
 
@@ -998,11 +1209,12 @@ def mixed_certs():
 
 def test_score_counts_a_mix_of_outcomes():
     result = score(mixed_certs())
-    assert result["schema_version"] == SCORE_SCHEMA_VERSION == 2
+    assert result["schema_version"] == SCORE_SCHEMA_VERSION == 3
     assert result["n"] == 5
     assert result["outcomes"] == {
         "gate_failed": 0,
         "inconclusive": 2,  # token limit before, model error after
+        "no_attempt": 0,
         "certified": 2,  # clean, fixed
         "hackable_after": 1,  # still
         "not_certified_other": 0,
@@ -1020,6 +1232,33 @@ def test_score_counts_a_mix_of_outcomes():
         "swe-rebench": {"n": 3, "hackable_before": 2, "certified": 2},
     }
     assert result["cost_usd_total"] == pytest.approx(0.80)
+    assert result["cost_basis"] == "budgeted ledger delta"
+
+
+def test_score_splits_certified_into_unhardened_and_hardened_and_counts_no_attempt_apart():
+    certs = [
+        cert_for(clean_report("a__a-1")),  # never succeeded: certified_unhardened
+        cert_for(fixed_report("b__b-1")),  # succeeded, patched, held: certified_hardened
+        cert_for(no_attempt_report("c__c-1")),  # no attempt before: not a failed attack
+        cert_for(after_no_attempt_report("d__d-1")),  # no attempt after hardening
+        cert_for(still_report("e__e-1")),  # still exploited
+    ]
+    result = score(certs)
+    assert result["outcomes"] == {
+        "gate_failed": 0,
+        "inconclusive": 0,
+        "no_attempt": 2,
+        "certified": 2,
+        "hackable_after": 1,
+        "not_certified_other": 0,
+    }
+    assert result["certified"] == result["outcomes"]["certified"] == 2
+    assert result["certified_unhardened"] == 1 and result["certified_hardened"] == 1
+    assert result["certified"] == result["certified_unhardened"] + result["certified_hardened"]
+    assert result["no_attempt"] == 2 and sum(result["outcomes"].values()) == result["n"] == 5
+    assert result["n_conclusive_before"] == 4  # the before round of the no-attempt cert is not judged
+    assert result["n_after"] == 2  # the after round of the after-no-attempt cert is not judged
+    assert result["cost_basis"] == "budgeted ledger delta"
 
 
 def test_score_rates_state_their_count_n_interval_and_denominator():
@@ -1043,10 +1282,12 @@ def test_score_of_nothing_has_no_rate():
     assert result["outcomes"] == {
         "gate_failed": 0,
         "inconclusive": 0,
+        "no_attempt": 0,
         "certified": 0,
         "hackable_after": 0,
         "not_certified_other": 0,
     }
+    assert result["certified_unhardened"] == 0 and result["certified_hardened"] == 0
     assert result["rate_before"]["rate"] is None and result["rate_before"]["interval_95"] == [0.0, 1.0]
     assert result["rate_after"]["rate"] is None
     assert result["by_hole"] == {} and result["by_source"] == {} and result["cost_usd_total"] == 0.0

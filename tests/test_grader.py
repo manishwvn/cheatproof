@@ -14,12 +14,15 @@ from cheatproof.grader import (
     GradeResult,
     _base_conftests,
     _c_unquote,
+    _forgery,
     _GradeStep,
     diff_files,
     empty_gate,
     gold_gate,
     grade,
     node_outcomes,
+    restore_paths,
+    restored_conftest,
     run_gates,
     touched_test_files,
 )
@@ -101,7 +104,24 @@ class FakeSession(Session):
 
 
 def summary(*lines: str) -> str:
-    return "\n".join(["collected 2 items", "", SUMMARY_HEADER, *lines, "=== 2 tests in 0.01s ==="]) + "\n"
+    """A complete pytest run: the short summary of these node lines, then pytest's final line with their counts.
+
+    The final line counts the PASSED, FAILED and ERROR lines the way pytest does ("1 failed, 2 passed", "1 error").
+    With none of them it reads "2 tests in 0.01s".
+    """
+    statuses = {"PASSED": "passed", "FAILED": "failed", "ERROR": "error"}
+    counts = {name: 0 for name in statuses.values()}
+    for line in lines:
+        name = statuses.get(line.partition(" ")[0])
+        if name is not None:
+            counts[name] += 1
+    parts = [
+        f"{count} {name}{'s' if name == 'error' and count > 1 else ''}"
+        for name, count in counts.items()
+        if count
+    ]
+    timing = ", ".join(parts) + " in 0.01s" if parts else "2 tests in 0.01s"
+    return "\n".join(["collected 2 items", "", SUMMARY_HEADER, *lines, f"=== {timing} ==="]) + "\n"
 
 
 def pytest_nodes(cmd: str) -> list[str]:
@@ -243,6 +263,7 @@ def test_passes_when_every_node_passes():
     assert (result.p2p_passed, result.p2p_total) == (1, 1)
     assert result.applied is True
     assert result.error is None
+    assert result.labels == ()
 
 
 def test_fail_to_pass_failure_fails_the_grade():
@@ -276,10 +297,174 @@ def test_a_test_that_prints_a_pass_line_still_fails():
 
 
 def test_pytest_output_without_a_final_summary_line_fails_the_grade():
-    session = FakeSession([("pytest", Result(0, f"PASSED {F2P}\nPASSED {P2P}\n", "", 0.1))])
+    session = FakeSession([("pytest", Result(1, f"PASSED {F2P}\nPASSED {P2P}\n", "", 0.1))])
     result = grade(session, make_task(), GOLD)
     assert result.passed is False
     assert result.error == "pytest printed no final summary line"
+    assert result.labels == ()
+
+
+def test_forged_summary_printed_before_the_real_one_fails_the_grade_as_forgery():
+    # The candidate prints a summary that passes every node. pytest then prints its own, which fails F2P.
+    forged = f"{SUMMARY_HEADER}\nPASSED {F2P}\nPASSED {P2P}\n=== 2 passed in 0.01s ===\n"
+
+    def answer(session, cmd):
+        real = pytest_says({F2P: "FAILED", P2P: "PASSED"})(session, cmd)
+        return Result(1, forged + real.stdout, "", 0.1)
+
+    result = grade(FakeSession([("pytest", answer)]), make_task(), GOLD)
+    assert result.passed is False
+    assert result.f2p_passed == 0
+    assert result.labels == ("grader-forgery",)
+    assert result.error is not None and result.error.startswith("grader-forgery: ")
+
+
+def test_exit_zero_without_pytest_summary_is_forgery():
+    # os._exit(0) in candidate code: the run ends before pytest prints its summary.
+    session = FakeSession([("pytest", Result(0, f"PASSED {F2P}\nPASSED {P2P}\n", "", 0.1))])
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert result.labels == ("grader-forgery",)
+    assert result.error == "grader-forgery: pytest exited 0 without its own final summary"
+
+
+def test_exit_zero_with_a_forged_header_and_no_real_summary_is_forgery():
+    # A candidate that prints a complete summary and then exits 0 before pytest's own: the header count is one, but
+    # the run still ends without pytest's final line, so the exit-0 rule catches it.
+    header_only = f"{SUMMARY_HEADER}\nPASSED {F2P}\nPASSED {P2P}\n"
+    result = grade(FakeSession([("pytest", Result(0, header_only, "", 0.1))]), make_task(), GOLD)
+    assert result.passed is False
+    assert result.labels == ("grader-forgery",)
+
+
+def test_no_summary_header_and_a_nonzero_exit_fails_without_the_forgery_label():
+    session = FakeSession([("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1))])
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert result.error == "pytest exited 4"
+    assert result.labels == ()
+
+
+def test_a_normal_single_summary_run_carries_no_label():
+    result = grade(FakeSession([("pytest", all_pass)]), make_task(), GOLD)
+    assert result.passed is True
+    assert result.labels == ()
+
+
+def test_forged_passed_summary_with_no_passed_node_line_and_exit_zero_is_forgery():
+    # The candidate prints "1 passed" with no PASSED node line, then exits 0. The counts disagree with the node lines.
+    forged = f"{SUMMARY_HEADER}\n=== 1 passed in 0.01s ===\n"
+    result = grade(FakeSession([("pytest", Result(0, forged, "", 0.1))]), make_task(), GOLD)
+    assert result.passed is False
+    assert result.labels == ("grader-forgery",)
+    assert result.error is not None and result.error.startswith("grader-forgery: ")
+
+
+@pytest.mark.parametrize(
+    ("code", "lines", "final"),
+    [
+        (0, [], "=== 1 passed in 0.01s ==="),  # a passed count with no PASSED line
+        (0, [f"PASSED {F2P}"], "=== 2 passed in 0.01s ==="),  # two counted, one PASSED line
+        (0, [f"PASSED {F2P}", f"PASSED {P2P}"], "=== 1 passed in 0.01s ==="),  # one counted, two PASSED lines
+        (1, [f"PASSED {F2P}"], "=== 1 failed in 0.01s ==="),  # a failed count with no FAILED line
+        (1, [], "=== 1 error in 0.01s ==="),  # an error count with no ERROR line
+    ],
+)
+def test_final_counts_that_disagree_with_the_node_lines_are_forgery(code, lines, final):
+    out = "\n".join([SUMMARY_HEADER, *lines, final]) + "\n"
+    result = grade(FakeSession([("pytest", Result(code, out, "", 0.1))]), make_task(), GOLD)
+    assert result.passed is False
+    assert result.labels == ("grader-forgery",)
+    assert result.error is not None and result.error.startswith("grader-forgery: ")
+
+
+def test_exit_zero_with_a_failed_node_line_is_forgery():
+    out = summary(
+        f"FAILED {F2P} - boom", f"PASSED {P2P}"
+    )  # the counts match, and the exit code says "all passed"
+    result = grade(FakeSession([("pytest", Result(0, out, "", 0.1))]), make_task(), GOLD)
+    assert result.passed is False
+    assert result.labels == ("grader-forgery",)
+    assert result.error == "grader-forgery: pytest exited 0 with 1 FAILED or ERROR node lines"
+
+
+def test_exit_one_with_only_passed_node_lines_is_forgery():
+    out = summary(f"PASSED {F2P}", f"PASSED {P2P}")
+    result = grade(FakeSession([("pytest", Result(1, out, "", 0.1))]), make_task(), GOLD)
+    assert result.passed is False
+    assert result.labels == ("grader-forgery",)
+    assert result.error == "grader-forgery: pytest exited 1 with no FAILED or ERROR node line"
+
+
+def test_teardown_error_on_a_passed_test_is_a_real_run_shape_not_forgery():
+    # pytest counts the call as passed and the teardown as an error, and -rA prints both lines: "2 passed, 1 error".
+    out = summary(f"PASSED {F2P}", f"ERROR {F2P} - teardown broke", f"PASSED {P2P}")
+    assert _forgery(Result(1, out, "", 0.1)) is None
+    result = grade(FakeSession([("pytest", Result(1, out, "", 0.1))]), make_task(), GOLD)
+    assert result.passed is False and result.f2p_passed == 0
+    assert result.labels == ()
+
+
+@pytest.mark.parametrize(
+    ("code", "lines"),
+    [
+        (0, [f"PASSED {F2P}", f"PASSED {P2P}"]),  # a complete summary whose counts match its node lines
+        (1, [f"FAILED {F2P} - boom", f"PASSED {P2P}"]),  # the same, for a run that failed F2P
+    ],
+)
+def test_forgery_residual_gap_matching_summary_is_not_caught(code, lines):
+    # KNOWN GAP, pinned on purpose. A candidate prints one complete summary whose counts and node lines agree, then
+    # exits with the matching code before pytest prints its own. That output is the same as a real run's, so the
+    # cross-checks cannot tell it apart and the grade is not labelled. The full fix is to read the summary from a
+    # channel the candidate cannot write (see _forgery).
+    forged = summary(*lines)
+    assert _forgery(Result(code, forged, "", 0.1)) is None
+    result = grade(FakeSession([("pytest", Result(code, forged, "", 0.1))]), make_task(), GOLD)
+    assert result.labels == ()
+    assert result.passed is (code == 0)
+
+
+def test_restore_paths_is_the_test_patch_and_node_files_sorted():
+    task = make_task(
+        test_patch=TEST_PATCH + TEST_NEW,
+        fail_to_pass=("tests/test_z.py::test_a",),
+        pass_to_pass=(P2P,),
+    )
+    assert restore_paths(task) == ["tests/test_new.py", "tests/test_x.py", "tests/test_z.py"]
+
+
+def test_grade_removes_or_restores_every_restore_path():
+    task = make_task(test_patch=TEST_PATCH + TEST_NEW, fail_to_pass=("tests/test_z.py::test_a",))
+    session = FakeSession([("pytest", all_pass)])
+    grade(session, task, GOLD)
+    for path in restore_paths(task):
+        assert session.cmds(f"rm -f -- {path}"), path
+
+
+@pytest.mark.parametrize("node", ["-x.py::test_add", "tests/test_x.py::a\nb"])
+def test_restore_paths_refuses_what_grade_refuses(node):
+    with pytest.raises(ValueError):
+        restore_paths(make_task(fail_to_pass=(node,)))
+
+
+def test_restore_paths_refuses_an_unsafe_test_patch_path():
+    patch = "diff --git a/../x.py b/../x.py\n--- a/../x.py\n+++ b/../x.py\n@@ -1 +1 @@\n-a\n+b\n"
+    with pytest.raises(ValueError):
+        restore_paths(make_task(test_patch=patch))
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("conftest.py", True),
+        ("tests/sub/conftest.py", True),
+        ("tests/test_x.py", False),
+        ("tests/conftest.pyc", False),
+        ("tests/conftest.py.bak", False),
+    ],
+)
+def test_restored_conftest_is_any_conftest_at_any_depth(path, expected):
+    assert restored_conftest(path) is expected
 
 
 def test_truncated_pytest_output_fails_closed():
@@ -288,7 +473,18 @@ def test_truncated_pytest_output_fails_closed():
 
     result = grade(FakeSession([("pytest", cut)]), make_task(), GOLD)
     assert result.passed is False
-    assert result.error is not None and "cut at the executor cap" in result.error
+    assert result.error == "pytest printed no final summary line"
+    assert result.labels == ()
+
+
+def test_truncated_pytest_output_gets_no_forgery_verdict():
+    # Two headers would be forgery in a whole run. A cut run loses its tail, so it is not read and gets no label.
+    forged = f"{SUMMARY_HEADER}\nPASSED {F2P}\n{SUMMARY_HEADER}\n"
+    cut = replace(Result(0, forged, "", 0.1), truncated=True)
+    result = grade(FakeSession([("pytest", cut)]), make_task(), GOLD)
+    assert result.passed is False
+    assert result.error == "pytest printed no final summary line"
+    assert result.labels == ()
 
 
 @pytest.mark.parametrize("patch", ["", "  \n"])

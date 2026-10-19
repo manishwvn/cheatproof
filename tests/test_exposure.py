@@ -104,7 +104,7 @@ def test_clean_repo_reports_no_holes():
         (("ORIG_HEAD", Result(0, f"{OTHER}\n", "", 0.0)), HOLE_GIT_HISTORY),
         (("FETCH_HEAD", Result(0, f"{OTHER}\n", "", 0.0)), HOLE_GIT_HISTORY),
         (
-            (PROBE, Result(0, "covered tests/test_calc.py\nuncovered tests/conftest.py\ndone\n", "", 0.0)),
+            (PROBE, Result(0, "covered tests/test_calc.py\nuncovered tests/helpers.py\ndone\n", "", 0.0)),
             HOLE_TEST_EDIT,
         ),
         (("python3 -c", Result(0, "", "", 0.0)), HOLE_NETWORK),
@@ -131,7 +131,7 @@ def test_all_three_holes_are_listed_in_order():
     report = scan(
         session_with(
             ("rev-list", Result(0, "1\n", "", 0.0)),
-            (PROBE, Result(0, "uncovered tests/conftest.py\ndone\n", "", 0.0)),
+            (PROBE, Result(0, "uncovered tests/helpers.py\ndone\n", "", 0.0)),
             ("python3 -c", Result(0, "", "", 0.0)),
         ),
         make_task(),
@@ -196,12 +196,44 @@ def test_writable_node_file_is_observed_but_covered_by_the_restore():
 
 
 def test_writable_test_file_outside_the_restore_set_is_a_hole():
-    rule = (PROBE, Result(0, "covered tests/test_calc.py\nuncovered tests/conftest.py\ndone\n", "", 0.0))
+    rule = (PROBE, Result(0, "covered tests/test_calc.py\nuncovered tests/helpers.py\ndone\n", "", 0.0))
     report = scan(session_with(rule), make_task())
-    assert report.writable_tests == ["tests/test_calc.py", "tests/conftest.py"]
+    assert report.writable_tests == ["tests/test_calc.py", "tests/helpers.py"]
     assert report.restore_covered is False
-    assert report.unrestored_tests == ["tests/conftest.py"]
+    assert report.unrestored_tests == ["tests/helpers.py"]
+    assert report.writable_as_root == []
     assert report.holes == [HOLE_TEST_EDIT]
+
+
+def test_conftest_files_are_covered_because_the_grader_restores_every_one():
+    rule = (
+        PROBE,
+        Result(
+            0,
+            "covered tests/test_calc.py\ncovered tests/conftest.py\ncovered tests/sub/conftest.py\ndone\n",
+            "",
+            0.0,
+        ),
+    )
+    report = scan(session_with(rule), make_task())
+    assert report.writable_tests == ["tests/test_calc.py", "tests/conftest.py", "tests/sub/conftest.py"]
+    assert report.unrestored_tests == []
+    assert report.restore_covered is True
+    assert report.holes == []
+
+
+def test_writable_as_root_is_labelled_and_is_not_a_hole():
+    # As root, test -w is true for every file, so the probe cannot show exposure. The file is labelled, not counted.
+    rule = (
+        PROBE,
+        Result(0, "covered tests/test_calc.py\nwritable-as-root tests/helpers.py\ndone\n", "", 0.0),
+    )
+    report = scan(session_with(rule), make_task())
+    assert report.writable_tests == ["tests/test_calc.py", "tests/helpers.py"]
+    assert report.writable_as_root == ["tests/helpers.py"]
+    assert report.unrestored_tests == []
+    assert report.restore_covered is False  # a writable path is not restored, so coverage is not shown
+    assert report.holes == []
 
 
 def test_p2p_node_file_and_test_patch_files_are_covered_too():
@@ -425,9 +457,45 @@ def test_live_scan_of_the_hero_repo_reports_only_git_history(tmp_path):
 
 
 @needs_git
-def test_live_scan_flags_a_test_file_the_grader_does_not_restore(tmp_path):
+def test_live_scan_covers_a_conftest_the_agent_adds(tmp_path):
     repo = build_hero(tmp_path)
     (repo / "tests" / "conftest.py").write_text("# added by the agent\n", encoding="utf-8")
     report = scan(LocalShell(), hero_task(), workdir=str(repo))
-    assert report.unrestored_tests == ["tests/conftest.py"]
-    assert HOLE_TEST_EDIT in report.holes
+    assert "tests/conftest.py" in report.writable_tests
+    assert report.unrestored_tests == []  # grade() restores every conftest.py, so it is covered
+    assert report.holes == [HOLE_GIT_HISTORY]
+
+
+@needs_git
+def test_live_scan_judges_a_helper_the_grader_does_not_restore_by_uid(tmp_path):
+    repo = build_hero(tmp_path)
+    (repo / "tests" / "helpers.py").write_text("# added by the agent\n", encoding="utf-8")
+    report = scan(LocalShell(), hero_task(), workdir=str(repo))
+    assert "tests/helpers.py" in report.writable_tests
+    if os.geteuid() == 0:
+        assert report.writable_as_root == ["tests/helpers.py"]
+        assert report.unrestored_tests == []
+        assert HOLE_TEST_EDIT not in report.holes
+    else:
+        assert report.unrestored_tests == ["tests/helpers.py"]
+        assert HOLE_TEST_EDIT in report.holes
+
+
+@needs_git
+def test_live_probe_as_root_labels_a_helper_writable_as_root_and_not_a_hole(tmp_path, monkeypatch):
+    repo = build_hero(tmp_path)
+    (repo / "tests" / "helpers.py").write_text("# added by the agent\n", encoding="utf-8")
+    (repo / "tests" / "conftest.py").write_text("# added by the agent\n", encoding="utf-8")
+    # A fake `id` that reports uid 0, so the probe takes its root branch whatever uid the suite runs as.
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fake_id = bindir / "id"
+    fake_id.write_text("#!/bin/sh\necho 0\n", encoding="utf-8")
+    fake_id.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
+    report = scan(LocalShell(), hero_task(), workdir=str(repo))
+    assert report.writable_as_root == ["tests/helpers.py"]
+    assert report.unrestored_tests == []
+    assert "tests/conftest.py" in report.writable_tests  # covered: the grader restores every conftest.py
+    assert report.restore_covered is False  # a writable helper is not restored, so coverage is not shown
+    assert report.holes == [HOLE_GIT_HISTORY]
