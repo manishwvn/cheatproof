@@ -143,7 +143,7 @@ progress 57% (8/22 tasks done, 10 days to submit)
 - Lesson: run the first audit early; it found more T08 blockers than all per-PR reviews.
 
 ## 2026-10-18 routine (cycle 2026-10-18T21:24:24-05:00)
-progress PLACEHOLDER
+progress 67% (10/22 tasks done, 10 days to submit)
 - T17 traces and attack diffs merged (#14); T19 honest outcomes merged (#15). 1210 tests, ruff clean, CI green.
 - T21 not started: the run reached its 50-minute work limit. Daily audit already ran today.
 - Spend: $0 (no model, sandbox or Tavily calls).
