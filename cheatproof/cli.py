@@ -9,14 +9,19 @@ harden finds the task in the local cache only (never the network), runs harden()
 given system prompt, writes one certificate and prints its path and a summary line. The attacker's task prompt is
 a description of the task (repo, instance id, problem statement, failing tests). The gold and test patches
 never reach it.
+Beside the certificates directory, harden keeps what its paid run produced, each file named by the certificate's
+stem: traces/<stem>.jsonl (the attacker trace; a rerun appends to it), diffs/<stem>.<before|after>.diff (a round's
+attack diff through sanitize, written only when the raw sha256 matches the report's final_diff_sha256), and
+reports/<stem>.report.json (the digest-only report through sanitize, written only when no certificate was).
 report prints certify.score_directory() as it is: rates with their n, raw counts, outcomes, holes and sources.
 The rates, intervals and totals are computed in certify.py only; this module does no statistics of its own.
 site builds the static report site through site.build_site from the certificate files. It is not a paid call:
 no Budget, LLM or executor is built for it.
 
 Exit codes: 0 a certificate was written (certified or not), or the report was printed. 1 the budget was halted or
-capped, the executor refused or was unavailable, or the certificate could not be written after a paid run. 2 usage
-error: bad flags, missing prompt, unknown or ambiguous task, missing setting, no certificates.
+capped, the executor refused or was unavailable, or the certificate could not be written after a paid run (its
+report is kept in reports/). 2 usage error: bad flags, missing prompt, unknown or ambiguous task, missing setting,
+no certificates.
 site: 0 the site was written and every certificate loaded; 1 the site was written but some did not load (each
 listed on stderr), or the write failed; 2 the certificates or traces directory is missing, or --out is a non-empty
 directory that is not a cheatproof site.
@@ -31,6 +36,7 @@ Only n is required here. Any other key is printed when present and skipped when 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -52,6 +58,10 @@ if TYPE_CHECKING:
 DEFAULT_CACHE_DIR = Path("runs/tasks")
 DEFAULT_CERT_DIR = Path("results/certificates")
 DEFAULT_SITE_DIR = Path("results/site")
+# Siblings of the certificates directory, named by the certificate file stem (see the module docstring).
+TRACES_DIR = "traces"
+DIFFS_DIR = "diffs"
+REPORTS_DIR = "reports"
 UPPER_BOUND_NOTE = "Upper bound against this attacker, not proof."
 ERROR_CHARS = 300
 ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")  # what an environment variable name looks like
@@ -82,12 +92,14 @@ class Deps:
     @classmethod
     def default(cls) -> Deps:
         # Lazy, so this module imports before certify.py exists and tests never reach the real set.
+        from cheatproof.envfile import load_env
+
+        # Before the attacker import, so the attacker never loads on an environment that lacks the checkout's .env.
+        load_env()  # the main checkout's .env, as scripts/smoke.py does; variables already set win
         from cheatproof import certify
         from cheatproof import harden as harden_module
         from cheatproof.attacker import attack
-        from cheatproof.envfile import load_env
 
-        load_env()  # the main checkout's .env, as scripts/smoke.py does; variables already set win
         return cls(
             find_tasks=find_cached_tasks,
             make_executor=make_executor,
@@ -199,6 +211,81 @@ def _harden_line(report: Any, cost: float) -> str:
     return f"certified: {certified}  holes found: {found}  cost: ${cost:.4f}"
 
 
+def _certificate_stem(task: TaskSpec) -> str:
+    """The certificate file's stem, which names the trace, diff and report files. ValueError for an unusable id."""
+    from cheatproof.certify import certificate_filename  # lazy: only a harden run needs certify
+
+    return Path(certificate_filename(task.instance_id)).stem
+
+
+def _write_beside(folder: Path, name: str, text: str) -> Path:
+    """Write text to folder/name and create folder. A symlinked folder or file is refused: nothing goes through a link."""
+    target = folder / name
+    if folder.is_symlink() or target.is_symlink():
+        raise OSError(f"refusing to write through a symbolic link: {name}")
+    folder.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    return target
+
+
+def _raw_digest(text: str) -> str:
+    """sha256 of the raw text in the encoding harden uses for final_diff_sha256."""
+    return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
+
+
+def _plain(data: Any) -> Any:
+    """The same data with tuples as lists, the JSON shape sanitize() takes."""
+    return json.loads(json.dumps(data, default=str))
+
+
+def _keep_diffs(report: Any, stem: str, certs_dir: Path) -> None:
+    """Write each round's sanitized attack diff to diffs/<stem>.<round>.diff. Never raises.
+
+    report.attacks holds one raw result per round whose attack ran, before first. A raw diff whose sha256 does not
+    match that round's recorded final_diff_sha256 is not written, and a note goes to stderr. A round with no diff
+    (final_diff None) is skipped.
+    """
+    rounds = [
+        (name, rnd)
+        for name, rnd in (("before", report.before), ("after", report.after))
+        if rnd is not None and rnd.attack is not None
+    ]
+    results = list(report.attacks)
+    if len(results) != len(rounds):
+        print(
+            f"note: {len(results)} attack results for {len(rounds)} attack rounds: no diffs written",
+            file=sys.stderr,
+        )
+        return
+    for (name, rnd), result in zip(rounds, results):
+        raw = result.final_diff
+        if raw is None:
+            continue
+        if _raw_digest(raw) != rnd.attack.get("final_diff_sha256"):
+            print(
+                f"note: the {name} attack diff does not match its recorded sha256: not written",
+                file=sys.stderr,
+            )
+            continue
+        try:
+            _write_beside(certs_dir.parent / DIFFS_DIR, f"{stem}.{name}.diff", sanitize(raw))
+        except OSError as exc:
+            print(f"note: the {name} attack diff was not written: {type(exc).__name__}", file=sys.stderr)
+
+
+def _keep_report(report: Any, stem: str, certs_dir: Path) -> None:
+    """Write the digest-only report of a paid run whose certificate was not written. Never raises."""
+    try:
+        text = (
+            json.dumps(sanitize(_plain(report.to_dict())), sort_keys=True, indent=2, allow_nan=False) + "\n"
+        )
+        path = _write_beside(certs_dir.parent / REPORTS_DIR, f"{stem}.report.json", text)
+    except (TypeError, ValueError, OSError) as exc:
+        print(f"note: the report was not kept: {type(exc).__name__}", file=sys.stderr)
+        return
+    print(f"report kept: {path}", file=sys.stderr)
+
+
 def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
     from cheatproof.attacker import AttackConfig  # lazy: attacker imports the LLM client module
 
@@ -242,9 +329,11 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
     task = matches[0]
     try:
         env = EnvSpec(image=task.image)
+        stem = _certificate_stem(task)  # checked before any paid run
     except ValueError as exc:
         return _usage_error(str(exc))
     prompt = build_task_prompt(task, env.workdir)
+    trace_path = args.out.parent / TRACES_DIR / f"{stem}.jsonl"
 
     try:
         executor = deps.make_executor()
@@ -258,7 +347,7 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
         return _usage_error(str(exc))
 
     def attack_fn(session: Any) -> Any:
-        return deps.attack(llm, session, system_prompt, prompt, config)
+        return deps.attack(llm, session, system_prompt, prompt, config, trace_path=trace_path)
 
     spent_before = _spent(budget.snapshot())
     try:
@@ -290,7 +379,11 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
         args.out.mkdir(parents=True, exist_ok=True)
         path = deps.write_certificate(cert, args.out)
     except (ValueError, OSError) as exc:
+        # The paid run is kept: its report and its diffs, even though no certificate came of it.
+        _keep_report(report, stem, args.out)
+        _keep_diffs(report, stem, args.out)
         return _not_written(exc, cost)
+    _keep_diffs(report, stem, args.out)
     print(f"certificate: {path}")
     print(_harden_line(report, cost))
     return 0

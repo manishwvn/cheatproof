@@ -61,6 +61,15 @@ def write_trace(traces: Path, name: str, lines: list[str]) -> None:
     (traces / f"{name}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def write_diff_file(parent: Path, name: str, text: str) -> Path:
+    """A round's sanitized diff in parent/diffs, where cli harden writes it beside the certificates."""
+    diffs = parent / "diffs"
+    diffs.mkdir(parents=True, exist_ok=True)
+    path = diffs / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
 def trace_lines(payload: str = f"{PAYLOAD} {ATTR_PAYLOAD}") -> list[str]:
     """A header, a step with a digest, a bad line, a step with no keys, and an end record."""
     step = {
@@ -409,9 +418,10 @@ def test_the_patches_section_says_diff_text_is_not_recorded(tmp_path):
 
 
 def test_tables_and_preformatted_text_are_focusable_and_named(tmp_path):
-    report = with_before(fixed_report("owner__repo-1"), attack={**attack_summary(), "final_diff": "+x = 1\n"})
+    report = with_before(fixed_report("owner__repo-1"), attack=attack_summary())
     cert_dir = tmp_path / "certs"
     write_certs(cert_dir, report)
+    write_diff_file(tmp_path, "owner__repo-1.before.diff", "+x = 1\n")
     result = build_site(cert_dir, tmp_path / "site")
     index = read(result.index)
     page = read(result.pages[0])
@@ -509,11 +519,9 @@ def place_error_row(cert_dir: Path) -> None:
     (cert_dir / "bad.json").write_text(json.dumps(bad), encoding="utf-8")
 
 
-def place_final_diff(cert_dir: Path) -> None:
-    report = with_before(
-        fixed_report("owner__repo-1"), attack={**attack_summary(), "final_diff": MIXED_PAYLOAD}
-    )
-    write_certs(cert_dir, report)
+def place_diff_file(cert_dir: Path) -> None:
+    write_certs(cert_dir, with_before(fixed_report("owner__repo-1"), attack=attack_summary()))
+    write_diff_file(cert_dir.parent, "owner__repo-1.before.diff", MIXED_PAYLOAD)
 
 
 @pytest.mark.parametrize(
@@ -524,9 +532,9 @@ def place_final_diff(cert_dir: Path) -> None:
         place_attacker_field,
         place_hole_label,
         place_error_row,
-        place_final_diff,
+        place_diff_file,
     ],
-    ids=["instance_id", "repo", "attacker", "hole-label", "error-row", "final-diff"],
+    ids=["instance_id", "repo", "attacker", "hole-label", "error-row", "diff-file"],
 )
 def test_a_payload_is_escaped_wherever_it_is_shown(tmp_path, place):
     cert_dir = tmp_path / "certs"
@@ -591,3 +599,74 @@ def test_a_directory_where_every_file_is_bad_shows_the_empty_state(tmp_path):
     assert "No valid certificates were found. Every certificate file failed to load (see below)." in index
     assert "Hackability score" not in index
     assert list((out / "env").iterdir()) == []
+
+
+# Attack diffs: read from diffs/ beside the certificates, shown escaped, digest-only when the file is absent.
+
+NO_DIFF_NOTE = "attack diff not recorded in certificate"
+DIGEST = "0" * 64  # attack_summary() records this sha256
+
+
+def with_attack_round(cert_dir: Path) -> None:
+    write_certs(cert_dir, with_before(fixed_report("owner__repo-1"), attack=attack_summary()))
+
+
+def test_round_shows_the_diff_file_escaped(tmp_path):
+    cert_dir = tmp_path / "certs"
+    with_attack_round(cert_dir)
+    write_diff_file(tmp_path, "owner__repo-1.before.diff", f"+{MIXED_PAYLOAD}\n")
+    out = tmp_path / "site"
+    build_site(cert_dir, out)
+    page = read(out / "env" / "owner__repo-1.html")
+    assert f'<pre tabindex="0">+{ESCAPED_TAG}' in page
+    assert MIXED_PAYLOAD not in page and "<script" not in page.lower()
+    assert f"Diff digest: sha256 {DIGEST}" in page  # the recorded digest still sits under the diff
+
+
+def test_round_without_a_diff_file_shows_the_digest_note(tmp_path):
+    cert_dir = tmp_path / "certs"
+    with_attack_round(cert_dir)
+    out = tmp_path / "site"
+    build_site(cert_dir, out)
+    page = read(out / "env" / "owner__repo-1.html")
+    assert NO_DIFF_NOTE in page
+    assert f"Diff digest: sha256 {DIGEST}" in page
+    assert '<pre tabindex="0">' not in page
+
+
+def test_a_diff_file_for_another_stem_is_not_used(tmp_path):
+    cert_dir = tmp_path / "certs"
+    with_attack_round(cert_dir)
+    write_diff_file(tmp_path, "other-stem.before.diff", "+OTHER-MARKER\n")
+    out = tmp_path / "site"
+    build_site(cert_dir, out)
+    assert "OTHER-MARKER" not in read(out / "env" / "owner__repo-1.html")
+
+
+def test_a_symlinked_diff_file_is_refused_and_its_target_is_not_read(tmp_path):
+    secret = tmp_path / "elsewhere.txt"
+    secret.write_text("TARGET-MARKER\n", encoding="utf-8")
+    cert_dir = tmp_path / "certs"
+    with_attack_round(cert_dir)
+    diffs = tmp_path / "diffs"
+    diffs.mkdir()
+    (diffs / "owner__repo-1.before.diff").symlink_to(secret)
+    out = tmp_path / "site"
+    build_site(cert_dir, out)
+    page = read(out / "env" / "owner__repo-1.html")
+    assert "TARGET-MARKER" not in page
+    assert NO_DIFF_NOTE in page
+
+
+def test_a_symlinked_diffs_directory_is_refused_and_its_target_is_not_read(tmp_path):
+    real = tmp_path / "real_diffs"
+    real.mkdir()
+    (real / "owner__repo-1.before.diff").write_text("TARGET-MARKER\n", encoding="utf-8")
+    (tmp_path / "diffs").symlink_to(real, target_is_directory=True)
+    cert_dir = tmp_path / "certs"
+    with_attack_round(cert_dir)
+    out = tmp_path / "site"
+    build_site(cert_dir, out)
+    page = read(out / "env" / "owner__repo-1.html")
+    assert "TARGET-MARKER" not in page
+    assert NO_DIFF_NOTE in page
