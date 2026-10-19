@@ -44,7 +44,7 @@ output, fresh-index `diff()`, named containers with label `cheatproof=1`), guard
 Docker test has not run: the Mac has the docker CLI but no daemon (U7). The Sandbox recon moves to T01's sandbox
 step and T03/T06 once U3 is done.
 
-### T15 Routine review fixes (planner-merge PR) — size M — in review [80%]
+### T15 Routine review fixes (planner-merge PR) — size M — done #10
 Apply the "Open, repo side" items 1–11 in `~/.cheatproof-autopilot/review-2026-10-18.md` (fail-closed caps and a
 read-only `snapshot()`, `lock.py` output, optional `--now`, CYCLE.md alignment and planner-merge list, `leakcheck.py`,
 a versioned pre-push hook, CLI tests and a Python 3.9 compile step in CI, reviewer model, tracked `results/`, pre-flip
@@ -119,7 +119,7 @@ over stated denominators and Wilson 95% intervals) and `cheatproof/cli.py` (`pyt
 CLI runs with network off only (the network-fetch experiment is not wired), and cost is a ledger delta, so run
 `harden` serially. A certificate holding a secret-shaped string is refused, so the CLI exits 1 after the paid run.
 
-### T16 Attack strategy prompts and Tavily counter (planner) — size S — waiting: planner (U9)
+### T16 Attack strategy prompts and Tavily counter (planner) — size S — done #18
 The four strategy hints for T04 (git-history, test-edit, hard-code, network) as caller-supplied `system_prompt`
 text, and a `budget.reserve_tavily_call()` counter enforcing `TAVILY_CALL_CAP` plus a host-side search callable
 for `attack(search=...)`. `budget.py` is a planner-merge path, and the routine left the prompt text to the planner.
@@ -167,7 +167,7 @@ scratch (or `--storage-opt size=` when the driver supports it), re-check free di
 sweep leftover `cheatproof=1` containers at CLI start (stop and remove containers only, never images). Tests with the
 fake runner.
 
-### T22 Planner-merge audit fixes (planner) — size S — waiting: planner (U11)
+### T22 Planner-merge audit fixes (planner) — size S — done #18
 Audit findings on planner-merge paths: (1) `executor.py:437` books $0.05 per Docker start and reset through
 `budget.reserve_sandbox_run()`; local Docker is free, and 40 tasks need about 200–480 runs against
 `SANDBOX_RUN_CAP=250` and $4/day (halts near task 16). Book Docker runs at $0 or on a separate counter
@@ -179,7 +179,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — todo — needs T01, T07, T17, T18, T19, T20
+### T08 Eval run and results with raw counts — size M — todo — needs T07, T16, T17, T18, T19, T20, T22
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
@@ -189,6 +189,13 @@ Audit 2026-10-18: before the run, smoke one real image's gold gate. `grader.PYTE
 under `sh -lc`; SWE-bench images may need `conda activate testbed`. Check image HEAD equals `base_commit`
 (`strip-future-git` refuses otherwise). With 13 GB free and a 6-image cap, Docker runs go in owner-pruned batches.
 
+
+Planner note 2026-10-19: run on the Docker executor (`EXECUTOR=docker`; Sandboxes access is pending, so T01's
+sandbox part does not block this). Docker runs are free and count toward `LOCAL_RUN_CAP`; model calls stay under the
+$20/$4 caps. Write `cheatproof.strategies.COMBINED` (or one named strategy) to a prompt file for the CLI's
+`--system-prompt-file`; the network strategy needs `TAVILY_API_KEY` and `make_tavily_search(budget)`. If the Docker
+daemon is down, `open -a Docker`; keep free disk above `MIN_FREE_DISK_GB` (18 GB free on 2026-10-19). Start with
+5 tasks to measure cost and time per task, then scale to 40 within the daily cap. Go/no-go is 2026-10-21.
 ### T09 Report page and judge replay mode — size M — done #12 — needs T07
 A static report site (no server, no paid calls): the 40-task table, one before/after page per environment with the
 patch diff, the attack transcript and the gates. Judge mode replays recorded runs, labelled "recorded". Builds from
@@ -271,13 +278,13 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
   edit: set the folder to `/Users/manish/Documents/Nebius_X_Nvidia/cheatproof` and the permission mode to **Bypass**,
   then save. Until then runs start in the parent folder in auto mode, so the repo's connector guard does not load
   and a run may stop on a refused step. Then tell the lead "U8 done".
-- **U10 Merge PR #10 (T15 review fixes)** (ready 2026-10-18): in an interactive session say `review` to merge
+- ~~**U10 Merge PR #10 (T15 review fixes)**~~ Done 2026-10-19 (PR #10 / #18). (ready 2026-10-18): in an interactive session say `review` to merge
   https://github.com/manishwvn/cheatproof/pull/10 (planner-merge paths: budget.py, docs/autopilot/, CI). Then install
   the hook: `cp docs/autopilot/pre-push "$(git rev-parse --git-path hooks)/pre-push"`. Note: `budget.py` now refuses
   to start unless `SPEND_CAP_USD` and `DAILY_CAP_USD` are set (≤ 20, daily ≤ total); the current `.env` sets 20 and 4.
-- **U11 Planner-merge audit fixes (T22)** (ready 2026-10-18; needed before T08): in an interactive session, fix the
+- ~~**U11 Planner-merge audit fixes (T22)**~~ Done 2026-10-19 (PR #10 / #18). (ready 2026-10-18; needed before T08): in an interactive session, fix the
   three T22 items (Docker run booking in `budget.py`, `llm.py` timeout, `security.yml` pins), then flip T22 to
   `done`. Without (1), the $4 daily cap halts the 40-task Docker run near task 16.
-- **U9 Planner work for T16** (ready 2026-10-18): in an interactive session, write the attacker strategy prompts
+- ~~**U9 Planner work for T16**~~ Done 2026-10-19 (PR #10 / #18). (ready 2026-10-18): in an interactive session, write the attacker strategy prompts
   and the Tavily budget counter (T16), then flip T16 to `done`. T05 and T06 do not wait on it; the first live
   attacker run (T08) does.

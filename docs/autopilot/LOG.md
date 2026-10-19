@@ -179,3 +179,8 @@ progress 73% (12/22 tasks done, 10 days to submit)
   reads `.claude/agents/learning-notes.md` first. Notes for #16 and #17 written (`learning-last-pr` 17).
 - Lesson: fix the writer/reader contract (exact keys) in both briefs up front; the parallel builders then matched
   on the first try and the audit's round-trip script confirmed it.
+
+## 2026-10-19 01:40 (interactive planner)
+- Merged #10 (T15 review fixes; installed the pre-push hook) and #18 (T22 free local-run and Tavily counters, Docker
+  sessions off the sandbox caps; T16 attacker strategies; CI actions pinned by SHA, gitleaks sha256 checked).
+- Built by two Haiku 5.5 builders in parallel, Opus final review. T08 unblocked on the Docker executor.
