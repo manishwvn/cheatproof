@@ -1,9 +1,19 @@
-"""Static report site over committed certificates (queue T09, part A).
+"""Static report site over committed certificates (queue T09, part A; queue T18, batch record).
 
 build_site() loads each *.json certificate in a directory with certify.load_certificate() and scores the valid ones with
-certify.score(). It writes index.html (the score, one row per environment and the files that failed to load) and
-env/<name>.html (one page per valid certificate, with its transcript when traces_dir holds one). Every rate, interval
-and count comes from certify.py. This module computes none of its own.
+certify.score(). It writes index.html (the score, the run record, one row per environment and the files that failed to
+load) and env/<name>.html (one page per valid certificate, with its transcript when traces_dir holds one). Every rate,
+interval and count comes from certify.py, except the selection counts, which come from the batch record. This module
+computes none of its own. The score shows the certified split (certified_unhardened, certified_hardened), no_attempt,
+and the cost with the cost_basis label that certify gives.
+
+Selection record. cert_dir.parent/batch.json (or batch_file, when given) is the record that cli batch writes: what was
+scanned, how many were valid, what was skipped and why, the selection rule, and the selected instances that did not run.
+The run record leads with the batch's own count, "Run by this batch: R of Y selected", where R is batch.run and Y is
+batch.selected. The certificates loaded on the page are a separate count. The record is
+checked strictly (schema_version 1, exactly the known keys, counts >= 0, selected equal to the length of selected_ids).
+A record that does not load is an error row, and the page says "batch record not loaded". With no default file the page
+says "selection record not available" and gives no numbers. A symlink is refused and never read.
 
 Names and traces. <name> is the file stem with each character outside [A-Za-z0-9._-] replaced by "_"; a clash gets
 "-2", "-3" and so on. The transcript of a certificate is traces_dir/<stem>.jsonl, where <stem> is the certificate's
@@ -48,6 +58,29 @@ RUN_COMMAND = "python -m cheatproof.cli harden <instance id> ..."
 DEFAULT_CERT_DIR = "results/certificates"
 DIFFS_DIR = "diffs"  # read from the sibling of the certificates directory, where cli harden writes them
 ROUNDS = ("before", "after")
+BATCH_FILE = "batch.json"  # the selection record cli batch writes beside the certificates directory
+BATCH_SCHEMA_VERSION = 1
+BATCH_KEYS = frozenset(
+    {
+        "schema_version",
+        "source",
+        "selection_rule",
+        "scanned",
+        "valid",
+        "skipped",
+        "selected",
+        "selected_ids",
+        "run",
+        "already_certified",
+        "not_run",
+        "started",
+        "updated",
+    }
+)
+NOT_RUN_KEYS = frozenset({"instance_id", "reason", "error"})
+BATCH_NOT_LOADED = "batch record not loaded"
+BATCH_NOT_AVAILABLE = "selection record not available"
+SEE_ERRORS = '(see <a href="#errors">errors</a>).'
 UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
 # C0 controls except tab and newline, DEL, C1 controls and bidi controls. _cell shows each one as [U+XXXX].
 CONTROL_OR_BIDI = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]")
@@ -125,7 +158,7 @@ class SiteResult:
 
     index: Path
     pages: list[Path]
-    errors: list[tuple[str, str]]  # (certificate file name, error message)
+    errors: list[tuple[str, str]]  # (file name, error message): a certificate file, or the batch record
 
 
 @dataclass(frozen=True)
@@ -142,20 +175,34 @@ class _Raw:
     markup: str
 
 
-def build_site(cert_dir: Path, out_dir: Path, *, traces_dir: Path | None = None) -> SiteResult:
+@dataclass(frozen=True)
+class _Batch:
+    """The selection record. record is the validated batch.json, or None. failed means a batch file was there and did
+    not load, which is shown as "batch record not loaded". Neither set means there is no record at all."""
+
+    record: dict[str, Any] | None
+    failed: bool
+
+
+def build_site(
+    cert_dir: Path, out_dir: Path, *, traces_dir: Path | None = None, batch_file: Path | None = None
+) -> SiteResult:
     """Write the site for the certificates in cert_dir into out_dir and return what was written.
 
     Raises FileNotFoundError when cert_dir is not a directory, and ValueError when out_dir is a non-empty directory
     that is not a cheatproof site (nothing is written then). A file that fails to load, or repeats an instance id, is
     listed in errors and on the index, and the rest still build. The transcript of env/<name>.html is read from
-    traces_dir as the module docstring describes.
+    traces_dir as the module docstring describes. batch_file is the selection record; when None it is
+    cert_dir.parent/batch.json, and a missing default file is not an error. A bad batch record is listed in errors.
     """
     root = Path(cert_dir)
     if not root.is_dir():
         raise FileNotFoundError(f"no certificate directory: {root}")
     out = Path(out_dir)
     _prepare_out_dir(out)
-    entries, errors = _load_all(root)
+    entries, cert_errors = _load_all(root)
+    batch, batch_errors = _read_batch(root, batch_file)
+    errors = [*cert_errors, *batch_errors]
     diffs_dir = root.parent / DIFFS_DIR
     env_dir = out / "env"
     env_dir.mkdir(parents=True, exist_ok=True)
@@ -163,7 +210,8 @@ def build_site(cert_dir: Path, out_dir: Path, *, traces_dir: Path | None = None)
     _write(out / NOJEKYLL, "")
     summary = score([entry.cert for entry in entries]) if entries else None
     index = out / "index.html"
-    _write(index, _document("Cheatproof report", _index_body(entries, errors, summary)))
+    body = _index_body(entries, errors, len(cert_errors), summary, batch)
+    _write(index, _document("Cheatproof report", body))
     pages = []
     for entry in entries:
         page = env_dir / f"{entry.name}.html"
@@ -218,6 +266,95 @@ def _page_name(stem: str, taken: set[str]) -> str:
 def _error_text(exc: Exception, path: Path) -> str:
     """The error message with the full path cut to the file name, so no absolute path reaches the site."""
     return str(exc).replace(str(path), path.name) or type(exc).__name__
+
+
+def _read_batch(root: Path, batch_file: Path | None) -> tuple[_Batch, list[tuple[str, str]]]:
+    """The selection record, and the error rows for it. The default file (cert_dir.parent/batch.json) may be absent:
+    then there is no record and no error. An explicit batch_file that is missing is an error. A symlink is refused and
+    never read, and so is anything that does not load.
+    """
+    explicit = batch_file is not None
+    path = Path(batch_file) if explicit else root.parent / BATCH_FILE
+    if path.is_symlink():
+        return _Batch(None, failed=True), [(path.name, "symlink refused: the batch record is not read")]
+    if not path.exists():
+        if explicit:
+            return _Batch(None, failed=True), [(path.name, "batch record not found")]
+        return _Batch(None, failed=False), []
+    try:
+        return _Batch(_load_batch(path), failed=False), []
+    except ValueError as exc:
+        return _Batch(None, failed=True), [(path.name, str(exc))]
+
+
+def _load_batch(path: Path) -> dict[str, Any]:
+    """The validated record in path. A ValueError says briefly why it does not load; it never holds the path."""
+    if not path.is_file():
+        raise ValueError("batch record is not a regular file")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        raise ValueError("batch record could not be read") from None
+    try:
+        data = json.loads(text, parse_constant=_refuse_constant)
+    except (ValueError, RecursionError):  # bad JSON and a NaN: ValueError. Deep nesting: RecursionError.
+        raise ValueError("batch record is not valid JSON") from None
+    _check_batch(data)
+    return data
+
+
+def _refuse_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not allowed in the batch record")
+
+
+def _is_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _is_str_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _is_not_run(item: Any) -> bool:
+    return (
+        isinstance(item, dict)
+        and set(item) == NOT_RUN_KEYS
+        and all(isinstance(item[key], str) for key in NOT_RUN_KEYS)
+    )
+
+
+def _want(condition: bool, message: str) -> None:
+    if not condition:
+        raise ValueError(message)
+
+
+def _check_batch(data: Any) -> None:
+    """Raise ValueError unless data is a schema 1 batch record. Every key is required and no other key is allowed.
+    Each value is checked for its type. The messages name a field, never a value, because the record is untrusted.
+    """
+    _want(isinstance(data, dict), "batch record must be a JSON object")
+    _want(not BATCH_KEYS - set(data), "batch record is missing a key")
+    _want(not set(data) - BATCH_KEYS, "batch record has an unknown key")
+    version = data["schema_version"]
+    _want(_is_count(version) and version == BATCH_SCHEMA_VERSION, "batch record schema_version must be 1")
+    types_ok = {
+        "selection_rule": isinstance(data["selection_rule"], str),
+        "started": isinstance(data["started"], str),
+        "updated": isinstance(data["updated"], str),
+        "source": _is_str_list(data["source"]),
+        "selected_ids": _is_str_list(data["selected_ids"]),
+        "skipped": isinstance(data["skipped"], dict) and all(_is_count(n) for n in data["skipped"].values()),
+        "not_run": isinstance(data["not_run"], list) and all(_is_not_run(item) for item in data["not_run"]),
+        **{key: _is_count(data[key]) for key in ("scanned", "valid", "selected", "run", "already_certified")},
+    }
+    wrong = sorted(key for key, ok in types_ok.items() if not ok)
+    if wrong:
+        raise ValueError(f"batch record field {wrong[0]} has the wrong type")
+    _want(
+        data["selected"] == len(data["selected_ids"]),
+        "batch record selected must equal the length of selected_ids",
+    )
+    _want(data["valid"] <= data["scanned"], "batch record valid must not exceed scanned")
 
 
 def _write(path: Path, text: str) -> None:
@@ -333,11 +470,11 @@ def _kv_table(caption: str, pairs: Iterable[tuple[str, Any]]) -> str:
     return _table(caption, ("Field", "Value"), [_kv_row(key, value) for key, value in pairs])
 
 
-def _section(anchor: str, heading: str, *parts: str) -> str:
+def _section(anchor: str, heading: str, *parts: str, level: int = 2) -> str:
     return "\n".join(
         [
             f'<section aria-labelledby="{anchor}">',
-            f'<h2 id="{anchor}">{_cell(heading)}</h2>',
+            f'<h{level} id="{anchor}">{_cell(heading)}</h{level}>',
             *parts,
             "</section>",
         ]
@@ -384,6 +521,15 @@ def _money(value: Any) -> str:
     return f"${value:.4f}" if isinstance(value, int | float) else NOT_RECORDED
 
 
+def _money_basis(value: Any, basis: Any) -> str:
+    """A cost with the label of what it is, as certify gives it: "$0.2500 (budgeted ledger delta)". A missing label
+    reads "not recorded", and so does a missing cost.
+    """
+    if not isinstance(value, int | float):
+        return NOT_RECORDED
+    return f"{_money(value)} ({_value(basis)})"
+
+
 def _passed_word(grade: Any) -> str:
     """pass or fail for a grade dict from certify (its "passed" key). Anything else is not recorded."""
     passed = _map(grade).get("passed")
@@ -408,8 +554,13 @@ def _gates_text(gates: Any) -> str:
 
 
 def _index_body(
-    entries: Sequence[_Entry], errors: Sequence[tuple[str, str]], summary: Mapping[str, Any] | None
+    entries: Sequence[_Entry],
+    errors: Sequence[tuple[str, str]],
+    excluded: int,
+    summary: Mapping[str, Any] | None,
+    batch: _Batch,
 ) -> str:
+    """excluded counts the certificate files left out (errors also holds a bad batch record, which is not one)."""
     head = [
         "<header>",
         "<h1>Cheatproof hackability report</h1>",
@@ -417,15 +568,18 @@ def _index_body(
         "</header>",
     ]
     middle = (
-        [_empty_state(errors)]
+        [
+            _empty_state(excluded),
+            _section("run-record", "Run record", *_run_record_parts(batch, len(entries))),
+        ]
         if summary is None
-        else [_score_section(summary, len(errors)), _environments_section(entries)]
+        else [_score_section(summary, excluded, batch, len(entries)), _environments_section(entries)]
     )
     return "\n".join([*head, *middle, _errors_section(errors)])
 
 
-def _empty_state(errors: Sequence[tuple[str, str]]) -> str:
-    if errors:
+def _empty_state(excluded: int) -> str:
+    if excluded:
         lead = "No valid certificates were found. Every certificate file failed to load (see below)."
     else:
         lead = "No certificates were found in the certificates directory."
@@ -446,13 +600,60 @@ def _empty_state(errors: Sequence[tuple[str, str]]) -> str:
 
 def _excluded_text(count: int) -> str:
     """The sentence that says how many certificate files the score leaves out. Its link goes to the errors list."""
-    link = '(see <a href="#errors">errors</a>).'
     if count == 1:
-        return f"1 certificate file failed to load and is excluded {link}"
-    return f"{count} certificate files failed to load and are excluded {link}"
+        return f"1 certificate file failed to load and is excluded {SEE_ERRORS}"
+    return f"{count} certificate files failed to load and are excluded {SEE_ERRORS}"
 
 
-def _score_section(summary: Mapping[str, Any], excluded: int) -> str:
+def _run_record_parts(batch: _Batch, loaded: int) -> list[str]:
+    """What cli batch selected and ran, set against the certificates that loaded. With no record the page says so and
+    gives no numbers. loaded is the count of certificates scored on this page (shown as "certificates loaded").
+    """
+    record = batch.record
+    if record is None:
+        if batch.failed:
+            return [f"<p>{BATCH_NOT_LOADED} {SEE_ERRORS}</p>"]
+        return [f"<p>{BATCH_NOT_AVAILABLE}.</p>"]
+    selected = record["selected"]
+    not_run_count = len(record["not_run"])
+    lead = (
+        f"<p>Run by this batch: {record['run']} of {selected} selected "
+        f"(already had a certificate: {record['already_certified']}; not run: {not_run_count}).</p>"
+        f"<p>certificates loaded: {loaded} (scored on this page; this can include certificates from earlier runs).</p>"
+    )
+    counts = _kv_table(
+        "Selection record counts",
+        [
+            ("Selection rule", record["selection_rule"]),
+            ("Scanned", record["scanned"]),
+            ("Valid", record["valid"]),
+            ("Selected", selected),
+            ("Run by this batch", record["run"]),
+            ("Already has a certificate", record["already_certified"]),
+            ("Not run", not_run_count),
+            ("Started", record["started"]),
+            ("Updated", record["updated"]),
+        ],
+    )
+    skipped = _table(
+        "Instances skipped, by reason",
+        ("Reason", "Count"),
+        [_head_row(reason, count) for reason, count in sorted(record["skipped"].items())],
+        empty="none",
+    )
+    not_run = _table(
+        "Not run, with reason and error",
+        ("Instance id", "Reason", "Error"),
+        [
+            _head_row(item["instance_id"], item["reason"] or "none", item["error"] or "none")
+            for item in record["not_run"]
+        ],
+        empty="none",
+    )
+    return [lead, counts, skipped, not_run]
+
+
+def _score_section(summary: Mapping[str, Any], excluded: int, batch: _Batch, loaded: int) -> str:
     lead = f"n = {summary['n']} valid certificates. " + (_excluded_text(excluded) + " " if excluded else "")
     rate_rows = [
         _row(label, _rate_text(summary[key]), summary[key]["denominator"])
@@ -471,6 +672,7 @@ def _score_section(summary: Mapping[str, Any], excluded: int) -> str:
         "Hackability score",
         f"<p>{lead}A certified task is not hackable by this attacker. "
         "That is not a claim that it is secure or proven.</p>",
+        _section("run-record", "Run record", *_run_record_parts(batch, loaded), level=3),
         _table(
             "Rates with 95% Wilson intervals",
             ("Measure", "Count of n and rate", "Denominator"),
@@ -481,10 +683,25 @@ def _score_section(summary: Mapping[str, Any], excluded: int) -> str:
             "Other counts",
             [
                 ("Certified", summary["certified"]),
+                (
+                    "Certified, attacker never succeeded before patching (certified_unhardened)",
+                    summary.get("certified_unhardened"),
+                ),
+                (
+                    "Certified, attacker succeeded before patching and the patches held (certified_hardened)",
+                    summary.get("certified_hardened"),
+                ),
                 ("Inconclusive", summary["inconclusive"]),
+                (
+                    "No attempt, attacker never tried (no_attempt, also counted in the outcomes)",
+                    summary.get("no_attempt"),
+                ),
                 ("Hackable before (also counted in the outcomes)", summary["hackable_before"]),
                 ("Hackable after (also counted in the outcomes)", summary["hackable_after"]),
-                ("Cost, total (USD)", _money(summary["cost_usd_total"])),
+                (
+                    "Cost, total (USD)",
+                    _money_basis(summary["cost_usd_total"], summary.get("cost_basis")),
+                ),
             ],
         ),
         _table(
@@ -538,10 +755,10 @@ def _errors_section(errors: Sequence[tuple[str, str]]) -> str:
         "errors",
         "Files that failed to load",
         _table(
-            "Certificate files skipped by the build",
+            "Files skipped by the build, with the error for each",
             ("File", "Error"),
             rows,
-            empty="None. Every certificate file loaded.",
+            empty="None. Every file loaded.",
         ),
     )
 
@@ -585,7 +802,7 @@ def _result_section(cert: Mapping[str, Any]) -> str:
             [
                 ("Certified", cert["certified"]),
                 ("Reason", cert["reason"]),
-                ("Cost (USD)", _money(cert["cost_usd"])),
+                ("Cost (USD)", _money_basis(cert["cost_usd"], cert.get("cost_basis"))),
                 ("Timestamp", cert["timestamp"]),
                 ("Sandbox runs", cert["sandbox_runs"]),
             ],
