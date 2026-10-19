@@ -751,7 +751,8 @@ def test_a_symlinked_diffs_directory_is_refused_and_its_target_is_not_read(tmp_p
 # The batch record (cli batch, schema_version 1) and the summary split. Hand-written records, no model or network.
 
 RUN_RECORD_HEAD = '<h3 id="run-record">Run record</h3>'
-BATCH_OK_RUN = "n run 3 of 4 selected."
+BATCH_OK_RUN = "Run by this batch: 3 of 4 selected (already had a certificate: 0; not run: 1)."
+BATCH_LOADED = "certificates loaded: 3 (scored on this page"
 CERTIFIED_UNHARDENED = "Certified, attacker never succeeded before patching (certified_unhardened)"
 CERTIFIED_HARDENED = "Certified, attacker succeeded before patching and the patches held (certified_hardened)"
 NO_ATTEMPT = "No attempt, attacker never tried (no_attempt, also counted in the outcomes)"
@@ -793,7 +794,8 @@ def test_a_batch_record_gives_the_counts_skips_and_the_not_run_table(tmp_path):
     result = build_site(cert_dir, tmp_path / "site")
     index = read(result.index)
     assert result.errors == []
-    assert BATCH_OK_RUN in index  # 3 certificates loaded, 4 selected
+    assert BATCH_OK_RUN in index  # the batch's own count leads the run record
+    assert BATCH_LOADED in index  # 3 certificates loaded, shown apart from the batch count
     assert RUN_RECORD_HEAD in index
     assert index.index('id="score"') < index.index(RUN_RECORD_HEAD) < index.index('id="environments"')
     for label, value in (
@@ -802,7 +804,7 @@ def test_a_batch_record_gives_the_counts_skips_and_the_not_run_table(tmp_path):
         ("Valid", 4),
         ("Selected", 4),
         ("Run by this batch", 3),
-        ("Already certified", 0),
+        ("Already has a certificate", 0),
         ("Not run", 1),
         ("Started", "2026-10-18T10:00:00Z"),
     ):
@@ -823,14 +825,15 @@ def test_a_batch_record_gives_the_counts_skips_and_the_not_run_table(tmp_path):
     assert "batch record not loaded" not in index
 
 
-def test_the_first_number_counts_certificates_loaded_not_the_batch_run(tmp_path):
+def test_the_run_record_leads_with_the_batch_count_and_shows_certificates_loaded_apart(tmp_path):
     cert_dir = fixture_dir(tmp_path)  # three certificates load
     put_batch(
         tmp_path,
         batch_record(run=1, not_run=[{"instance_id": "owner__repo-2", "reason": "x", "error": ""}] * 3),
     )
     index = read(build_site(cert_dir, tmp_path / "site").index)
-    assert BATCH_OK_RUN in index  # X is the loaded count, 3
+    assert "Run by this batch: 1 of 4 selected (already had a certificate: 0; not run: 3)." in index
+    assert BATCH_LOADED in index  # the loaded count is 3, and it is not the batch's run count
     assert '<tr><th scope="row">Run by this batch</th><td>1</td></tr>' in index
     assert (
         '<tr><th scope="row">owner__repo-2</th><td>x</td><td>none</td></tr>' in index
@@ -881,12 +884,13 @@ def test_no_certificates_and_no_batch_still_say_the_record_is_not_available(tmp_
     assert "selection record not available" in index
 
 
-def test_a_valid_batch_with_no_certificates_loaded_says_zero_run(tmp_path):
+def test_a_valid_batch_with_no_certificates_loaded_still_shows_the_batch_count(tmp_path):
     cert_dir = tmp_path / "certs"
     cert_dir.mkdir()
     put_batch(tmp_path, batch_record())
     index = read(build_site(cert_dir, tmp_path / "site").index)
-    assert "n run 0 of 4 selected." in index
+    assert "Run by this batch: 3 of 4 selected (already had a certificate: 0; not run: 1)." in index
+    assert "certificates loaded: 0 (scored on this page" in index
     assert "Hackability score" not in index
 
 

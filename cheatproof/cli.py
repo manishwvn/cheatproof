@@ -22,14 +22,21 @@ sanitize, written only when no certificate was, and removed once a certificate i
 traces/ or at a trace file is refused before the paid run.
 batch hardens the cached selection one task at a time, with the same steps and files as harden. The selection is the
 rule tasks fetch uses (per source, the n lowest by score, deny-listed repos left out), read from the cache only:
-batch never fetches. A task whose certificate is already in --out is skipped and counted as already certified. Each
-other task gets one paid run. A task that cannot run becomes a not-run row {instance_id, reason, error} and the batch
-goes on. reason is executor_refused, executor_unavailable, disk (free space on --out's file system is below
-MIN_FREE_DISK_GB, default 10, checked before each task), budget or certificate_write_failed. A BudgetExceeded (a cap,
-a halt, or HTTP 402) marks the current task and each remaining task that is not already certified as budget, and the
-batch stops. Nothing is pruned.
+batch never fetches. An instance id that more than one source selects is kept once, from the first source, and each
+repeat is counted in skipped as duplicate_across_sources. A task whose certificate is already in --out is skipped and
+counted as one that already has a certificate. Each other task gets one paid run. A task that cannot run becomes a
+not-run row {instance_id, reason, error} and the batch goes on. reason is executor_refused, executor_unavailable, disk
+(free space on --out's file system is below MIN_FREE_DISK_GB, default 10, checked before each task after the
+leftover sweep), budget, certificate_write_failed, invalid_task (the instance id cannot name a certificate, or traces/
+or the trace file is a symbolic link) or cost_check_failed (the ledger total could not be read or is not a finite
+number before the run, or after it the measured spend is not a finite number or went down).
+A BudgetExceeded (a cap, a halt, or HTTP 402) or a cost_check_failed stops the batch after the current task, and
+exits 1. The current task gets that reason. Each remaining task that does not already have a certificate is marked
+not run with reason budget after a budget stop, or stopped_after_cost_check after a cost check failure. Nothing is
+pruned.
 After every task the batch writes batch.json beside the certificates directory, atomically (schema_version 1: the
-selection, the counts and the not-run rows).
+selection, the counts and the not-run rows). A rerun rewrites batch.json for that run only: the not-run rows of an
+earlier run are not kept.
 report prints certify.score_directory() as it is: rates with their n, raw counts, outcomes, holes and sources.
 When batch.json sits beside the certificates directory, report also prints the batch counts and adds a batch key
 to the JSON output.
@@ -39,11 +46,12 @@ no Budget, LLM or executor is built for it. Its traces come from --traces, or fr
 when that directory exists and --traces is not given.
 
 Exit codes: 0 a certificate was written (certified or not), or the report was printed. 1 the budget was halted or
-capped, the executor refused or was unavailable, or the certificate could not be written after a paid run (its
-report is kept in reports/). 2 usage error: bad flags, missing prompt, unknown or ambiguous task, missing setting,
-no certificates.
-batch: 0 the batch finished, with or without not-run rows; 1 the budget stopped it, or batch.json could not be
-written; 2 usage error, or a missing setting or no current cache, found before the first paid run that needs it.
+capped, the executor refused or was unavailable, the spend could not be checked, or the certificate could not be
+written after a paid run (its report is kept in reports/). 2 usage error: bad flags, missing prompt, unknown or
+ambiguous task, missing setting, no certificates.
+batch: 0 the batch finished, with or without not-run rows; 1 a budget stop or a cost check failure stopped it, or
+batch.json could not be written; 2 usage error, or a missing setting or no current cache, found before the first paid
+run that needs it.
 site: 0 the site was written and every certificate loaded; 1 the site was written but some did not load (each
 listed on stderr), or the write failed; 2 the certificates or traces directory is missing, or --out is a non-empty
 directory that is not a cheatproof site.
@@ -103,6 +111,8 @@ RATE_LABELS = (
 )
 BATCH_FILE = "batch.json"  # beside the certificates directory; rewritten whole after every task
 BATCH_SCHEMA_VERSION = 1
+# A skipped reason: an instance id that an earlier source already selected. The first source keeps the task.
+DUPLICATE_REASON = "duplicate_across_sources"
 DEFAULT_MIN_FREE_GB = 10.0  # MIN_FREE_DISK_GB when the environment does not set it
 GIB = 1024**3
 
@@ -251,6 +261,14 @@ def build_task_prompt(task: TaskSpec, workdir: str) -> str:
 
 def _spent(snapshot: Mapping[str, Any]) -> float:
     return float(snapshot.get("total_usd", 0.0))
+
+
+def _ledger_total(budget: Any) -> float | None:
+    """The ledger total, or None when the snapshot holds no number (TypeError or ValueError from float)."""
+    try:
+        return _spent(budget.snapshot())
+    except (TypeError, ValueError):
+        return None
 
 
 def _usage_error(message: str) -> int:
@@ -449,9 +467,9 @@ class _Usage(Exception):
 class _Unwritten(Exception):
     """A paid run that ended without a certificate, or never started.
 
-    stage: "start" (a setup or harden stop, or the trace could not be set aside), "cost" (the spend could not be
-    measured) or "certificate" (the report and diffs were kept). reason: the batch label. cost: the measured spend
-    when the run finished, else None.
+    stage: "start" (a setup or harden stop, or the trace could not be set aside), "cost" (the ledger could not be read
+    or the spend could not be checked; after a paid run the report and diffs are kept) or "certificate" (the report and
+    diffs were kept). reason: the batch label. cost: the measured spend when the run finished, else None.
     """
 
     def __init__(self, stage: str, reason: str, exc: BaseException, cost: float | None = None) -> None:
@@ -591,23 +609,32 @@ def _harden_one(
             llm, session, settings.system_prompt, plan.prompt, settings.config, trace_path=plan.trace_path
         )
 
-    spent_before = _spent(budget.snapshot())
+    spent_before = _ledger_total(budget)
+    if spent_before is None or not math.isfinite(spent_before):
+        # Checked before the paid call: a spend that cannot be measured is not started.
+        message = "cost check failed: the ledger total is not a number before the run; no paid run started"
+        raise _Unwritten("cost", "cost_check_failed", RuntimeError(message))
     try:
         report = deps.harden(executor, plan.env, plan.task, attack_fn, budget=budget, **settings.timeout_kw)
     except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
         raise _Unwritten("start", _stop_reason(exc), exc) from None
-    spent_after = _spent(budget.snapshot())
-    cost = spent_after - spent_before
-    if not (math.isfinite(cost) and cost >= 0):
-        # The ledger total went down or is not a number: the spend is unknown, so no certificate is built.
-        # The paid run is kept all the same: its digest-only report and its diffs.
+    spent_after = _ledger_total(budget)
+    cost = None if spent_after is None else spent_after - spent_before
+    if cost is None or not (math.isfinite(cost) and cost >= 0):
+        # The ledger total went down, is not a number, or cannot be read: the spend is unknown, so no certificate is
+        # built. The paid run is kept all the same: its digest-only report and its diffs.
         _keep_report(report, stem, out)
         _keep_diffs(report, stem, out)
-        message = (
-            "cost check failed: the ledger went from "
-            f"${spent_before:.4f} to ${spent_after:.4f} during the run; no certificate written"
-        )
-        raise _Unwritten("cost", "certificate_write_failed", RuntimeError(message))
+        if spent_after is None:
+            message = (
+                "cost check failed: the ledger total could not be read after the run; no certificate written"
+            )
+        else:
+            message = (
+                "cost check failed: the ledger went from "
+                f"${spent_before:.4f} to ${spent_after:.4f} during the run; no certificate written"
+            )
+        raise _Unwritten("cost", "cost_check_failed", RuntimeError(message))
 
     config = settings.config
     attacker = {"model": config.model, "max_steps": config.max_steps, "max_tokens": config.max_tokens_total}
@@ -734,7 +761,7 @@ class _Batch:
     def already(self, instance_id: str) -> None:
         self.state["already_certified"] += 1
         self.save()
-        print(f"{instance_id}: already certified")
+        print(f"{instance_id}: already has a certificate")
 
     def not_run(self, instance_id: str, reason: str, error: str) -> None:
         text = sanitize(error)[:ERROR_CHARS]
@@ -754,29 +781,30 @@ def _run_or_stop(
 
 
 def _run_tasks(tasks: list[TaskSpec], settings: _Settings, deps: Deps, batch: _Batch, min_free: float) -> int:
-    """Run the selection one task at a time. 0 when it finished, 1 when the budget stopped it. 2 when a setting is
-    missing or invalid, found at the first paid run that needs it (batch.json keeps the progress so far)."""
+    """Run the selection one task at a time. 0 when it finished. 1 when a budget stop or a cost check failure stopped
+    it: the current task gets that reason, and each remaining task that does not already have a certificate is not run,
+    with reason budget after a budget stop or stopped_after_cost_check after a cost check failure. 2 when a setting is
+    missing or invalid, found at the first paid run that needs it (batch.json keeps the progress so far).
+
+    Each task opens the executor first, which runs the leftover sweep, and only then checks the free disk, so a low disk
+    still gets its leftovers removed."""
     out = settings.out
-    stopped: str | None = None  # the budget message, once a budget stop has happened
+    stop: tuple[str, str] | None = None  # (reason, error) for each remaining task, once a stop has happened
     for task in tasks:
         iid = task.instance_id
         if _certified_before(task, out):
             batch.already(iid)
             continue
-        if stopped is not None:
-            batch.not_run(iid, "budget", stopped)
+        if stop is not None:
+            batch.not_run(iid, stop[0], stop[1])
             continue
         try:
             plan = _plan(task, out)
         except _Usage as exc:
-            batch.not_run(iid, "certificate_write_failed", str(exc))
-            continue
-        free = deps.disk_free_gb(out)
-        if free < min_free:
-            batch.not_run(iid, "disk", f"free disk is {free:.1f} GB, below MIN_FREE_DISK_GB={min_free:g}")
+            batch.not_run(iid, "invalid_task", str(exc))
             continue
         try:
-            opened = _open(deps)
+            opened = _open(deps)  # the leftover sweep runs here, before the disk check below
         except _Unwritten as exc:
             outcome: _Written | _Unwritten = exc
         except KeyError as exc:
@@ -784,14 +812,20 @@ def _run_tasks(tasks: list[TaskSpec], settings: _Settings, deps: Deps, batch: _B
         except ValueError as exc:
             return _usage_error(str(exc))
         else:
+            free = deps.disk_free_gb(out)
+            if free < min_free:
+                batch.not_run(iid, "disk", f"free disk is {free:.1f} GB, below MIN_FREE_DISK_GB={min_free:g}")
+                continue
             outcome = _run_or_stop(plan, settings, deps, opened)
         if isinstance(outcome, _Unwritten):
             if outcome.reason == "budget":
-                stopped = str(outcome.exc)
+                stop = ("budget", str(outcome.exc))
+            elif outcome.reason == "cost_check_failed":
+                stop = ("stopped_after_cost_check", f"batch stopped after the cost check failed on {iid}")
             batch.not_run(iid, outcome.reason, str(outcome.exc))
             continue
         batch.done(f"{iid}: run  {_harden_line(outcome.report, outcome.cost)}")
-    return 1 if stopped is not None else 0
+    return 1 if stop is not None else 0
 
 
 def _batch_summary(state: Mapping[str, Any]) -> str:
@@ -799,7 +833,7 @@ def _batch_summary(state: Mapping[str, Any]) -> str:
     counts = Counter(row["reason"] for row in rows)
     by_reason = ", ".join(f"{reason}={count}" for reason, count in sorted(counts.items())) or "none"
     return (
-        f"batch: run {state['run']}, already certified {state['already_certified']}, "
+        f"batch: run {state['run']}, already has a certificate {state['already_certified']}, "
         f"not run {len(rows)} ({by_reason}), selected {state['selected']}"
     )
 
@@ -830,7 +864,15 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
     for loaded in selections:
         for reason, count in loaded.skipped.items():
             skipped[reason] = skipped.get(reason, 0) + count
-    tasks = [task for loaded in selections for task in loaded.selected]
+    tasks: list[TaskSpec] = []
+    seen: set[str] = set()
+    for loaded in selections:
+        for task in loaded.selected:
+            if task.instance_id in seen:  # the first source keeps it; a repeat is counted and never run
+                skipped[DUPLICATE_REASON] = skipped.get(DUPLICATE_REASON, 0) + 1
+                continue
+            seen.add(task.instance_id)
+            tasks.append(task)
     started = deps.clock()
     state: dict[str, Any] = {
         "schema_version": BATCH_SCHEMA_VERSION,
@@ -875,7 +917,8 @@ def _read_batch(path: Path) -> dict[str, Any] | None:
 
 
 def _batch_lines(batch: Mapping[str, Any]) -> list[str]:
-    """The batch counts for the text report: the selection and skips, then the already certified and not-run rows."""
+    """The batch lines for the text report: the selection rule, the selection and skips, then the rows that already
+    had a certificate and the not-run rows."""
     skipped = batch.get("skipped")
     skipped = skipped if isinstance(skipped, Mapping) else {}
     skipped_text = ", ".join(
@@ -885,12 +928,16 @@ def _batch_lines(batch: Mapping[str, Any]) -> list[str]:
     rows = [row for row in not_run if isinstance(row, Mapping)] if isinstance(not_run, list) else []
     reasons = Counter(str(row.get("reason")) for row in rows)
     reason_text = ", ".join(f"{key}={value}" for key, value in sorted(reasons.items())) or "none"
+    rule = f"batch selection rule: {_cell(batch.get('selection_rule'))}"
     head = (
         f"batch: run {_cell(batch.get('run'))} of {_cell(batch.get('selected'))} selected "
         f"(scanned {_cell(batch.get('scanned'))}, skipped: {skipped_text or 'none'})"
     )
-    tail = f"batch: already certified {_cell(batch.get('already_certified'))}; not run {len(rows)} ({reason_text})"
-    return [head, tail]
+    tail = (
+        f"batch: already has a certificate {_cell(batch.get('already_certified'))}; "
+        f"not run {len(rows)} ({reason_text})"
+    )
+    return [rule, head, tail]
 
 
 def _cell(value: Any) -> str:

@@ -1534,9 +1534,9 @@ def test_batch_skips_a_certified_task_and_runs_the_rest(tmp_path, capsys):
     assert (state["selected"], state["run"], state["already_certified"], state["not_run"]) == (2, 1, 1, [])
     assert state["selected_ids"] == [ID_A, ID_B]
     printed = capsys.readouterr().out
-    assert f"{ID_A}: already certified" in printed
+    assert f"{ID_A}: already has a certificate" in printed
     assert f"{ID_B}: run  certified: yes" in printed
-    assert "batch: run 1, already certified 1, not run 0 (none), selected 2" in printed
+    assert "batch: run 1, already has a certificate 1, not run 0 (none), selected 2" in printed
 
 
 @pytest.mark.parametrize(
@@ -1560,26 +1560,81 @@ def test_a_task_that_cannot_run_is_a_not_run_row_and_the_batch_goes_on(tmp_path,
     assert (out / certify.certificate_filename(ID_B)).is_file()
 
 
-def test_a_spend_that_went_down_is_a_certificate_write_failed_row(tmp_path):
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [(0.25, 0.10), (0.10, float("nan")), (0.10, float("inf"))],
+    ids=["went-down", "nan", "infinite"],
+)
+def test_a_spend_that_cannot_be_checked_stops_the_batch_as_cost_check_failed(tmp_path, capsys, before, after):
     spy = Spy()
     out = out_dir(tmp_path)
-    budgets = iter([FakeBudget(0.25, 0.10), FakeBudget(0.10, 0.25)])
-    deps = batch_deps(spy, batch_tasks(ID_A, ID_B), make_budget=lambda: next(budgets))
-    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0
+    budgets = iter([FakeBudget(before, after)])
+    deps = batch_deps(spy, batch_tasks(ID_A, ID_B, ID_C), make_budget=lambda: next(budgets))
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 1
+    assert [call["task"].instance_id for call in spy.harden_calls] == [
+        ID_A
+    ]  # the batch stops: B and C never run
     state = read_batch(out)
-    (row,) = state["not_run"]
-    assert (row["instance_id"], row["reason"]) == (ID_A, "certificate_write_failed")
-    assert row["error"].startswith("cost check failed")
-    assert state["run"] == 1
+    assert [(row["instance_id"], row["reason"]) for row in state["not_run"]] == [
+        (ID_A, "cost_check_failed"),
+        (ID_B, "stopped_after_cost_check"),
+        (ID_C, "stopped_after_cost_check"),
+    ]
+    assert state["not_run"][0]["error"].startswith("cost check failed")
+    assert (state["run"], state["already_certified"]) == (0, 0)
+    assert not (out / certify.certificate_filename(ID_A)).exists()
+    stem = Path(certify.certificate_filename(ID_A)).stem
+    assert (out.parent / "reports" / f"{stem}.report.json").is_file()  # the paid run is kept
+    assert (
+        "batch: run 0, already has a certificate 0, not run 3 "
+        "(cost_check_failed=1, stopped_after_cost_check=2), selected 3"
+    ) in capsys.readouterr().out
 
 
-def test_a_task_that_names_no_certificate_file_is_a_not_run_row(tmp_path):
+@pytest.mark.parametrize(
+    ("before", "after", "ran", "message"),
+    [
+        ("n/a", 0.25, 0, "is not a number before the run"),
+        (0.10, None, 1, "could not be read after the run"),
+        (0.10, "n/a", 1, "could not be read after the run"),
+    ],
+    ids=["unreadable-before", "unreadable-after-none", "unreadable-after-text"],
+)
+def test_a_ledger_that_cannot_be_read_stops_the_batch_as_cost_check_failed(
+    tmp_path, before, after, ran, message
+):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    budgets = iter([FakeBudget(before, after)])
+    deps = batch_deps(spy, batch_tasks(ID_A, ID_B), make_budget=lambda: next(budgets))
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 1
+    assert len(spy.harden_calls) == ran  # an unreadable ledger before the run starts no paid run
+    state = read_batch(out)
+    assert [(row["instance_id"], row["reason"]) for row in state["not_run"]] == [
+        (ID_A, "cost_check_failed"),
+        (ID_B, "stopped_after_cost_check"),
+    ]
+    assert message in state["not_run"][0]["error"]
+    assert state["run"] == 0
+
+
+def test_an_unreadable_ledger_after_a_paid_run_is_reported_by_harden_and_keeps_the_report(tmp_path, capsys):
+    out = tmp_path / "certs"
+    deps = make_deps(Spy(), make_budget=lambda: FakeBudget(0.10, None))
+    assert cli.main(_harden_argv(tmp_path, out), deps=deps) == 1
+    captured = capsys.readouterr()
+    assert "error: cost check failed: the ledger total could not be read after the run" in captured.err
+    assert not out.exists()
+    assert (tmp_path / "reports" / f"{INSTANCE}.report.json").is_file()
+
+
+def test_a_task_that_names_no_certificate_file_is_an_invalid_task_row(tmp_path):
     spy = Spy()
     out = out_dir(tmp_path)
     assert cli.main(batch_argv(tmp_path, out), deps=batch_deps(spy, batch_tasks("bad..id", ID_B))) == 0
     state = read_batch(out)
     (row,) = state["not_run"]
-    assert row["instance_id"] == "bad..id" and row["reason"] == "certificate_write_failed"
+    assert row["instance_id"] == "bad..id" and row["reason"] == "invalid_task"
     assert "'..'" in row["error"]
     assert [call["task"].instance_id for call in spy.harden_calls] == [ID_B]
 
@@ -1595,7 +1650,7 @@ def test_a_trace_file_that_is_a_link_is_a_not_run_row(tmp_path):
     assert cli.main(batch_argv(tmp_path, out), deps=batch_deps(spy, batch_tasks(ID_A, ID_B))) == 0
     state = read_batch(out)
     (row,) = state["not_run"]
-    assert (row["instance_id"], row["reason"]) == (ID_A, "certificate_write_failed")
+    assert (row["instance_id"], row["reason"]) == (ID_A, "invalid_task")
     assert "symbolic link" in row["error"]
     assert [call["task"].instance_id for call in spy.harden_calls] == [ID_B]
     assert target.read_text(encoding="utf-8") == "not yours\n"
@@ -1638,7 +1693,7 @@ def test_budget_stop_marks_the_current_and_remaining_tasks_and_exits_1(tmp_path,
     assert {row["reason"] for row in state["not_run"]} == {"budget"}
     assert all("daily cap" in row["error"] for row in state["not_run"])
     assert (state["run"], state["already_certified"]) == (1, 1 if certified_last else 0)
-    assert "batch: run 1, already certified" in capsys.readouterr().out
+    assert "batch: run 1, already has a certificate" in capsys.readouterr().out
 
 
 def test_an_http_402_from_the_attacker_stops_the_batch_as_budget(tmp_path):
@@ -1719,6 +1774,44 @@ def test_batch_json_has_the_contract_keys_and_sums_the_sources(tmp_path):
     assert "per source" in state["selection_rule"] and "deny list" in state["selection_rule"]
     assert [call[0] for call in spy.load_calls] == ["swe-rebench", "swe-bench-verified"]
     assert [kwargs["strategy"] for kwargs in spy.build_kwargs] == ["prompt"] * 3
+
+
+def test_an_instance_that_two_sources_select_runs_once_and_the_repeat_is_counted_as_skipped(tmp_path):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    selections = [
+        loaded(batch_tasks(ID_A, ID_B), source="swe-rebench"),
+        loaded(batch_tasks(ID_A, ID_C), source="swe-bench-verified", skipped={"bad_tests": 1}),
+    ]
+    argv = [
+        "batch",
+        "--system-prompt-file",
+        str(prompt_file(tmp_path)),
+        "--attacker-model",
+        "fake-model",
+        "--out",
+        str(out),
+    ]
+    assert cli.main(argv, deps=batch_deps(spy, selections=selections)) == 0
+    state = read_batch(out)
+    assert state["selected_ids"] == [ID_A, ID_B, ID_C]  # the first source keeps ID_A
+    assert state["selected"] == len(state["selected_ids"]) == 3
+    assert state["skipped"] == {"bad_tests": 1, "duplicate_across_sources": 1}
+    assert [call["task"].instance_id for call in spy.harden_calls] == [ID_A, ID_B, ID_C]
+    assert (state["run"], state["not_run"]) == (3, [])
+
+
+def test_a_low_disk_still_runs_the_leftover_sweep_before_the_task_is_refused(tmp_path, capsys):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    executor = SweepingExecutor(swept=2)
+    deps = batch_deps(spy, batch_tasks(ID_A), disk_free_gb=lambda path: 5.0, make_executor=lambda: executor)
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0
+    assert executor.sweeps == 1  # the sweep ran for the task the disk check then refused
+    assert "swept 2 leftover cheatproof containers" in capsys.readouterr().err
+    state = read_batch(out)
+    assert [row["reason"] for row in state["not_run"]] == ["disk"]
+    assert spy.harden_calls == []
 
 
 def test_batch_usage_errors_exit_2_before_any_run(tmp_path, capsys):
@@ -1879,8 +1972,8 @@ def test_report_prints_the_batch_counts_and_adds_a_batch_key_to_json(tmp_path, c
     assert cli.main(["report", "--certs", str(certs)], deps=make_deps(spy)) == 0
     text = capsys.readouterr().out
     assert "n=12" in text  # the score is shown first, as before
-    assert "batch: run 2 of 3 selected (scanned 10, skipped: bad_tests=2)" in text
-    assert "batch: already certified 0; not run 1 (disk=1)" in text
+    assert "batch selection rule: rule\nbatch: run 2 of 3 selected (scanned 10, skipped: bad_tests=2)" in text
+    assert "batch: already has a certificate 0; not run 1 (disk=1)" in text
     assert cli.main(["report", "--certs", str(certs), "--format", "json"], deps=make_deps(spy)) == 0
     printed = json.loads(capsys.readouterr().out)
     assert printed["batch"] == batch

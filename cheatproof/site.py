@@ -9,7 +9,8 @@ and the cost with the cost_basis label that certify gives.
 
 Selection record. cert_dir.parent/batch.json (or batch_file, when given) is the record that cli batch writes: what was
 scanned, how many were valid, what was skipped and why, the selection rule, and the selected instances that did not run.
-The page says "n run X of Y selected", where X counts the certificates loaded and Y is batch.selected. The record is
+The run record leads with the batch's own count, "Run by this batch: R of Y selected", where R is batch.run and Y is
+batch.selected. The certificates loaded on the page are a separate count. The record is
 checked strictly (schema_version 1, exactly the known keys, counts >= 0, selected equal to the length of selected_ids).
 A record that does not load is an error row, and the page says "batch record not loaded". With no default file the page
 says "selection record not available" and gives no numbers. A symlink is refused and never read.
@@ -606,7 +607,7 @@ def _excluded_text(count: int) -> str:
 
 def _run_record_parts(batch: _Batch, loaded: int) -> list[str]:
     """What cli batch selected and ran, set against the certificates that loaded. With no record the page says so and
-    gives no numbers. loaded is the count of certificates scored on this page (X in "n run X of Y selected").
+    gives no numbers. loaded is the count of certificates scored on this page (shown as "certificates loaded").
     """
     record = batch.record
     if record is None:
@@ -614,9 +615,11 @@ def _run_record_parts(batch: _Batch, loaded: int) -> list[str]:
             return [f"<p>{BATCH_NOT_LOADED} {SEE_ERRORS}</p>"]
         return [f"<p>{BATCH_NOT_AVAILABLE}.</p>"]
     selected = record["selected"]
+    not_run_count = len(record["not_run"])
     lead = (
-        f"<p>n run {loaded} of {selected} selected. The {loaded} counts the certificates loaded and scored on this page, "
-        f"which can include ones from earlier runs. The batch itself ran {record['run']} of the selected instances.</p>"
+        f"<p>Run by this batch: {record['run']} of {selected} selected "
+        f"(already had a certificate: {record['already_certified']}; not run: {not_run_count}).</p>"
+        f"<p>certificates loaded: {loaded} (scored on this page; this can include certificates from earlier runs).</p>"
     )
     counts = _kv_table(
         "Selection record counts",
@@ -626,8 +629,8 @@ def _run_record_parts(batch: _Batch, loaded: int) -> list[str]:
             ("Valid", record["valid"]),
             ("Selected", selected),
             ("Run by this batch", record["run"]),
-            ("Already certified", record["already_certified"]),
-            ("Not run", len(record["not_run"])),
+            ("Already has a certificate", record["already_certified"]),
+            ("Not run", not_run_count),
             ("Started", record["started"]),
             ("Updated", record["updated"]),
         ],
