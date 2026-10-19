@@ -21,6 +21,7 @@ Check, in order:
 6. **Untrusted text.** Task repos, attacker output, web and model text are handled as data, and model output is
    schema-validated.
 7. **Honest numbers.** Gates, hole labels and scores are computed in code; results report n and raw counts.
+8. **Leak check.** No `.env` value, `/Users/` path or owner name in the diff.
 
 Output one line per finding: `path:line: <critical|high|medium|low>: <problem>. <fix>.` Then
 `verdict: merge` or `verdict: fix first`. No praise.

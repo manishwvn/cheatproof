@@ -330,6 +330,8 @@ def test_reset_over_budget_leaves_no_live_sandbox(tmp_path):
 
 def test_budget_defaults_to_env_ledger(tmp_path, monkeypatch):
     monkeypatch.setenv("SPEND_LEDGER", str(tmp_path / "ledger.json"))
+    monkeypatch.setenv("SPEND_CAP_USD", "20")
+    monkeypatch.setenv("DAILY_CAP_USD", "4")
     fake = FakeDocker()
     with make_docker(fake).start(ENV):
         pass
