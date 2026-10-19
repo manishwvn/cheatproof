@@ -19,13 +19,14 @@
   Cycle 22:24: container tmpfs, per-start disk check and owner-scoped leftover sweep (T21, #16); `cheatproof batch`
   with resume, not-run rows, budget and cost-check stops and `batch.json` run counts in report and site (T18, #17).
   1332 tests.
-- **Next for the routine:** no runnable task until T01's sandbox step (U3) or the planner unblocks T08; T11 (video
-  script) opens 2026-10-21. T08 needs T01, plus T16 and T22 from the planner.
+- **Next for the routine:** T08 (eval run) is blocked by U12: the Docker image cap (6) counts colima's 10 images
+  from other projects. After U12, T08 runs on Docker (colima, x86_64 emulation). T11 opens 2026-10-21.
 - **Certificates:** schema 2 since #15; schema 1 files are refused (none are committed).
 - **Planner:** T22 (U11): Docker runs are booked at $0.05 each in `budget.py`, so the $4 daily cap would halt the
   40-task Docker run near task 16; plus `llm.py` timeout, workflow pins and git-ignoring `results/traces/`.
 - **Planner:** T16 (U9) attack strategy prompts and the Tavily budget counter; needed before live attacks (T08).
-- **Owner blockers:** U3 (Sandboxes access), U7 (no Docker daemon on the Mac, and only 16 GB free disk). U10: merge
+- **Owner blockers:** U12 (Docker image cap blocks T08; by Oct 20), U3 (Sandboxes access). U7: colima is installed
+  and runs (22 GB free on Oct 19). U10: merge
   PR #10 (planner-merge). U1 done
   2026-10-18: promo applied, key in `.env`, caps 20/4.
 - **Risk:** the Oct 21 go/no-go needs live attacker runs: T16 (planner) and an executor (U3 or U7) by Oct 20.

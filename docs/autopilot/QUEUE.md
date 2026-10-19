@@ -179,7 +179,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — in-progress (cycle 2026-10-19T02:23:53-05:00) — needs T07, T16, T17, T18, T19, T20, T22
+### T08 Eval run and results with raw counts — size M — waiting: U12 (Docker image cap) — needs T07, T16, T17, T18, T19, T20, T22
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
@@ -196,6 +196,11 @@ $20/$4 caps. Write `cheatproof.strategies.COMBINED` (or one named strategy) to a
 `--system-prompt-file`; the network strategy needs `TAVILY_API_KEY` and `make_tavily_search(budget)`. If the Docker
 daemon is down, `open -a Docker`; keep free disk above `MIN_FREE_DISK_GB` (18 GB free on 2026-10-19). Start with
 5 tasks to measure cost and time per task, then scale to 40 within the daily cap. Go/no-go is 2026-10-21.
+Routine 2026-10-19 02:24: colima's existing VM started (aarch64; qemu-x86_64 binfmt present, so the x86_64
+task images should run under emulation). Task specs fetched (rebench scanned 1000, 243 valid, 30 selected;
+Verified scanned 500, 192 valid, 10 selected, 8 of them sphinx). Blocked before the first pull: colima already holds
+10 images from other projects, so `DOCKER_IMAGE_CAP=6` refuses every task image (U12). Routines may neither delete
+images nor change caps. No model calls; spend $0. Flip back to `todo` when U12 is done.
 ### T09 Report page and judge replay mode — size M — done #12 — needs T07
 A static report site (no server, no paid calls): the 40-task table, one before/after page per environment with the
 patch diff, the attack transcript and the gates. Judge mode replays recorded runs, labelled "recorded". Builds from
@@ -237,6 +242,15 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
+- **U12 Docker image cap blocks T08** (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): colima
+  (profile `default`) holds 10 images from other projects (about 6 GB), and `DOCKER_IMAGE_CAP=6` counts every local
+  image, so the executor refuses each task image before pulling. Pick one:
+  1. In `.env`, set `DOCKER_IMAGE_CAP=16` (10 existing plus up to 6 task images; `MIN_FREE_DISK_GB=10` still guards
+     the disk, 22 GB free on Oct 19), or
+  2. prune the images you no longer need (`docker images`, then `docker rmi <name>`) until fewer than 6 remain.
+  Then start colima (`colima start`) or leave it running, and tell the lead "U12 done". The routine flips T08 to
+  `todo`. Note: this run started colima and could not stop it (the stop call was refused); stop it with
+  `colima stop` if you need the memory.
 - ~~**U1 Nebius Token Factory account, credits and key**~~ Done 2026-10-18: promo applied, credit received, key in
   `.env`, caps set to 20 and 4.
   **U1 steps (kept)** (ready 2026-10-16; status 2026-10-18: account exists, billing

@@ -184,3 +184,17 @@ progress 73% (12/22 tasks done, 10 days to submit)
 - Merged #10 (T15 review fixes; installed the pre-push hook) and #18 (T22 free local-run and Tavily counters, Docker
   sessions off the sandbox caps; T16 attacker strategies; CI actions pinned by SHA, gitleaks sha256 checked).
 - Built by two Haiku 5.5 builders in parallel, Opus final review. T08 unblocked on the Docker executor.
+
+## 2026-10-19 routine (cycle 2026-10-19T02:23:53-05:00)
+progress 77% (15/22 tasks done, 9 days to submit)
+- T08 (eval run) claimed, then blocked before any paid call: the Docker image cap counts colima's 10 images from other
+  projects, so every task image is refused. Owner item U12 added and alerted; T08 is `waiting: U12`.
+- Colima's existing VM was started (it has x86_64 emulation); task specs fetched and cached (30 rebench, 10 Verified).
+- No other task is runnable: T10 needs T08, T11 opens 2026-10-21, T12 opens 2026-10-27.
+- Spend: $0 (no model, sandbox or Tavily calls).
+
+- Refused tool call (auto mode): one Bash call that removed the clean, unused worktree `../cheatproof-wt/t08-eval`
+  (branch `t08-eval`, no commits) and stopped colima. Not retried. The worktree and the running colima VM remain;
+  the next run or the planner can remove the worktree, and the owner can `colima stop`.
+- Verified Docker 29.5.2 under colima. 8 of the 10 Verified picks are sphinx; expect a sphinx-heavy Verified slice.
+- Lesson: check shared-daemon state (image count, disk) against the executor guards before claiming a live-run task.
