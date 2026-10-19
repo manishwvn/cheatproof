@@ -10,21 +10,26 @@ import json
 import os
 from pathlib import Path
 
+ENV_LOADED = False
+if __name__ == "__main__":
+    # Load .env before the cheatproof imports below: llm.py reads MAX_OUTPUT_TOKENS when it is imported.
+    # Only when run as a script, so importing this module (the tests do) never reads .env.
+    from cheatproof.envfile import load_env
+
+    ENV_LOADED = load_env()
+
 from cheatproof.budget import Budget, BudgetExceeded
-from cheatproof.envfile import load_env
 from cheatproof.llm import GuardedLLM
 from cheatproof.sanitize import assert_clean, sanitize
 
 
 def list_nvidia_models(llm: GuardedLLM) -> dict:
-    # VERIFY: model listing assumed free, so it skips the budget.
-    page = llm.client.models.list()
-    ids = [m.id for m in page.data]
+    ids = llm.list_models()  # listing is free, see GuardedLLM.list_models
     nvidia = sorted(i for i in ids if "nemotron" in i.lower() or i.lower().startswith("nvidia/"))
     print(f"{len(ids)} models total, NVIDIA/Nemotron:")
     for i in nvidia:
         print(f"  {i}")
-    return page.model_dump(mode="json")
+    return {"object": "list", "data": [{"id": i, "object": "model"} for i in ids]}
 
 
 def call_cheap_model(llm: GuardedLLM):
@@ -66,7 +71,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--record", metavar="DIR", type=Path, help="save sanitized fixtures into DIR")
     args = parser.parse_args(argv)
 
-    print(f".env loaded from main checkout: {load_env()}")
+    print(f".env loaded from main checkout: {ENV_LOADED}")
     budget = Budget.from_env()
     llm = GuardedLLM(budget)
     print(f"ledger before: {budget.snapshot()}")

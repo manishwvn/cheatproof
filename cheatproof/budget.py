@@ -7,9 +7,10 @@ ledger is a JSON file guarded by an OS file lock, so parallel processes share on
 
 Fail closed. The total cap must be a finite number above 0 and at most MAX_TOTAL_CAP_USD. The
 daily cap must be a finite number above 0 and at most the total cap. Every price must be a finite
-number above 0, and the sandbox run cap a whole number of 0 or more. A missing, empty, nan, inf,
-zero, negative or too-large money value, or a bad run cap, raises BudgetExceeded before anything
-is spent, because a bad value must never read as "unlimited". A ledger that does not match this
+number above 0, and the sandbox, local and Tavily call caps whole numbers of 0 or more. A missing,
+empty, nan, inf, zero, negative or too-large money value, or a bad count cap, raises BudgetExceeded
+before anything is spent, because a bad value must never read as "unlimited". Local Docker runs and
+Tavily calls book no money; they only count against their caps. A ledger that does not match this
 shape is refused the same way, never repaired. snapshot() only reads the ledger and never writes it.
 """
 
@@ -74,13 +75,19 @@ def _total_cap(value: object) -> float:
     return number
 
 
-def _run_cap(value: object) -> int:
-    # 0 is allowed: it means no sandbox runs, which spends nothing.
+def _count_cap(label: str, value: object) -> int:
+    # 0 is allowed: it means no runs or calls of this kind, which spends nothing.
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise BudgetExceeded(
-            f"sandbox_run_cap (SANDBOX_RUN_CAP) must be a whole number, 0 or more, got {value!r}"
-        )
+        raise BudgetExceeded(f"{label} must be a whole number, 0 or more, got {value!r}")
     return value
+
+
+def _count_env(name: str, default: str) -> int:
+    raw = os.environ.get(name, default)
+    try:
+        return int(raw)
+    except (ValueError, OverflowError):
+        raise BudgetExceeded(f"{name} must be a whole number, 0 or more, got {raw!r}") from None
 
 
 def _checked_price(label: str, price: Price) -> Price:
@@ -162,6 +169,8 @@ class Budget:
         prices: dict[str, Price] | None = None,
         sandbox_run_usd: float = 0.05,
         default_price: Price = DEFAULT_PRICE,
+        local_run_cap: int = 2000,
+        tavily_call_cap: int = 200,
     ) -> None:
         # Every cap and price is checked here too, so a direct construction fails closed as well.
         self.ledger = Path(ledger)
@@ -172,11 +181,14 @@ class Budget:
                 f"daily cap (DAILY_CAP_USD) ${self.daily_cap_usd:g} must not exceed "
                 f"the total cap (SPEND_CAP_USD) ${self.total_cap_usd:g}"
             )
-        self.sandbox_run_cap = _run_cap(sandbox_run_cap)
+        self.sandbox_run_cap = _count_cap("sandbox_run_cap (SANDBOX_RUN_CAP)", sandbox_run_cap)
         # VERIFY: per-run sandbox price is not documented; this conservative guess counts toward the money caps.
         self.sandbox_run_usd = _positive("sandbox run price (SANDBOX_RUN_USD)", sandbox_run_usd)
         self.prices = {model: _checked_price(f"price for {model}", p) for model, p in (prices or {}).items()}
         self.default_price = _checked_price("default price", default_price)
+        # Count-only caps: local Docker runs and Tavily calls book $0, so they never touch the money caps.
+        self.local_run_cap = _count_cap("local_run_cap (LOCAL_RUN_CAP)", local_run_cap)
+        self.tavily_call_cap = _count_cap("tavily_call_cap (TAVILY_CALL_CAP)", tavily_call_cap)
 
     @classmethod
     def from_env(cls) -> Budget:
@@ -184,13 +196,9 @@ class Budget:
         ledger = _ledger_path()
         total_cap = _env_cap("SPEND_CAP_USD")
         daily_cap = _env_cap("DAILY_CAP_USD")
-        raw_run_cap = os.environ.get("SANDBOX_RUN_CAP", "250")
-        try:
-            run_cap = int(raw_run_cap)
-        except (ValueError, OverflowError):
-            raise BudgetExceeded(
-                f"SANDBOX_RUN_CAP must be a whole number, 0 or more, got {raw_run_cap!r}"
-            ) from None
+        run_cap = _count_env("SANDBOX_RUN_CAP", "250")
+        local_cap = _count_env("LOCAL_RUN_CAP", "2000")
+        tavily_cap = _count_env("TAVILY_CALL_CAP", "200")
         return cls(
             ledger=ledger,
             total_cap_usd=total_cap,
@@ -198,6 +206,8 @@ class Budget:
             sandbox_run_cap=run_cap,
             prices=_env_prices(),
             sandbox_run_usd=_positive("SANDBOX_RUN_USD", os.environ.get("SANDBOX_RUN_USD", "0.05")),
+            local_run_cap=local_cap,
+            tavily_call_cap=tavily_cap,
         )
 
     def price(self, model: str) -> Price:
@@ -247,6 +257,15 @@ class Budget:
             raise BudgetExceeded(
                 f"ledger {self.ledger} has sandbox_runs that is not a whole number, 0 or more; fix it by hand"
             )
+        # Optional: ledgers written before these counters existed lack them, and that reads as 0.
+        for key in ("local_runs", "tavily_calls"):
+            if key in state:
+                count = state[key]
+                if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                    raise BudgetExceeded(
+                        f"ledger {self.ledger} has {key} that is not a whole number, 0 or more; "
+                        "fix it by hand"
+                    )
         # Stored as None (not halted), a bool, or a non-empty string. An empty string would read as not halted.
         halted = state.get("halted")
         if halted is not None and not isinstance(halted, bool) and not (isinstance(halted, str) and halted):
@@ -299,6 +318,26 @@ class Budget:
             hold = self._charge(s, "sandbox-run", self.sandbox_run_usd)
             s["sandbox_runs"] += 1
         return hold
+
+    def reserve_local_run(self) -> None:
+        """Count one local Docker run against local_run_cap. Free: books no money."""
+        self._reserve_count("local_runs", self.local_run_cap, "local run cap")
+
+    def reserve_tavily_call(self) -> None:
+        """Count one Tavily search call against tavily_call_cap. Free credits: books no money."""
+        self._reserve_count("tavily_calls", self.tavily_call_cap, "tavily call cap")
+
+    def _reserve_count(self, key: str, cap: int, label: str) -> None:
+        # One lock for the halt flag, the cap check and the increment, so parallel callers cannot overshoot.
+        # A missing key is an old ledger and counts as 0. A refused call writes nothing.
+        with self._locked() as s:
+            halted = s.get("halted")
+            if halted:
+                raise BudgetExceeded(f"budget halted: {halted}")
+            used = s.get(key, 0)
+            if used >= cap:
+                raise BudgetExceeded(f"{label} {cap} reached")
+            s[key] = used + 1
 
     def halt(self, reason: str) -> None:
         """Stop all paid calls until a person clears `halted` in the ledger file."""

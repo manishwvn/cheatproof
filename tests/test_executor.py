@@ -135,7 +135,20 @@ class FakeClock:
 
 
 def make_budget(tmp_path, runs=5):
-    return Budget(tmp_path / "ledger.json", total_cap_usd=10.0, daily_cap_usd=10.0, sandbox_run_cap=runs)
+    # Docker sessions count local runs, so `runs` sets local_run_cap. sandbox_run_cap is 0 here: if a
+    # Docker start ever reserved a sandbox run instead, these tests would fail with "sandbox run cap 0".
+    return Budget(
+        tmp_path / "ledger.json",
+        total_cap_usd=10.0,
+        daily_cap_usd=10.0,
+        sandbox_run_cap=0,
+        local_run_cap=runs,
+    )
+
+
+def local_runs(budget):
+    # The key is absent until the first local run is booked, which reads as 0.
+    return budget.snapshot().get("local_runs", 0)
 
 
 def make_docker(runner, *, disk_gb=100.0, image_cap=6, platform="linux", clock=None, pid=None):
@@ -296,13 +309,13 @@ def test_each_start_and_reset_reserves_one_run_before_docker_run(tmp_path):
     budget = make_budget(tmp_path)
     fake = FakeDocker()
     seen = []
-    fake.on_run = lambda: seen.append(budget.snapshot()["sandbox_runs"])
+    fake.on_run = lambda: seen.append(local_runs(budget))
     s = make_docker(fake).start(ENV, budget)
-    assert budget.snapshot()["sandbox_runs"] == 1
+    assert local_runs(budget) == 1
     s.reset()
     s.close()
     assert seen == [1, 2]
-    assert budget.snapshot()["sandbox_runs"] == 2
+    assert local_runs(budget) == 2
     first, second = run_name(fake, 0), run_name(fake, 1)
     calls = [argv for argv, _ in fake.log]
     rm = calls.index(["docker", "rm", "-f", first])
@@ -313,9 +326,45 @@ def test_each_start_and_reset_reserves_one_run_before_docker_run(tmp_path):
 
 def test_budget_exceeded_prevents_container_start(tmp_path):
     fake = FakeDocker()
-    with pytest.raises(BudgetExceeded, match="sandbox run cap"):
+    with pytest.raises(BudgetExceeded, match="local run cap 0 reached"):
         make_docker(fake).start(ENV, make_budget(tmp_path, runs=0))
     assert fake.runs() == []
+
+
+def test_docker_start_books_a_local_run_and_no_money_or_sandbox_run(tmp_path):
+    budget = make_budget(tmp_path)
+    with make_docker(FakeDocker()).start(ENV, budget):
+        pass
+    s = budget.snapshot()
+    assert s["local_runs"] == 1
+    assert s["sandbox_runs"] == 0
+    assert s["total_usd"] == 0.0
+
+
+def test_local_run_cap_refuses_a_new_docker_start(tmp_path):
+    budget = Budget(
+        tmp_path / "ledger.json",
+        total_cap_usd=10.0,
+        daily_cap_usd=10.0,
+        sandbox_run_cap=100,
+        local_run_cap=1,
+    )
+    fake = FakeDocker()
+    with make_docker(fake).start(ENV, budget):
+        pass
+    with pytest.raises(BudgetExceeded, match="local run cap 1 reached"):
+        make_docker(fake).start(ENV, budget)
+    assert len(fake.runs()) == 1
+
+
+def test_halted_budget_blocks_a_docker_start_and_books_nothing(tmp_path):
+    budget = make_budget(tmp_path)
+    budget.halt("HTTP 402 from Token Factory")
+    fake = FakeDocker()
+    with pytest.raises(BudgetExceeded, match="budget halted"):
+        make_docker(fake).start(ENV, budget)
+    assert fake.runs() == []
+    assert local_runs(budget) == 0
 
 
 def test_reset_over_budget_leaves_no_live_sandbox(tmp_path):
@@ -335,7 +384,7 @@ def test_budget_defaults_to_env_ledger(tmp_path, monkeypatch):
     fake = FakeDocker()
     with make_docker(fake).start(ENV):
         pass
-    assert make_budget(tmp_path).snapshot()["sandbox_runs"] == 1
+    assert local_runs(make_budget(tmp_path)) == 1
 
 
 def test_missing_ledger_env_fails_closed(monkeypatch):
@@ -361,7 +410,7 @@ def test_disk_guard_refuses_new_image_before_any_pull(tmp_path):
     with pytest.raises(ExecutorRefused, match="MIN_FREE_DISK_GB"):
         make_docker(fake, disk_gb=5.0).start(ENV, budget)
     assert fake.runs() == []
-    assert budget.snapshot()["sandbox_runs"] == 0
+    assert local_runs(budget) == 0
     assert_refused_before_docker_was_touched(fake)
 
 
@@ -371,7 +420,7 @@ def test_disk_guard_applies_to_a_local_image_too(tmp_path):
     with pytest.raises(ExecutorRefused, match="MIN_FREE_DISK_GB"):
         make_docker(fake, disk_gb=5.0).start(ENV, budget)
     assert fake.runs() == []
-    assert budget.snapshot()["sandbox_runs"] == 0
+    assert local_runs(budget) == 0
     assert_refused_before_docker_was_touched(fake)
 
 
@@ -395,7 +444,7 @@ def test_reset_refuses_when_disk_has_dropped_and_starts_nothing(tmp_path):
     assert len(fake.argvs(["docker", "info"])) == info_calls  # no daemon check after the refusal
     assert not any(argv[:1] == ["open"] for argv, _ in fake.log)
     assert len(fake.runs()) == 1
-    assert budget.snapshot()["sandbox_runs"] == 1
+    assert local_runs(budget) == 1
     with pytest.raises(RuntimeError, match="reset"):
         s.run("true", 5)
     s.close()
@@ -474,7 +523,7 @@ def test_daemon_down_on_mac_opens_docker_then_refuses_after_120s(tmp_path):
     assert ["open", "-a", "Docker"] in [argv for argv, _ in fake.log]
     assert clock.sleeps == [5] * 24
     assert fake.runs() == []
-    assert budget.snapshot()["sandbox_runs"] == 0
+    assert local_runs(budget) == 0
 
 
 def test_daemon_that_comes_up_after_open_is_used(tmp_path):
@@ -548,7 +597,7 @@ def test_reset_that_cannot_remove_the_old_container_starts_nothing(tmp_path):
     with pytest.raises(RuntimeError, match="device or resource busy"):
         s.reset()
     assert len(fake.runs()) == 1
-    assert budget.snapshot()["sandbox_runs"] == 1
+    assert local_runs(budget) == 1
     s.close()
     assert fake.names_removed() == [run_name(fake), run_name(fake)]
 
@@ -729,7 +778,7 @@ def test_host_timeout_kills_client_and_resets_the_sandbox(tmp_path):
     assert res.timed_out and res.exit_code == TIMEOUT_EXIT_CODE
     assert len(fake.runs()) == 2  # a fresh container replaced the old one
     assert fake.names_removed() == [run_name(fake, 0), run_name(fake, 1)]
-    assert budget.snapshot()["sandbox_runs"] == 2
+    assert local_runs(budget) == 2
 
 
 def test_run_output_is_capped_per_stream(tmp_path):
@@ -880,6 +929,7 @@ def test_sandbox_env_is_unavailable_and_spends_nothing(tmp_path, monkeypatch):
     with pytest.raises(ExecutorUnavailable, match="U3"):
         start(ENV, budget)
     assert budget.snapshot()["sandbox_runs"] == 0
+    assert local_runs(budget) == 0
 
 
 def test_sandbox_stub_refuses_directly(tmp_path):

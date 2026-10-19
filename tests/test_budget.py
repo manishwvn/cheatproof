@@ -403,6 +403,8 @@ def cap_env(monkeypatch, tmp_path):
         "DAILY_CAP_USD": "4",
         "SANDBOX_RUN_CAP": "250",
         "SANDBOX_RUN_USD": "0.05",
+        "LOCAL_RUN_CAP": "2000",
+        "TAVILY_CALL_CAP": "200",
         "MODEL_PRICES_JSON": "{}",
     }
     for name, value in values.items():
@@ -561,3 +563,165 @@ def test_snapshot_creates_nothing_when_no_ledger_exists(tmp_path):
     b = Budget(tmp_path / "missing" / "ledger.json", 1.0, 1.0, 1)
     assert b.snapshot() == {"total_usd": 0.0, "days": {}, "sandbox_runs": 0, "halted": None}
     assert not (tmp_path / "missing").exists()
+
+
+# --- local runs and Tavily calls: counted against a cap, never priced -----------------------------
+
+
+def make_counted(tmp_path, local=3, tavily=2):
+    return Budget(
+        tmp_path / "ledger.json",
+        1.0,
+        1.0,
+        2,
+        prices={"m": PRICE},
+        local_run_cap=local,
+        tavily_call_cap=tavily,
+    )
+
+
+def test_local_run_cap_is_enforced(tmp_path):
+    b = make_counted(tmp_path, local=2)
+    assert b.reserve_local_run() is None
+    b.reserve_local_run()
+    with pytest.raises(BudgetExceeded, match="local run cap 2 reached"):
+        b.reserve_local_run()
+    assert b.snapshot()["local_runs"] == 2
+
+
+def test_tavily_call_cap_is_enforced(tmp_path):
+    b = make_counted(tmp_path, tavily=1)
+    b.reserve_tavily_call()
+    with pytest.raises(BudgetExceeded, match="tavily call cap 1 reached"):
+        b.reserve_tavily_call()
+    assert b.snapshot()["tavily_calls"] == 1
+
+
+def test_local_and_tavily_counters_book_no_money(tmp_path):
+    b = make_counted(tmp_path, local=50, tavily=50)
+    for _ in range(50):
+        b.reserve_local_run()
+        b.reserve_tavily_call()
+    s = b.snapshot()
+    assert s["local_runs"] == 50 and s["tavily_calls"] == 50
+    assert s["total_usd"] == 0.0
+    assert s["days"] == {}
+    assert s["sandbox_runs"] == 0
+
+
+def test_local_runs_and_sandbox_runs_have_separate_caps(tmp_path):
+    b = make_counted(tmp_path, local=1)
+    b.reserve_local_run()
+    with pytest.raises(BudgetExceeded, match="local run cap"):
+        b.reserve_local_run()
+    b.reserve_sandbox_run()  # the sandbox cap is untouched by local runs
+    assert b.snapshot()["sandbox_runs"] == 1
+    assert b.snapshot()["total_usd"] == pytest.approx(0.05)
+
+
+def test_halt_blocks_local_runs_and_tavily_calls_without_counting(tmp_path):
+    b = make_counted(tmp_path)
+    b.halt("HTTP 402 from Token Factory")
+    with pytest.raises(BudgetExceeded, match="budget halted: HTTP 402"):
+        b.reserve_local_run()
+    with pytest.raises(BudgetExceeded, match="budget halted: HTTP 402"):
+        b.reserve_tavily_call()
+    s = b.snapshot()
+    assert s.get("local_runs", 0) == 0 and s.get("tavily_calls", 0) == 0
+
+
+def test_zero_counter_caps_mean_no_local_runs_or_tavily_calls(tmp_path):
+    b = make_counted(tmp_path, local=0, tavily=0)
+    with pytest.raises(BudgetExceeded, match="local run cap 0 reached"):
+        b.reserve_local_run()
+    with pytest.raises(BudgetExceeded, match="tavily call cap 0 reached"):
+        b.reserve_tavily_call()
+    assert b.snapshot()["total_usd"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("method", "key"),
+    [("reserve_local_run", "local_runs"), ("reserve_tavily_call", "tavily_calls")],
+)
+def test_parallel_counted_reservations_never_pass_the_cap(tmp_path, method, key):
+    # Each reservation opens its own lock file handle, so threads contend like separate processes.
+    from concurrent.futures import ThreadPoolExecutor
+
+    b = make_counted(tmp_path, local=5, tavily=5)
+    reserve = getattr(b, method)
+
+    def try_call(_):
+        try:
+            reserve()
+            return True
+        except BudgetExceeded:
+            return False
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(pool.map(try_call, range(40)))
+    assert sum(results) == 5
+    assert b.snapshot()[key] == 5
+    assert b.snapshot()["total_usd"] == 0.0
+
+
+def test_old_ledger_without_the_new_counters_still_works(tmp_path):
+    write_ledger(tmp_path, total_usd=0.5, sandbox_runs=1)  # no local_runs or tavily_calls keys
+    b = make_counted(tmp_path, local=1, tavily=1)
+    assert b.snapshot()["total_usd"] == pytest.approx(0.5)
+    b.reserve_local_run()  # a missing counter reads as 0, so the first call passes
+    b.reserve_tavily_call()
+    s = b.snapshot()
+    assert s["local_runs"] == 1 and s["tavily_calls"] == 1
+    assert s["total_usd"] == pytest.approx(0.5) and s["sandbox_runs"] == 1
+
+
+@pytest.mark.parametrize("key", ["local_runs", "tavily_calls"])
+@pytest.mark.parametrize("value", [math.nan, -1, 1.5, True, "3", None, [1]])
+def test_malformed_counter_in_ledger_is_refused_by_every_read(tmp_path, key, value):
+    write_ledger(tmp_path, **{key: value})
+    b = make_counted(tmp_path)
+    with pytest.raises(BudgetExceeded, match="fix it by hand"):
+        b.snapshot()
+    with pytest.raises(BudgetExceeded):
+        b.reserve_local_run()
+    with pytest.raises(BudgetExceeded):
+        b.reserve_tavily_call()
+    with pytest.raises(BudgetExceeded):
+        b.reserve_sandbox_run()
+
+
+@pytest.mark.parametrize("bad", [-1, True, 1.5, None, "3", math.nan])
+@pytest.mark.parametrize("kwarg", ["local_run_cap", "tavily_call_cap"])
+def test_constructor_refuses_bad_counter_caps(tmp_path, kwarg, bad):
+    with pytest.raises(BudgetExceeded, match=kwarg):
+        Budget(tmp_path / "ledger.json", 1.0, 1.0, 1, **{kwarg: bad})
+
+
+def test_counter_caps_default_in_the_constructor(tmp_path):
+    b = Budget(tmp_path / "ledger.json", 1.0, 1.0, 1)
+    assert b.local_run_cap == 2000
+    assert b.tavily_call_cap == 200
+
+
+def test_counter_caps_default_when_unset(cap_env, monkeypatch):
+    monkeypatch.delenv("LOCAL_RUN_CAP")
+    monkeypatch.delenv("TAVILY_CALL_CAP")
+    b = Budget.from_env()
+    assert b.local_run_cap == 2000
+    assert b.tavily_call_cap == 200
+
+
+def test_counter_caps_are_read_from_env(cap_env, monkeypatch):
+    monkeypatch.setenv("LOCAL_RUN_CAP", "7")
+    monkeypatch.setenv("TAVILY_CALL_CAP", "0")
+    b = Budget.from_env()
+    assert b.local_run_cap == 7
+    assert b.tavily_call_cap == 0
+
+
+@pytest.mark.parametrize("name", ["LOCAL_RUN_CAP", "TAVILY_CALL_CAP"])
+@pytest.mark.parametrize("value", ["-1", "1.5", "nan", "inf", "abc", "", "1e3"])
+def test_invalid_counter_cap_env_fails_closed(cap_env, monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(BudgetExceeded, match=name):
+        Budget.from_env()

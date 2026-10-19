@@ -6,6 +6,9 @@
 LEARNING.md
 # Runtime state (spend ledger, run traces)
 runs/
+# Raw attacker step args: never committed unsanitized
+results/traces/
+results/reports/
 # Python
 .venv/
 __pycache__/

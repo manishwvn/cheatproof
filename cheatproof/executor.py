@@ -2,8 +2,9 @@
 
 Local Docker runs each session in a container with no network (unless EnvSpec asks), CPU, memory
 and PID limits, and no host mounts. Files reach the container over stdin. Token Factory Sandboxes
-is a stub until access is granted (U3). Every session start, including a reset, reserves one
-sandbox run in cheatproof/budget.py before the container exists.
+is a stub until access is granted (U3). Every Docker session start, including a reset, counts one
+local run in cheatproof/budget.py before the container exists. Local runs are free and count only
+toward LOCAL_RUN_CAP. A paid Sandboxes session must reserve a sandbox run instead.
 """
 
 from __future__ import annotations
@@ -492,7 +493,8 @@ class DockerSession(Session):
         self._executor._check_free_disk()  # first: a refusal never opens Docker Desktop
         self._executor._ensure_daemon()
         self._executor._preflight(self._env.image)
-        self._budget.reserve_sandbox_run()  # before the container exists; BudgetExceeded propagates
+        # Local Docker is free: books $0 and counts only toward LOCAL_RUN_CAP, not the money caps.
+        self._budget.reserve_local_run()  # before the container exists; BudgetExceeded propagates
         self._name, self._cid = self._executor._create(self._env)
         self._base = ""
         try:
@@ -586,6 +588,7 @@ class SandboxExecutor:
     """
 
     def start(self, env: EnvSpec, budget: Budget | None = None) -> Session:
+        # When access lands, this paid session must call reserve_sandbox_run(), not reserve_local_run().
         raise ExecutorUnavailable("Sandboxes access pending (U3)")
 
 
