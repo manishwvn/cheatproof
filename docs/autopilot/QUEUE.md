@@ -124,7 +124,7 @@ The four strategy hints for T04 (git-history, test-edit, hard-code, network) as 
 text, and a `budget.reserve_tavily_call()` counter enforcing `TAVILY_CALL_CAP` plus a host-side search callable
 for `attack(search=...)`. `budget.py` is a planner-merge path, and the routine left the prompt text to the planner.
 
-### T17 Record traces and attack diffs; keep paid runs (audit 2026-10-18) — size M — todo
+### T17 Record traces and attack diffs; keep paid runs (audit 2026-10-18) — size M — in-progress (cycle 2026-10-18T21:24:24-05:00)
 From the first daily audit. `cli.py` calls `attack` with no `trace_path`, so no trace is written, and
 `report.attacks` (the raw diffs) is dropped; the site reads `attack["final_diff"]`, which `harden._attack_summary`
 never emits. Pass `trace_path=results/traces/<certificate stem>.jsonl`, and write the sanitized attack diff beside
@@ -141,7 +141,7 @@ halt) instead of stopping, and stop cleanly at the daily cap. Put the selection 
 (`non_pytest_id`, no `docker_image`) and selected counts into the score and the site, so n run versus n selected is
 honest. Re-check free disk before each task. Never prune images (the owner does, between batches).
 
-### T19 Honest outcomes in certificates and scores (audit 2026-10-18) — size M — todo
+### T19 Honest outcomes in certificates and scores (audit 2026-10-18) — size M — in-progress (cycle 2026-10-18T21:24:24-05:00)
 (1) `harden.py:314`: an empty final diff, or an attack with no write step, is a `no_attempt` outcome: never
 certified, counted separately. (2) `certify.py`: split `certified` into `certified_unhardened` (never hacked) and
 `certified_hardened`; record executor, attacks per round, `max_output_tokens`, `cmd_timeout` and strategy label in
