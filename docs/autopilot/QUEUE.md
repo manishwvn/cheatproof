@@ -63,6 +63,16 @@ them toward `SANDBOX_RUN_CAP` only (a count-only path like `reserve_local_run()`
 fixture of the free-tier statement's effect (ledger unchanged after one run), and update ADR 0001/0002. `budget.py` is
 a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
 
+### T24 Rename the product to RewardSeal — size M — todo
+"Cheatproof" is another company's product name (CheatProof.ai). Rename every user-facing and public mention to
+**RewardSeal**: README, report site, CLI name and help (`rewardseal harden <env-id>`), certificate `tool` field (bump
+the schema version, keep reading old certificates), docs (CLAUDE.md, pitches, ADRs, STATUS, PLAN, prize-fit), video
+script, LEARNING notes via the learning-notes agent. Also rename the Python package `cheatproof/` → `rewardseal/` and
+the console script, with one grep-checked sweep (`grep -rni cheatproof` must only hit history notes, the state-folder
+path `~/.cheatproof-autopilot`, the worktree path and the GitHub URL, which stay until the flip). Do it when no other
+task PR is open, in one PR, built by Haiku, Opus review; touches planner-merge paths, so add a USER item for the
+planner to merge. Do not rename the local folder, the state folder or the scheduled task.
+
 ## Milestone: hero path
 
 ### T03 Task loader with gold and empty gates — size M — done #7 — needs T02
@@ -251,6 +261,8 @@ Fresh clone, follow the README exactly, run tests and one replay. Pre-flip: full
 `git log --all --oneline -- LEARNING.md` empty; full-history grep finds no personal details. Scan patterns include
 `/Users/`, the owner's username and promo codes; docs use `~` or relative paths. Report to the owner.
 
+At the flip (owner, right after making the repo public): protect `main` (block force pushes and deletion, include
+administrators), and rename the GitHub repo to `rewardseal` in Settings (GitHub redirects the old URL).
 ### T13 Learning pack — size M — todo — needs T12
 Fill `LEARNING.md` interview questions, complete the glossary, re-read the whole file for accuracy.
 
@@ -294,10 +306,10 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
   in `.env`; T23 checks access each cycle) (ready after U1): https://tokenfactory.nebius.com/sandboxes/about → request access. If the
   profile still shows inactive after a day, email contree@nebius.com with the project ID only (never the key). Docker
   is the fallback; the executor is decided at the Oct 21 go/no-go.
-- **U4 GitHub safety** (ready 2026-10-16): Settings → Billing → set budgets for Actions, Codespaces and Packages to
+- ~~**U4 GitHub safety**~~ Done 2026-10-19: budgets already $0 (Actions, Codespaces, Packages, LFS, AI credits); branch protection needs a public repo, so it moved to T12.  (ready 2026-10-16): Settings → Billing → set budgets for Actions, Codespaces and Packages to
   $0. Repo → Settings → Branches → protect `main`: block force pushes and deletion, include administrators. Do not
   require pull requests (routines push queue claims to `main`).
-- **U5 Final product name** (before any public asset): check that "Cheatproof" is not an existing product's
+- ~~**U5 Final product name**~~ Done 2026-10-19: "Cheatproof" is taken (CheatProof.ai); new product name **RewardSeal**; rename is T24.  (before any public asset): check that "Cheatproof" is not an existing product's
   trademark, or pick another name. The lead can propose options.
 - **U6 Video voice-over and submission** (2026-10-26 to 2026-10-28).
 - **U7 Disk space and a Docker daemon for the fallback** (ready 2026-10-18; needed by 2026-10-20 if U3 is still
