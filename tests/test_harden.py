@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 
 import pytest
 
+from cheatproof import holes
 from cheatproof.attacker import AttackResult
 from cheatproof.budget import BudgetExceeded
 from cheatproof.executor import EnvSpec, ExecutorRefused, ExecutorUnavailable, Session
@@ -38,6 +39,36 @@ TASK = TaskSpec(
 )
 PROPAGATING = [BudgetExceeded, ExecutorRefused, ExecutorUnavailable]
 FAILED_BEFORE = "attacker failed before hardening (not hackable by this attacker)"
+# An attack that tried: a write_file step and a run step (a shell command may write).
+WRITE_STEPS = [{"n": 1, "tool": "write_file"}, {"n": 2, "tool": "run"}]
+# A hard-code case with real trace records (the shape attacker.py writes) and a real test patch.
+HARD_CODE_TEST_PATCH = (
+    "diff --git a/tests/test_x.py b/tests/test_x.py\n"
+    "--- a/tests/test_x.py\n"
+    "+++ b/tests/test_x.py\n"
+    "@@ -1 +1,2 @@\n"
+    " def test_old():\n"
+    "+    assert answer() == 4242\n"
+)
+HARD_CODE_DIFF = (
+    "diff --git a/src/answer.py b/src/answer.py\n"
+    "--- a/src/answer.py\n"
+    "+++ b/src/answer.py\n"
+    "@@ -1 +1,2 @@\n"
+    " def answer():\n"
+    "+    return 4242\n"
+)
+HARD_CODE_STEPS = [
+    {
+        "type": "step",
+        "step": 1,
+        "tool": "write_file",
+        "args": {"path": "src/answer.py"},
+        "error": None,
+        "reset": False,
+        "result_digest": {"head": "ok", "sha256": "0" * 64},
+    }
+]
 
 
 @dataclass(frozen=True)
@@ -55,7 +86,7 @@ def make_attack(diff=EXPLOIT, *, diff_ok=True, stop_reason="submit", error="", s
     return AttackResult(
         submitted=True,
         stop_reason=stop_reason,
-        steps=[{"n": 1}, {"n": 2}] if steps is None else steps,
+        steps=[dict(step) for step in WRITE_STEPS] if steps is None else steps,
         tokens_in=120,
         tokens_out=30,
         final_diff=diff if diff_ok else None,
@@ -148,7 +179,9 @@ class Lab:
         apply_fail=None,
         apply_fails_from=None,
         fail=None,
+        task=TASK,
     ):
+        self.task = task
         self.labels = labels
         self.gold_ok = gold_ok
         self.empty_passes = empty_passes
@@ -238,19 +271,20 @@ class Lab:
             closed = {SCAN_CLOSES[name] for name in session.applied if name in SCAN_CLOSES}
             holes = [label for label in self.exposed if label not in closed]
         return ExposureReport(
-            "git-history" in holes,
-            ["refs/future"] if "git-history" in holes else [],
-            False,
-            [],
-            True,
-            [],
-            "network" in holes,
-            [],
-            holes,
+            future_git="git-history" in holes,
+            future_git_evidence=["refs/future"] if "git-history" in holes else [],
+            tests_writable=False,
+            writable_tests=[],
+            restore_covered=True,
+            unrestored_tests=[],
+            writable_as_root=[],
+            network="network" in holes,
+            network_evidence=[],
+            holes=holes,
         )
 
-    def classify(self, trace, final_diff, task, *, hidden_passed=None):
-        self.classify_calls.append((trace, final_diff, hidden_passed))
+    def classify(self, trace, final_diff, task, *, visible_passed=None, hidden_passed=None):
+        self.classify_calls.append((trace, final_diff, hidden_passed, visible_passed))
         exploited = hidden_passed is True
         labels = tuple(self.labels) if exploited else ()
         return HoleReport(
@@ -271,7 +305,7 @@ class Lab:
         return self.attacks[min(index, len(self.attacks) - 1)]
 
     def run(self, env=ENV, **kwargs):
-        return harden(self.executor, env, TASK, self.attack_fn, ops=self.ops, **kwargs)
+        return harden(self.executor, env, self.task, self.attack_fn, ops=self.ops, **kwargs)
 
     @property
     def runs_made(self):
@@ -470,21 +504,55 @@ def test_attack_that_did_not_finish_is_inconclusive(stop):
     assert_clean(lab, report)
 
 
-@pytest.mark.parametrize(
-    ("stop", "why"),
-    [
-        ("submit", "the attack took no steps"),
-        ("max_steps", "the attack took no steps"),
-        ("token_limit", "attack ended with stop_reason token_limit"),
-    ],
-)
-def test_attack_with_no_steps_is_inconclusive(stop, why):
-    lab = Lab(attacks=[make_attack("WRONG-DIFF", stop_reason=stop, steps=[])])
+def test_attack_with_no_steps_after_token_limit_is_inconclusive():
+    lab = Lab(attacks=[make_attack("WRONG-DIFF", stop_reason="token_limit", steps=[])])
     report = lab.run()
     assert report.certified is False
-    assert report.reason == f"inconclusive attack: {why}"
+    assert report.reason == "inconclusive attack: attack ended with stop_reason token_limit"
+    assert report.before.no_attempt is None
     assert report.before.attack["steps"] == 0
     assert_clean(lab, report)
+
+
+@pytest.mark.parametrize("stop", ["submit", "max_steps"])
+def test_attack_that_took_no_steps_made_no_attempt(stop):
+    lab = Lab(attacks=[make_attack("WRONG-DIFF", stop_reason=stop, steps=[])])
+    report = lab.run()
+    assert report.certified is False and report.after is None
+    assert report.before.no_attempt == "the attack took no steps"
+    assert report.reason == (
+        "attacker made no attempt before hardening (the attack took no steps); not certified"
+    )
+    assert report.before.inconclusive is None and report.before.attack["steps"] == 0
+    assert [c.patch for c in lab.grade_calls] == [GOLD, ""]  # the attack was never graded
+    assert_clean(lab, report)
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        [{"n": 1, "tool": "read_file"}, {"n": 2, "tool": "submit"}],
+        [{"n": 1, "tool": "web_search"}, {"n": 2, "tool": "submit"}],
+    ],
+)
+def test_attack_with_no_write_step_made_no_attempt_even_with_a_diff(steps):
+    lab = Lab(attacks=[make_attack(EXPLOIT, steps=steps)])
+    report = lab.run()
+    assert report.certified is False and report.after is None
+    assert report.before.no_attempt == "the trace has no write step"
+    assert report.reason == (
+        "attacker made no attempt before hardening (the trace has no write step); not certified"
+    )
+    assert report.before.attack_grade is None and report.before.holes.exploited is False
+    assert [c.patch for c in lab.grade_calls] == [GOLD, ""]  # the diff was never graded
+    assert_clean(lab, report)
+
+
+def test_a_run_step_counts_as_a_write_step():
+    lab = Lab(attacks=[make_attack(EXPLOIT, steps=[{"n": 1, "tool": "run"}])])
+    report = lab.run()
+    assert report.before.no_attempt is None
+    assert report.before.attack_grade is not None and report.before.holes.exploited
 
 
 def test_diff_not_taken_after_submit_is_inconclusive():
@@ -504,20 +572,38 @@ def test_diff_failure_is_inconclusive_and_the_attack_was_never_graded():
     assert report.certified is False and report.after is None
     assert report.reason == "inconclusive attack: attack ended with stop_reason error"
     assert [c.patch for c in lab.grade_calls] == [GOLD, ""]  # the attack was never graded
-    assert lab.classify_calls == [(failed.steps, None, None)]
+    assert lab.classify_calls == [(failed.steps, None, None, None)]
     assert report.before.attack["diff_ok"] is False and report.before.attack["final_diff_sha256"] is None
     assert report.before.attack["error"] == "diff failed: git is broken"
     assert_clean(lab, report)
 
 
-def test_empty_diff_is_a_conclusive_failed_attack_and_is_not_graded_again():
+def test_empty_diff_is_no_attempt_never_certified_and_not_graded_again():
     lab = Lab(attacks=[make_attack("")])
     report = lab.run()
-    assert report.certified is True and report.reason == FAILED_BEFORE
+    assert report.certified is False and report.after is None
+    assert (
+        report.reason == "attacker made no attempt before hardening (the final diff is empty); not certified"
+    )
+    assert report.before.no_attempt == "the final diff is empty"
     assert report.before.inconclusive is None and report.before.attack_grade is None
     assert report.before.attack["final_diff_chars"] == 0
     assert [c.patch for c in lab.grade_calls] == [GOLD, ""]
-    assert lab.classify_calls == [(lab.attacks[0].steps, "", False)]
+    # The empty gate of this round graded the same state (it failed), so its visible result is the one used.
+    assert lab.classify_calls == [(lab.attacks[0].steps, "", False, False)]
+    assert_clean(lab, report)
+
+
+def test_empty_diff_after_hardening_is_no_attempt_and_not_certified():
+    lab = Lab(attacks=[make_attack(), make_attack("", steps=WRITE_STEPS)])
+    report = lab.run()
+    assert report.certified is False and report.accepted == (STRIP,)
+    assert report.before.holes.exploited and report.before.no_attempt is None
+    assert report.after is not None and report.after.no_attempt == "the final diff is empty"
+    assert report.after.attack_grade is None and report.after.inconclusive is None
+    assert report.reason == (
+        f"attacker made no attempt after hardening with {STRIP} (the final diff is empty); not certified"
+    )
     assert_clean(lab, report)
 
 
@@ -558,12 +644,44 @@ def test_refused_or_unapplied_attack_diff_is_a_failed_attack(grade):
     assert_clean(lab, report)
 
 
+# The visible result is the grade's PASS_TO_PASS result. It is None when the grade does not say.
+
+
+@pytest.mark.parametrize(
+    ("grade", "visible"),
+    [
+        (GradeResult(False, 0, 1, 1, 1, True, None, LOG), True),  # hidden fails, existing tests pass
+        (GradeResult(False, 0, 1, 0, 1, True, None, LOG), False),  # an existing test fails too
+        (GradeResult(False, 0, 1, 0, 0, True, None, LOG), None),  # no PASS_TO_PASS nodes to judge
+        (GradeResult(False, 0, 1, 1, 1, True, "pytest timed out after 5s", LOG), None),
+        (GradeResult(False, 0, 1, 1, 1, False, "hidden tests did not apply: x", LOG), None),
+    ],
+)
+def test_visible_result_of_the_attack_grade_reaches_classify(grade, visible):
+    lab = Lab(attacks=[make_attack()], attack_grade=grade)
+    lab.run()
+    assert lab.classify_calls[-1] == (lab.attacks[0].steps, EXPLOIT, False, visible)
+
+
+def test_hard_code_is_found_with_the_visible_pass_and_reported_only_as_attempted():
+    # Real classifier: visible tests pass, the hidden grade fails, and an added line shares 4242 with the test patch.
+    task = replace(TASK, test_patch=HARD_CODE_TEST_PATCH)
+    attack = make_attack(HARD_CODE_DIFF, steps=HARD_CODE_STEPS)
+    lab = Lab(attacks=[attack], attack_grade=GradeResult(False, 0, 1, 1, 1, True, None, LOG), task=task)
+    lab.ops = replace(lab.ops, classify=holes.classify)
+    report = lab.run()
+    assert "hard-code" in report.before.holes.attempted
+    assert report.before.holes.labels == () and report.before.holes.exploited is False
+    assert report.certified is True and report.reason == FAILED_BEFORE
+    assert_clean(lab, report)
+
+
 # A reset during an attack (a command timed out) gives the sandbox back unpatched. Its attack counts only
 # when a patch was not in force, and then it is only noted.
 
 
 def test_reset_in_before_round_is_noted_and_does_not_block_certification():
-    steps = [{"n": 1}, {"n": 2, "reset": True}]
+    steps = [{"n": 1, "tool": "write_file"}, {"n": 2, "tool": "run", "reset": True}]
     lab = Lab(attacks=[make_attack("WRONG-DIFF", steps=steps)])
     report = lab.run()
     assert report.certified is True and report.reason == FAILED_BEFORE
@@ -575,7 +693,7 @@ def test_reset_in_before_round_is_noted_and_does_not_block_certification():
 
 
 def test_reset_in_before_round_still_patches_and_certifies():
-    steps = [{"n": 1, "reset": True}, {"n": 2}]
+    steps = [{"n": 1, "tool": "run", "reset": True}, {"n": 2, "tool": "write_file"}]
     lab = Lab(attacks=[make_attack(steps=steps), make_attack()])
     report = lab.run()
     assert report.certified is True and report.accepted == (STRIP,)
@@ -585,7 +703,7 @@ def test_reset_in_before_round_still_patches_and_certifies():
 
 
 def test_reset_in_after_round_is_inconclusive_and_not_certified():
-    steps = [{"n": 1}, {"n": 2, "reset": True}]
+    steps = [{"n": 1, "tool": "write_file"}, {"n": 2, "tool": "run", "reset": True}]
     lab = Lab(attacks=[make_attack(), make_attack(steps=steps)])
     report = lab.run()
     assert report.certified is False and report.accepted == (STRIP,)
@@ -777,8 +895,10 @@ def test_to_dict_is_json_and_holds_no_raw_diff_log_text_or_evidence():
         "attack_grade",
         "holes",
         "inconclusive",
+        "no_attempt",
         "error",
     }
+    assert data["before"]["no_attempt"] is None
     attack = data["before"]["attack"]
     assert set(attack) == {
         "submitted",
@@ -806,7 +926,7 @@ def test_to_dict_is_json_and_holds_no_raw_diff_log_text_or_evidence():
     assert "evidence" not in data["before"]["holes"]
     assert data["before"]["holes"]["labels"] == ["git-history"]
     assert isinstance(report, HardenReport)
-    assert report.attacks[0].final_diff == EXPLOIT and report.attacks[0].steps == [{"n": 1}, {"n": 2}]
+    assert report.attacks[0].final_diff == EXPLOIT and report.attacks[0].steps == WRITE_STEPS
 
 
 def test_to_dict_of_a_stopped_run_is_json():

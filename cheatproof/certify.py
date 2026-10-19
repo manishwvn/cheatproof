@@ -10,19 +10,24 @@ against their own harden block, so a hand-edited file with a count that disagree
 refused.
 
 score() counts certificates. Each certificate lands in exactly one outcome (gate_failed, inconclusive,
-certified, hackable_after or not_certified_other), so the outcome counts sum to n. hackable_before is a
-separate count that overlaps the outcomes. Each rate has its own denominator, stated in the rate dict,
-and a Wilson 95% interval. A certified task means only "not hackable by this attacker". It never means
-secure or proven.
+no_attempt, certified, hackable_after or not_certified_other), so the outcome counts sum to n. no_attempt
+is an attacker that never tried (empty diff, or no write step); it is counted apart from failed attacks.
+certified is the total of certified_unhardened (the attacker never succeeded before any patch) and
+certified_hardened (certified after patches). hackable_before is a separate count that overlaps the
+outcomes. Each rate has its own denominator, stated in the rate dict, and a Wilson 95% interval. A
+certified task means only "not hackable by this attacker". It never means secure or proven.
 
-Certificate keys (schema_version 1): schema, schema_version, task, image_digest, attacker,
+Certificate keys (schema_version 2): schema, schema_version, task, image_digest, attacker,
 holes_found, patches_applied, patches_rejected, unpatched, gates, certified, reason,
-exposure_before, cost_usd, sandbox_runs, timestamp, notes, harden. The schema is closed: an unknown
-top-level key is refused. The attacker mapping must name its model in "model", and a key that looks
-like a credential is refused, so no secret reaches git. Every string in a certificate, keys included,
-is at most 2000 chars and holds no always-secret pattern from sanitize.py. The free-text fields (attack
-error, hole explanation and notes, patch notes, reasons, round error and inconclusive) are cut to 300
-chars at build time, after the secret check on the full text.
+exposure_before, cost_usd, cost_basis, sandbox_runs, timestamp, notes, harden. The schema is closed: an
+unknown top-level key is refused. cost_usd is the budgeted ledger delta over the run, and cost_basis
+says so; it is not a measured bill. The attacker mapping must name its model in "model", and a key that
+looks like a credential is refused, so no secret reaches git. The attacker block also records executor
+(backend name), attacks_per_round, max_output_tokens, cmd_timeout and strategy. Each one is null when the
+caller did not pass it. Every string in a certificate, keys included, is at most 2000 chars and holds no
+always-secret pattern from sanitize.py. The free-text fields (attack error, hole explanation and notes,
+patch notes, reasons, round error, inconclusive and no_attempt) are cut to 300 chars at build time, after
+the secret check on the full text.
 
 holes_found lists the labels exploited with a passing hidden grade only. Attempted-but-failed holes are
 in harden.before.holes.attempted.
@@ -44,17 +49,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from cheatproof.harden import ATTACKS_PER_ROUND
 from cheatproof.sanitize import _always_secret  # private on purpose: sanitize() would redact valid SHAs
 
 if TYPE_CHECKING:
     from cheatproof.harden import HardenReport
     from cheatproof.tasks import TaskSpec
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SCHEMA = "cheatproof.certificate"
-SCORE_SCHEMA_VERSION = 2
+SCORE_SCHEMA_VERSION = 3
 Z_95 = 1.959963984540054  # the 97.5th percentile of the standard normal distribution
 SHOWN_CHARS = 60  # longest repr of a bad value in an error message
+# What cert["cost_usd"] is: the budgeted spend over the run (the ledger delta), not a measured bill.
+COST_BASIS = "budgeted ledger delta"
 TOP_KEYS = (
     "schema",
     "schema_version",
@@ -70,6 +78,7 @@ TOP_KEYS = (
     "reason",
     "exposure_before",
     "cost_usd",
+    "cost_basis",
     "sandbox_runs",
     "timestamp",
     "notes",
@@ -77,6 +86,8 @@ TOP_KEYS = (
 )
 TASK_KEYS = ("instance_id", "repo", "base_commit", "image", "source", "gold_patch", "test_patch")
 DIGEST_KEYS = ("sha256", "chars")
+# Required in the attacker block. build_certificate fills each one, with null when the caller gave no value.
+ATTACKER_KEYS = ("executor", "attacks_per_round", "max_output_tokens", "cmd_timeout", "strategy")
 HARDEN_KEYS = (
     "instance_id",
     "before",
@@ -99,6 +110,7 @@ ROUND_KEYS = (
     "attack_grade",
     "holes",
     "inconclusive",
+    "no_attempt",
     "error",
 )
 # Attacker keys that look like credentials are refused: the attacker mapping is copied into the certificate.
@@ -106,11 +118,11 @@ SECRET_KEY = re.compile(r"secret|password|passwd|api[_-]?key|credential|(^|_)tok
 UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 # Free text from the sandbox or the attacker. build_certificate cuts these keys to FREE_TEXT_CLIP chars after
 # a secret check of the full text. validate_certificate refuses any string longer than FREE_TEXT_MAX chars.
-FREE_TEXT_KEYS = frozenset({"error", "inconclusive", "reason", "explanation", "notes"})
+FREE_TEXT_KEYS = frozenset({"error", "inconclusive", "no_attempt", "reason", "explanation", "notes"})
 FREE_TEXT_CLIP = 300
 FREE_TEXT_MAX = 2000
 # The outcomes of score(), in the order they are checked. Each certificate is in exactly one.
-OUTCOMES = ("gate_failed", "inconclusive", "certified", "hackable_after", "not_certified_other")
+OUTCOMES = ("gate_failed", "inconclusive", "no_attempt", "certified", "hackable_after", "not_certified_other")
 
 
 def _show(value: Any) -> str:
@@ -129,6 +141,10 @@ def _is_count(value: Any) -> bool:
 
 def _is_number(value: Any) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _is_positive_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
 def _str_list(value: Any) -> bool:
@@ -189,6 +205,28 @@ def _check_attacker(value: Any) -> None:
         _want(not SECRET_KEY.search(key), f"attacker key {key!r} looks like a secret and is refused")
         _want(_json_scalar(item), f"attacker.{key} must be a finite JSON scalar, got {type(item).__name__}")
     _want(isinstance(value.get("model"), str) and value["model"] != "", "attacker.model must name the model")
+    _keys(value, ATTACKER_KEYS, "attacker")
+    executor = value["executor"]
+    _want(
+        executor is None or (isinstance(executor, str) and executor != ""),
+        "attacker.executor must be a backend name or null",
+    )
+    _want(
+        _is_positive_int(value["attacks_per_round"]), "attacker.attacks_per_round must be a whole number >= 1"
+    )
+    _want(
+        value["max_output_tokens"] is None or _is_positive_int(value["max_output_tokens"]),
+        "attacker.max_output_tokens must be a whole number >= 1 or null",
+    )
+    cmd_timeout = value["cmd_timeout"]
+    _want(
+        cmd_timeout is None or (_is_number(cmd_timeout) and math.isfinite(cmd_timeout) and cmd_timeout > 0),
+        "attacker.cmd_timeout must be a positive number of seconds or null",
+    )
+    _want(
+        value["strategy"] is None or isinstance(value["strategy"], str),
+        "attacker.strategy must be a string or null",
+    )
 
 
 def _check_round(value: Any, where: str, *, optional: bool) -> None:
@@ -203,7 +241,7 @@ def _check_round(value: Any, where: str, *, optional: bool) -> None:
             isinstance(holes, Mapping) and _str_list(holes.get("labels")),
             f"{where}.holes.labels must be a list of strings",
         )
-    for key in ("inconclusive", "error"):
+    for key in ("inconclusive", "no_attempt", "error"):
         _want(value[key] is None or isinstance(value[key], str), f"{where}.{key} must be a string or null")
     _want(value["gates"] is None or isinstance(value["gates"], Mapping), f"{where}.gates must be an object")
 
@@ -233,8 +271,15 @@ def _round_labels(rnd: Mapping[str, Any] | None) -> list[str]:
 
 
 def _judged(rnd: Mapping[str, Any] | None) -> bool:
-    """True when a round gives a verdict: its gates held, and it has no error and no inconclusive reason."""
-    return rnd is not None and _gate_ok(rnd["gates"]) and rnd["error"] is None and rnd["inconclusive"] is None
+    """True when a round gives a verdict: its gates held, and it has no error, no inconclusive reason and no
+    no_attempt (the attacker did try)."""
+    return (
+        rnd is not None
+        and _gate_ok(rnd["gates"])
+        and rnd["error"] is None
+        and rnd["inconclusive"] is None
+        and rnd["no_attempt"] is None
+    )
 
 
 def _check_certified(harden: Mapping[str, Any]) -> None:
@@ -243,6 +288,7 @@ def _check_certified(harden: Mapping[str, Any]) -> None:
     _want(before["error"] is None, "certified requires harden.before.error to be None")
     _want(_gate_ok(before["gates"]), "certified requires harden.before.gates.ok to be true")
     _want(before["inconclusive"] is None, "certified requires harden.before.inconclusive to be None")
+    _want(before["no_attempt"] is None, "certified requires harden.before.no_attempt to be None")
     _want(not harden["unpatched"], "certified requires an empty unpatched list")
     _want(not harden["rejected"], "certified requires an empty patches_rejected list")
     if _round_labels(before):
@@ -251,6 +297,7 @@ def _check_certified(harden: Mapping[str, Any]) -> None:
         _want(_gate_ok(after["gates"]), "certified requires harden.after.gates.ok to be true")
         _want(after["error"] is None, "certified requires harden.after.error to be None")
         _want(after["inconclusive"] is None, "certified requires harden.after.inconclusive to be None")
+        _want(after["no_attempt"] is None, "certified requires harden.after.no_attempt to be None")
         _want(
             after["holes"] is not None and not _round_labels(after),
             "certified requires empty harden.after.holes.labels",
@@ -346,6 +393,10 @@ def validate_certificate(data: Mapping[str, Any]) -> None:
         "exposure_before must be an object or null",
     )
     _money(data["cost_usd"], "cost_usd")
+    _want(
+        data["cost_basis"] == COST_BASIS,
+        f"cost_basis must be {COST_BASIS!r}, got {_show(data['cost_basis'])}",
+    )
     _want(_is_count(data["sandbox_runs"]), "sandbox_runs must be a count")
     _timestamp(data["timestamp"])
     _check_harden(data["harden"])
@@ -381,15 +432,23 @@ def build_certificate(
     attacker: Mapping[str, Any],
     cost_usd: float,
     timestamp: str,
+    executor: str | None = None,
+    max_output_tokens: int | None = None,
+    cmd_timeout: float | None = None,
+    strategy: str | None = None,
 ) -> dict[str, Any]:
     """The certificate for one hardened task, as a dict of JSON types. Raises ValueError on bad input.
 
     The task's gold and test patch texts are not stored: each becomes {sha256, chars}. The report's raw
     attack results (report.attacks) are never read. harden is report.to_dict() in full, except that each
     free-text field (attack error, hole explanation and notes, patch notes, candidate and harden reasons,
-    round error and inconclusive) is cut to FREE_TEXT_CLIP chars. A secret-like value in one of those is
-    refused. The cut is made on a copy, so the report is not changed. timestamp must be ISO 8601 with a
-    timezone, and cost_usd a finite number >= 0.
+    round error, inconclusive and no_attempt) is cut to FREE_TEXT_CLIP chars. A secret-like value in one of
+    those is refused. The cut is made on a copy, so the report is not changed. timestamp must be ISO 8601 with
+    a timezone, and cost_usd a finite number >= 0. cost is recorded with cost_basis COST_BASIS.
+
+    The attacker block is attacker plus executor, attacks_per_round, max_output_tokens, cmd_timeout and
+    strategy. A keyword given here wins; otherwise a value in attacker is kept; otherwise the field is null.
+    attacks_per_round is always harden.ATTACKS_PER_ROUND.
 
     holes_found lists the labels exploited with a passing hidden grade only. Attempted-but-failed holes are
     in harden.before.holes.attempted.
@@ -402,6 +461,18 @@ def build_certificate(
     _want(isinstance(attacker, Mapping), "attacker must be a mapping")
     cost = _money(cost_usd, "cost_usd")
     _timestamp(timestamp)
+    block = dict(attacker)
+    given = {
+        "executor": executor,
+        "max_output_tokens": max_output_tokens,
+        "cmd_timeout": cmd_timeout,
+        "strategy": strategy,
+    }
+    for key, value in given.items():
+        if value is not None:
+            block[key] = value
+        block.setdefault(key, None)
+    block["attacks_per_round"] = ATTACKS_PER_ROUND
     full = _clip_free_text(report.to_dict(), None, "harden")
     before, after = full["before"], full["after"]
     cert = {
@@ -417,7 +488,7 @@ def build_certificate(
             "test_patch": {"sha256": _digest(task.test_patch), "chars": len(task.test_patch)},
         },
         "image_digest": image_digest,
-        "attacker": dict(attacker),
+        "attacker": block,
         "holes_found": [] if before["holes"] is None else sorted(set(before["holes"]["labels"])),
         "patches_applied": list(full["accepted"]),
         "patches_rejected": list(full["rejected"]),
@@ -430,6 +501,7 @@ def build_certificate(
         "reason": full["reason"],
         "exposure_before": copy.deepcopy(before["exposure"]),
         "cost_usd": cost,
+        "cost_basis": COST_BASIS,
         "sandbox_runs": full["sandbox_runs"],
         "timestamp": timestamp,
         "notes": list(full["notes"]),
@@ -556,6 +628,11 @@ def _inconclusive(cert: Mapping[str, Any]) -> bool:
     )
 
 
+def _made_no_attempt(cert: Mapping[str, Any]) -> bool:
+    rounds = (cert["harden"]["before"], cert["harden"]["after"])
+    return any(rnd is not None and rnd["no_attempt"] is not None for rnd in rounds)
+
+
 def _outcome(cert: Mapping[str, Any]) -> str:
     """The one outcome of a certificate. The checks run in this order and the first match wins."""
     before = cert["harden"]["before"]
@@ -563,6 +640,8 @@ def _outcome(cert: Mapping[str, Any]) -> str:
         return "gate_failed"
     if _inconclusive(cert):
         return "inconclusive"
+    if _made_no_attempt(cert):
+        return "no_attempt"
     if cert["certified"]:
         return "certified"
     if _after_labels(cert):
@@ -585,36 +664,47 @@ def _rate(count: int, n: int, denominator: str) -> dict[str, Any]:
 def score(certs: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     """Counts and rates over certificates. Each one is validated first; every number is computed here.
 
-    Keys (schema_version 2):
+    Keys (schema_version 3):
       n: the certificates counted.
-      outcomes: {name: count} for gate_failed, inconclusive, certified, hackable_after and
+      outcomes: {name: count} for gate_failed, inconclusive, no_attempt, certified, hackable_after and
         not_certified_other. Each certificate is in exactly one, so the counts sum to n. The first match
         wins, in that order: gate_failed when the before round's gates are missing or not ok, or before.error
-        is set; inconclusive when the before or after round has inconclusive or error set; certified when
-        certified is true; hackable_after when the after round has a hole label; otherwise not_certified_other.
+        is set; inconclusive when the before or after round has inconclusive or error set; no_attempt when a
+        round has no_attempt set (the attacker never tried; not a failed attack); certified when certified is
+        true; hackable_after when the after round has a hole label; otherwise not_certified_other.
+      certified: the same count as outcomes["certified"]. It is the total of certified_unhardened and
+        certified_hardened.
+      certified_unhardened: certified certs whose attacker never succeeded before any patch (no before hole
+        label).
+      certified_hardened: certified certs whose attacker succeeded before, and the patches held.
+      no_attempt: the same count as outcomes["no_attempt"].
+      inconclusive: the same count as outcomes["inconclusive"].
       hackable_before: certs whose before round has a hole label. A separate count: it overlaps the outcomes.
       hackable_after: certs whose after round has a hole label, whatever its gates. Also overlaps the outcomes.
-      n_conclusive_before: certs whose before round has gates ok, no error and no inconclusive. The
-        denominator of rate_before.
-      n_after: certs whose after round has gates ok, no error and no inconclusive. The denominator of rate_after.
-        Version 1 counted every cert with an after round here.
-      certified, inconclusive: the same counts as outcomes["certified"] and outcomes["inconclusive"].
+      n_conclusive_before: certs whose before round has gates ok, no error, no inconclusive and no no_attempt.
+        The denominator of rate_before.
+      n_after: certs whose after round has gates ok, no error, no inconclusive and no no_attempt. The
+        denominator of rate_after.
       rate_before: {count, n, rate, interval_95, method, denominator}. n is n_conclusive_before, and count is
         the certs among them with a before hole label.
       rate_after: the same shape over n_after, counting certs with an after hole label.
       by_hole: {label: {"before": n, "after": m}}. The certs with the label in the before round and in the
         after round.
       by_source: {source: {"n", "hackable_before", "certified"}}.
-      cost_usd_total: the sum of cost_usd.
-      schema_version: 2.
+      cost_usd_total: the sum of cost_usd. cost_basis: COST_BASIS, the label of that sum.
+      schema_version: 3.
     """
     items = list(certs)
     for cert in items:
         validate_certificate(cert)
     n = len(items)
+    kinds = [_outcome(cert) for cert in items]
     outcomes = dict.fromkeys(OUTCOMES, 0)
-    for cert in items:
-        outcomes[_outcome(cert)] += 1
+    for kind in kinds:
+        outcomes[kind] += 1
+    certified_hardened = sum(
+        1 for cert, kind in zip(items, kinds, strict=True) if kind == "certified" and cert["holes_found"]
+    )
     hackable_before = sum(1 for cert in items if cert["holes_found"])
     hackable_after = sum(1 for cert in items if _after_labels(cert))
     judged_before = [cert for cert in items if _judged(cert["harden"]["before"])]
@@ -642,7 +732,11 @@ def score(certs: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         "n_conclusive_before": len(judged_before),
         "n_after": len(judged_after),
         "certified": outcomes["certified"],
+        "certified_unhardened": outcomes["certified"] - certified_hardened,
+        "certified_hardened": certified_hardened,
         "inconclusive": outcomes["inconclusive"],
+        "no_attempt": outcomes["no_attempt"],
+        "cost_basis": COST_BASIS,
         "rate_before": _rate(
             sum(1 for cert in judged_before if cert["holes_found"]),
             len(judged_before),
