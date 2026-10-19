@@ -81,7 +81,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from cheatproof.budget import Budget, BudgetExceeded
-from cheatproof.executor import EnvSpec, ExecutorRefused, ExecutorUnavailable, make_executor
+from cheatproof.executor import DiskRefused, EnvSpec, ExecutorRefused, ExecutorUnavailable, make_executor
 from cheatproof.sanitize import REDACTED, sanitize
 
 if TYPE_CHECKING:
@@ -511,6 +511,8 @@ def _stop_reason(exc: BaseException) -> str:
     """The batch label for a stop: the budget, or the executor that refused or was unavailable."""
     if isinstance(exc, BudgetExceeded):
         return "budget"
+    if isinstance(exc, DiskRefused):
+        return "disk"
     if isinstance(exc, ExecutorRefused):
         return "executor_refused"
     return "executor_unavailable"
@@ -780,6 +782,18 @@ def _run_or_stop(
         return exc
 
 
+def _release_image(executor: Any, image: str) -> None:
+    """After a task's runs, remove its task image so the next pull fits on the disk. Best effort."""
+    release = getattr(executor, "release_image", None)
+    if release is None:
+        return
+    try:
+        if release(image):
+            print(f"released task image {image}")
+    except Exception as exc:  # noqa: BLE001 - a failed removal never fails the batch
+        print(f"could not release task image {image}: {type(exc).__name__}")
+
+
 def _run_tasks(tasks: list[TaskSpec], settings: _Settings, deps: Deps, batch: _Batch, min_free: float) -> int:
     """Run the selection one task at a time. 0 when it finished. 1 when a budget stop or a cost check failure stopped
     it: the current task gets that reason, and each remaining task that does not already have a certificate is not run,
@@ -816,7 +830,10 @@ def _run_tasks(tasks: list[TaskSpec], settings: _Settings, deps: Deps, batch: _B
             if free < min_free:
                 batch.not_run(iid, "disk", f"free disk is {free:.1f} GB, below MIN_FREE_DISK_GB={min_free:g}")
                 continue
-            outcome = _run_or_stop(plan, settings, deps, opened)
+            try:
+                outcome = _run_or_stop(plan, settings, deps, opened)
+            finally:
+                _release_image(opened[0], plan.env.image)
         if isinstance(outcome, _Unwritten):
             if outcome.reason == "budget":
                 stop = ("budget", str(outcome.exc))
