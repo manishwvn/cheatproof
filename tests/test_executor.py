@@ -1,5 +1,7 @@
+import os
 import re
 import shlex
+import subprocess
 import sys
 import time
 
@@ -50,6 +52,7 @@ class FakeDocker:
         exec_result=None,
         exec_raises=None,
         rm_results=(),
+        ps_result=None,
     ):
         self.image_present = image_present
         self.images = list(images)
@@ -59,6 +62,7 @@ class FakeDocker:
         self.exec_result = exec_result or Result(0, "", "", 0.0)
         self.exec_raises = exec_raises  # raised by every docker exec
         self.rm_results = list(rm_results)  # answers to docker rm -f, in order; then exit 0
+        self.ps_result = ps_result  # answer to docker ps; prints nothing when unset
         self.on_run = None
         self.log: list[tuple[list[str], bytes | None]] = []
         self.meta: list[tuple[float, int | None]] = []
@@ -83,6 +87,8 @@ class FakeDocker:
             return Result(self.run_exit, f"{CID}\n", "" if self.run_exit == 0 else "pull denied", 0.0)
         if argv[:3] == ["docker", "rm", "-f"]:
             return self.rm_results.pop(0) if self.rm_results else Result(0, "", "", 0.0)
+        if argv[:2] == ["docker", "ps"]:
+            return self.ps_result or Result(0, "", "", 0.0)
         if argv[:2] == ["docker", "exec"]:
             if self.exec_raises is not None:
                 raise self.exec_raises
@@ -132,13 +138,14 @@ def make_budget(tmp_path, runs=5):
     return Budget(tmp_path / "ledger.json", total_cap_usd=10.0, daily_cap_usd=10.0, sandbox_run_cap=runs)
 
 
-def make_docker(runner, *, disk_gb=100.0, image_cap=6, platform="linux", clock=None):
+def make_docker(runner, *, disk_gb=100.0, image_cap=6, platform="linux", clock=None, pid=None):
     clock = clock or FakeClock()
     return DockerExecutor(
         runner=runner,
         disk_free_gb=lambda: disk_gb,
         min_free_gb=10.0,
         image_cap=image_cap,
+        pid=pid,
         platform=platform,
         sleep=clock.sleep,
         clock=clock,
@@ -213,6 +220,48 @@ def test_container_hardening_flags(tmp_path):
     assert "--read-only" not in argv
 
 
+def test_scratch_tmpfs_is_sized_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("DOCKER_TMPFS_MB", raising=False)
+    fake = FakeDocker()
+    with make_docker(fake).start(ENV, make_budget(tmp_path)):
+        pass
+    (argv,) = fake.runs()
+    assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,size=512m"
+    assert "--read-only" not in argv
+
+
+def test_scratch_tmpfs_size_comes_from_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOCKER_TMPFS_MB", "256")
+    fake = FakeDocker()
+    with make_docker(fake).start(ENV, make_budget(tmp_path)):
+        pass
+    (argv,) = fake.runs()
+    assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,size=256m"
+
+
+@pytest.mark.parametrize("raw", ["abc", "", "0", "-2", "1.5", "nan"])
+def test_scratch_tmpfs_env_falls_back_to_default_when_unusable(monkeypatch, tmp_path, raw):
+    monkeypatch.setenv("DOCKER_TMPFS_MB", raw)
+    fake = FakeDocker()
+    with make_docker(fake).start(ENV, make_budget(tmp_path)):
+        pass
+    (argv,) = fake.runs()
+    assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,size=512m"
+
+
+@pytest.mark.parametrize(
+    ("raw", "size"),
+    [("8192", 4096), ("4096", 4096), ("2048", 2048), ("99999999999999999999", 4096)],
+)
+def test_scratch_tmpfs_size_is_clamped_to_4096(monkeypatch, tmp_path, raw, size):
+    monkeypatch.setenv("DOCKER_TMPFS_MB", raw)
+    fake = FakeDocker()
+    with make_docker(fake).start(ENV, make_budget(tmp_path)):
+        pass
+    (argv,) = fake.runs()
+    assert argv[argv.index("--tmpfs") + 1] == f"/tmp:rw,nosuid,nodev,size={size}m"
+
+
 def test_container_is_named_and_labelled(tmp_path):
     fake = FakeDocker()
     with make_docker(fake).start(ENV, make_budget(tmp_path)):
@@ -220,6 +269,15 @@ def test_container_is_named_and_labelled(tmp_path):
     (argv,) = fake.runs()
     assert NAME_RE.fullmatch(argv[argv.index("--name") + 1])
     assert argv[argv.index("--label") + 1] == "cheatproof=1"
+
+
+def test_container_records_the_pid_of_the_process_that_started_it(tmp_path):
+    fake = FakeDocker()
+    with make_docker(fake, pid=lambda: 4242).start(ENV, make_budget(tmp_path)):
+        pass
+    (argv,) = fake.runs()
+    labels = [argv[i + 1] for i, arg in enumerate(argv) if arg == "--label"]
+    assert labels == ["cheatproof=1", "cheatproof.owner=4242"]
 
 
 def test_network_true_uses_bridge(tmp_path):
@@ -289,6 +347,12 @@ def test_missing_ledger_env_fails_closed(monkeypatch):
 # --- image guards ------------------------------------------------------------------------------------
 
 
+def assert_refused_before_docker_was_touched(fake):
+    """A disk refusal comes before every daemon check: no docker info and no open -a Docker."""
+    assert fake.argvs(["docker", "info"]) == []
+    assert [argv for argv, _ in fake.log if argv[:1] == ["open"]] == []
+
+
 def test_disk_guard_refuses_new_image_before_any_pull(tmp_path):
     fake = FakeDocker(image_present=False)
     budget = make_budget(tmp_path)
@@ -296,13 +360,43 @@ def test_disk_guard_refuses_new_image_before_any_pull(tmp_path):
         make_docker(fake, disk_gb=5.0).start(ENV, budget)
     assert fake.runs() == []
     assert budget.snapshot()["sandbox_runs"] == 0
+    assert_refused_before_docker_was_touched(fake)
 
 
-def test_disk_guard_skipped_when_image_is_local(tmp_path):
+def test_disk_guard_applies_to_a_local_image_too(tmp_path):
     fake = FakeDocker(image_present=True)
-    with make_docker(fake, disk_gb=5.0).start(ENV, make_budget(tmp_path)):
+    budget = make_budget(tmp_path)
+    with pytest.raises(ExecutorRefused, match="MIN_FREE_DISK_GB"):
+        make_docker(fake, disk_gb=5.0).start(ENV, budget)
+    assert fake.runs() == []
+    assert budget.snapshot()["sandbox_runs"] == 0
+    assert_refused_before_docker_was_touched(fake)
+
+
+def test_local_image_starts_when_disk_is_enough(tmp_path):
+    fake = FakeDocker(image_present=True)
+    with make_docker(fake, disk_gb=50.0).start(ENV, make_budget(tmp_path)):
         pass
     assert len(fake.runs()) == 1
+
+
+def test_reset_refuses_when_disk_has_dropped_and_starts_nothing(tmp_path):
+    free = [100.0]
+    fake = FakeDocker()
+    budget = make_budget(tmp_path)
+    executor = DockerExecutor(runner=fake, disk_free_gb=lambda: free[0], min_free_gb=10.0, platform="linux")
+    s = executor.start(ENV, budget)
+    info_calls = len(fake.argvs(["docker", "info"]))
+    free[0] = 5.0
+    with pytest.raises(ExecutorRefused, match="MIN_FREE_DISK_GB"):
+        s.reset()
+    assert len(fake.argvs(["docker", "info"])) == info_calls  # no daemon check after the refusal
+    assert not any(argv[:1] == ["open"] for argv, _ in fake.log)
+    assert len(fake.runs()) == 1
+    assert budget.snapshot()["sandbox_runs"] == 1
+    with pytest.raises(RuntimeError, match="reset"):
+        s.run("true", 5)
+    s.close()
 
 
 def test_image_cap_refuses_new_image(tmp_path):
@@ -455,6 +549,138 @@ def test_reset_that_cannot_remove_the_old_container_starts_nothing(tmp_path):
     assert budget.snapshot()["sandbox_runs"] == 1
     s.close()
     assert fake.names_removed() == [run_name(fake), run_name(fake)]
+
+
+# --- sweep: leftover cheatproof=1 containers at CLI start --------------------------------------------
+
+SWEEP_ARGV = [
+    "docker",
+    "ps",
+    "-a",
+    "--filter",
+    "label=cheatproof=1",
+    "--format",
+    '{{.ID}} {{.Label "cheatproof.owner"}}',
+]
+DEAD_PID = 2_147_483_646  # no process has this pid on macOS or Linux, so os.kill reports it gone
+
+
+@pytest.fixture
+def live_pid():
+    """Pid of a child process that stays alive for the test."""
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        yield child.pid
+    finally:
+        child.kill()
+        child.wait()
+
+
+def sweep_listing(*lines):
+    """docker ps output in the sweep format: one line per container, ID then owner label."""
+    return Result(0, "".join(f"{line}\n" for line in lines), "", 0.0)
+
+
+def test_sweep_lists_with_exact_argv_then_removes_dead_owners_by_id(tmp_path):
+    fake = FakeDocker(
+        ps_result=sweep_listing(f"c1 {DEAD_PID}", f"c2 {DEAD_PID}"),
+        rm_results=[Result(0, "c1\nc2\n", "", 0.0)],
+    )
+    assert make_docker(fake).sweep_leftovers() == 2
+    assert [argv for argv, _ in fake.log] == [SWEEP_ARGV, ["docker", "rm", "-f", "c1", "c2"]]
+
+
+def test_sweep_keeps_a_container_whose_owner_is_alive(tmp_path, live_pid):
+    fake = FakeDocker(ps_result=sweep_listing(f"c1 {live_pid}"))
+    assert make_docker(fake).sweep_leftovers() == 0
+    assert fake.argvs(["docker", "rm"]) == []
+
+
+def test_sweep_removes_a_container_whose_owner_is_dead(tmp_path):
+    fake = FakeDocker(ps_result=sweep_listing(f"c1 {DEAD_PID}"), rm_results=[Result(0, "c1\n", "", 0.0)])
+    assert make_docker(fake).sweep_leftovers() == 1
+    assert fake.argvs(["docker", "rm"]) == [["docker", "rm", "-f", "c1"]]
+
+
+@pytest.mark.parametrize("line", ["c1", "c1 "])  # docker prints an empty field when the label is missing
+def test_sweep_removes_a_container_without_an_owner_label(tmp_path, line):
+    fake = FakeDocker(ps_result=sweep_listing(line), rm_results=[Result(0, "c1\n", "", 0.0)])
+    assert make_docker(fake).sweep_leftovers() == 1
+    assert fake.argvs(["docker", "rm"]) == [["docker", "rm", "-f", "c1"]]
+
+
+@pytest.mark.parametrize("owner", ["abc", "-5", "0", "007", "1.5", "12abc", "1_000", "99999999999999999999"])
+def test_sweep_removes_a_container_with_a_garbage_owner_label(tmp_path, owner):
+    fake = FakeDocker(ps_result=sweep_listing(f"c1 {owner}"), rm_results=[Result(0, "c1\n", "", 0.0)])
+    assert make_docker(fake).sweep_leftovers() == 1
+    assert fake.argvs(["docker", "rm"]) == [["docker", "rm", "-f", "c1"]]
+
+
+def test_sweep_keeps_a_container_owned_by_this_process_even_if_the_pid_looks_gone(tmp_path):
+    fake = FakeDocker(ps_result=sweep_listing(f"c1 {DEAD_PID}"))
+    assert make_docker(fake, pid=lambda: DEAD_PID).sweep_leftovers() == 0
+    assert fake.argvs(["docker", "rm"]) == []
+
+
+def test_sweep_treats_a_permission_error_from_kill_as_alive(tmp_path, monkeypatch):
+    def denied(pid, sig):
+        raise PermissionError(pid)
+
+    monkeypatch.setattr(os, "kill", denied)
+    fake = FakeDocker(ps_result=sweep_listing("c1 77"))
+    assert make_docker(fake).sweep_leftovers() == 0
+    assert fake.argvs(["docker", "rm"]) == []
+
+
+def test_sweep_removes_only_the_dead_ones_from_a_mixed_listing(tmp_path, live_pid):
+    fake = FakeDocker(
+        ps_result=sweep_listing(f"live {live_pid}", f"dead {DEAD_PID}", "nolabel", "junk x"),
+        rm_results=[Result(0, "dead\nnolabel\njunk\n", "", 0.0)],
+    )
+    assert make_docker(fake).sweep_leftovers() == 3
+    assert fake.argvs(["docker", "rm"]) == [["docker", "rm", "-f", "dead", "nolabel", "junk"]]
+
+
+def test_sweep_never_touches_images_volumes_or_prune(tmp_path):
+    fake = FakeDocker(ps_result=sweep_listing(f"c1 {DEAD_PID}"), rm_results=[Result(0, "c1\n", "", 0.0)])
+    make_docker(fake).sweep_leftovers()
+    tokens = {token for argv, _ in fake.log for token in argv}
+    assert not tokens & {"rmi", "prune", "volume", "system", "image"}
+
+
+def test_sweep_with_no_labelled_containers_makes_no_rm_call(tmp_path):
+    fake = FakeDocker()  # docker ps prints nothing
+    assert make_docker(fake).sweep_leftovers() == 0
+    assert fake.argvs(["docker", "rm"]) == []
+
+
+def test_sweep_counts_only_what_docker_rm_reports(tmp_path):
+    fake = FakeDocker(
+        ps_result=sweep_listing(f"c1 {DEAD_PID}", f"c2 {DEAD_PID}"),
+        rm_results=[Result(1, "c1\n", "No such container: c2", 0.0)],
+    )
+    assert make_docker(fake).sweep_leftovers() == 1
+
+
+def test_sweep_when_ps_fails_returns_zero_and_removes_nothing(tmp_path):
+    fake = FakeDocker(ps_result=Result(1, "", "Cannot connect to the Docker daemon", 0.0))
+    assert make_docker(fake).sweep_leftovers() == 0
+    assert fake.argvs(["docker", "rm"]) == []
+
+
+def test_sweep_when_rm_fails_returns_zero_without_raising(tmp_path):
+    fake = FakeDocker(
+        ps_result=sweep_listing(f"c1 {DEAD_PID}"),
+        rm_results=[Result(1, "", "device or resource busy", 0.0)],
+    )
+    assert make_docker(fake).sweep_leftovers() == 0
+
+
+def test_sweep_when_docker_cannot_run_returns_zero_without_raising(tmp_path):
+    def missing(argv, timeout, stdin=None, max_bytes=None):
+        raise ExecutorUnavailable("docker not found on PATH")
+
+    assert make_docker(missing).sweep_leftovers() == 0
 
 
 # --- run: timeouts, output caps, host backstop -------------------------------------------------------

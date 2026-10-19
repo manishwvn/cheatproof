@@ -782,6 +782,81 @@ def test_setup_stop_errors_exit_1_without_traceback(tmp_path, capsys, error, fac
     assert spy.harden_calls == [] and spy.certs == [] and not out.exists()
 
 
+class SweepingExecutor:
+    """An executor with the start-up sweep. Counts the calls and answers with the given count."""
+
+    def __init__(self, swept: int) -> None:
+        self.swept = swept
+        self.sweeps = 0
+
+    def sweep_leftovers(self) -> int:
+        self.sweeps += 1
+        return self.swept
+
+
+def test_harden_sweeps_leftovers_once_and_reports_the_count(tmp_path, capsys):
+    spy = Spy()
+    executor = SweepingExecutor(swept=2)
+    deps = make_deps(spy, make_executor=lambda: executor)
+    rc = cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=deps)
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert executor.sweeps == 1
+    assert "swept 2 leftover cheatproof containers" in captured.err
+
+
+def test_harden_prints_no_sweep_line_when_nothing_was_swept(tmp_path, capsys):
+    spy = Spy()
+    executor = SweepingExecutor(swept=0)
+    deps = make_deps(spy, make_executor=lambda: executor)
+    rc = cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=deps)
+    assert rc == 0
+    assert executor.sweeps == 1
+    assert "swept" not in capsys.readouterr().err
+
+
+def test_harden_works_with_an_executor_that_has_no_sweep(tmp_path, capsys):
+    spy = Spy()
+    deps = make_deps(spy, make_executor=lambda: object())
+    rc = cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=deps)
+    assert rc == 0
+    assert len(spy.certs) == 1
+    assert "swept" not in capsys.readouterr().err
+
+
+class RaisingSweepExecutor:
+    """An executor whose start-up sweep fails. Counts the calls."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+        self.sweeps = 0
+
+    def sweep_leftovers(self) -> int:
+        self.sweeps += 1
+        raise self.exc
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        RuntimeError("docker ps exploded"),
+        ExecutorUnavailable("docker not found on PATH"),
+        KeyError("DOCKER_HOST"),
+        ValueError("bad value"),
+    ],
+)
+def test_harden_proceeds_when_the_sweep_raises(tmp_path, capsys, exc):
+    spy = Spy()
+    executor = RaisingSweepExecutor(exc)
+    deps = make_deps(spy, make_executor=lambda: executor)
+    rc = cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=deps)
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert executor.sweeps == 1
+    assert len(spy.certs) == 1
+    assert "warning: leftover sweep skipped" in captured.err
+
+
 @pytest.mark.parametrize("key", ["NEBIUS_API_KEY", "SPEND_CAP_USD"])
 def test_missing_env_var_is_named(tmp_path, capsys, key):
     spy = Spy()

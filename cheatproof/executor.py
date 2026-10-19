@@ -47,6 +47,11 @@ READ_CHUNK = 64 * 1024
 PIPE_POLL_S = 0.05
 PIPE_JOIN_S = 2
 IMAGE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./:@-]*")
+TMPFS_MAX_MB = 4096  # DOCKER_TMPFS_MB above this is clamped: tmpfs pages come out of the memory limit
+OWNER_RE = re.compile(r"[1-9][0-9]*")  # a cheatproof.owner label is a decimal pid: no 0, no leading zeros
+PID_MAX = 2**31 - 1  # pid_t is a signed 32-bit int: a larger label cannot name a process
+# One line per container: its ID, then its cheatproof.owner label (empty when the label is missing).
+SWEEP_FORMAT = '{{.ID}} {{.Label "cheatproof.owner"}}'
 
 # Runs in the container as `sh -lc <this> cheatproof <cmd>`, so $1 is the command. timeout(1) with KILL
 # stops a command that ignores TERM. Without timeout(1) in the image the command is unbounded inside, and
@@ -74,7 +79,7 @@ _DIFF_SCRIPT = (
 
 
 class ExecutorRefused(RuntimeError):
-    """A guard stopped a new image pull (low disk, too many local images). Nothing was deleted."""
+    """A guard stopped a session start or reset (low disk, too many local images). No image was deleted."""
 
 
 class ExecutorUnavailable(RuntimeError):
@@ -299,6 +304,7 @@ class DockerExecutor:
         disk_free_gb: Callable[[], float] = _root_free_gb,
         min_free_gb: float | None = None,
         image_cap: int | None = None,
+        pid: Callable[[], int] | None = None,
         platform: str = sys.platform,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
@@ -309,6 +315,9 @@ class DockerExecutor:
             min_free_gb if min_free_gb is not None else _env_min_one("MIN_FREE_DISK_GB", 10.0, float)
         )
         self._image_cap = image_cap if image_cap is not None else _env_min_one("DOCKER_IMAGE_CAP", 6, int)
+        # Clamped, not refused: a larger tmpfs would take more of the container memory limit.
+        self._tmpfs_mb = min(_env_min_one("DOCKER_TMPFS_MB", 512, int), TMPFS_MAX_MB)
+        self._pid = pid if pid is not None else os.getpid  # owner of the containers this process starts
         self._platform = platform
         self._sleep = sleep
         self._clock = clock
@@ -339,16 +348,19 @@ class DockerExecutor:
                 break
         raise ExecutorUnavailable(f"Docker daemon still down {DAEMON_WAIT_S}s after 'open -a Docker'")
 
-    def _preflight(self, image: str) -> None:
-        # Only a pull needs guards. A local image starts with no disk or image-count check.
-        if self._docker(["image", "inspect", "--", image], IO_TIMEOUT_S).exit_code == 0:
-            return
+    def _check_free_disk(self) -> None:
+        # Every start and every reset, local image or not: a running container writes to the host disk too.
         free = self._disk_free_gb()
         if free < self._min_free_gb:
             raise ExecutorRefused(
-                f"{image} is not local and free disk is {free:.1f} GB, below MIN_FREE_DISK_GB="
-                f"{self._min_free_gb:g}; nothing pulled"
+                f"free disk is {free:.1f} GB, below MIN_FREE_DISK_GB={self._min_free_gb:g}; "
+                "no container started"
             )
+
+    def _preflight(self, image: str) -> None:
+        # Only a pull needs the image-count guard. A local image starts with no image-count check.
+        if self._docker(["image", "inspect", "--", image], IO_TIMEOUT_S).exit_code == 0:
+            return
         count = self._local_image_count()
         if count >= self._image_cap:
             raise ExecutorRefused(
@@ -366,6 +378,10 @@ class DockerExecutor:
         """Start the container. Returns (name, id). A failure after docker run removes the named container."""
         network = "bridge" if env.network else "none"
         name = f"cheatproof-{uuid.uuid4().hex}"
+        # /tmp is a sized tmpfs, so scratch files cannot fill the host disk. The root fs is not --read-only:
+        # task repos must stay writable for the attacker and the grader. --storage-opt size= is not used
+        # because Docker Desktop's overlay2 does not support it without xfs pquota.
+        # tmpfs pages are charged to the --memory cgroup: a full /tmp hits the memory limit, not ENOSPC.
         argv = [
             "run",
             "-d",
@@ -374,6 +390,8 @@ class DockerExecutor:
             name,
             "--label",
             "cheatproof=1",
+            "--label",
+            f"cheatproof.owner={self._pid()}",
             "--network",
             network,
             "--cpus",
@@ -384,6 +402,8 @@ class DockerExecutor:
             env.memory,  # equal to --memory, so no swap
             "--pids-limit",
             str(PIDS_LIMIT),
+            "--tmpfs",
+            f"/tmp:rw,nosuid,nodev,size={self._tmpfs_mb}m",
             "--cap-drop",
             "ALL",
             "--security-opt",
@@ -414,6 +434,43 @@ class DockerExecutor:
         with contextlib.suppress(Exception):
             self._docker(["rm", "-f", name], DESTROY_TIMEOUT_S)
 
+    def _owner_alive(self, owner: str) -> bool:
+        """True only for a pid this host has alive. A missing or garbage label is not alive."""
+        if not OWNER_RE.fullmatch(owner):
+            return False
+        pid = int(owner)
+        if pid > PID_MAX:
+            return False
+        if pid == self._pid():
+            return True
+        try:
+            os.kill(pid, 0)  # signal 0 checks that the pid exists and sends nothing
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True  # exists, owned by another user
+        return True
+
+    def sweep_leftovers(self) -> int:
+        """Stop and remove cheatproof=1 containers whose cheatproof.owner pid is dead on this host, or whose
+        owner label is missing or garbage. A live owner's container is kept, so a concurrent harden is not
+        killed. Returns how many docker rm reported removed. Containers only: never images, volumes or the
+        build cache. Best-effort: a docker error returns 0 and leaves the containers for the next sweep."""
+        removed = 0
+        with contextlib.suppress(Exception):
+            listed = self._docker(
+                ["ps", "-a", "--filter", "label=cheatproof=1", "--format", SWEEP_FORMAT], IO_TIMEOUT_S
+            )
+            dead: list[str] = []
+            if listed.exit_code == 0:
+                for line in listed.stdout.splitlines():
+                    fields = line.split()
+                    if fields and not self._owner_alive(fields[1] if len(fields) > 1 else ""):
+                        dead.append(fields[0])
+            if dead:
+                removed = len(self._docker(["rm", "-f", *dead], DESTROY_TIMEOUT_S).stdout.split())
+        return removed
+
     def _base_commit(self, cid: str, workdir: str) -> str:
         script = f"cd {shlex.quote(workdir)} && git rev-parse HEAD"
         res = self._docker(["exec", cid, "sh", "-c", script], IO_TIMEOUT_S)
@@ -432,6 +489,7 @@ class DockerSession(Session):
         self._launch()
 
     def _launch(self) -> None:
+        self._executor._check_free_disk()  # first: a refusal never opens Docker Desktop
         self._executor._ensure_daemon()
         self._executor._preflight(self._env.image)
         self._budget.reserve_sandbox_run()  # before the container exists; BudgetExceeded propagates
