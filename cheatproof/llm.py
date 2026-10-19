@@ -23,12 +23,18 @@ def estimate_tokens(messages: list[dict], tools: list[dict] | None = None) -> in
 class GuardedLLM:
     def __init__(self, budget: Budget, client=None) -> None:
         self.budget = budget
-        self.client = client or openai.OpenAI(
+        self._client = client or openai.OpenAI(
             # No SDK retries: each retry could be billed while only one reservation is held.
             base_url=BASE_URL,
             api_key=os.environ["NEBIUS_API_KEY"],
             max_retries=0,
+            timeout=120.0,
         )
+
+    def list_models(self) -> list[str]:
+        # VERIFY: listing assumed free, so it skips the budget.
+        page = self._client.models.list()
+        return [m.id for m in page.data]
 
     def chat(self, model: str, messages: list[dict], max_tokens: int, **kwargs):
         if not 0 < max_tokens <= MAX_OUTPUT_TOKENS:
@@ -38,7 +44,7 @@ class GuardedLLM:
         est_input = estimate_tokens(messages, kwargs.get("tools"))
         hold = self.budget.reserve(model, est_input, max_tokens)
         try:
-            resp = self.client.chat.completions.create(
+            resp = self._client.chat.completions.create(
                 model=model, messages=messages, max_tokens=max_tokens, **kwargs
             )
         except openai.APIStatusError as err:
