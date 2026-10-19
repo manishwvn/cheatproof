@@ -271,7 +271,8 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
-- **U13 Weekly usage cap reached** (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): the routine
+- ~~**U13 Weekly usage cap reached**~~ Done 2026-10-19: owner set `weekly-cap` to 99 for this week and paused the other
+  routines; Cheatproof has priority until complete or blocked (CYCLE.md sections 2 and 2.1). (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): the routine
   read weekly usage at 88% (cap 85) and idles until the reset on 2026-10-20 23:59 UTC. T08 is still todo. Steps: run
   T08 in an interactive session, or pause the other routines, or write a higher cap into
   `~/.cheatproof-autopilot/weekly-cap` (owner only). Strike this item when the weekly window resets.
