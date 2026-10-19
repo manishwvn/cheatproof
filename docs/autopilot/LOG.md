@@ -161,3 +161,21 @@ progress 67% (10/22 tasks done, 10 days to submit)
   (`results/traces/` and `results/reports/` are not git-ignored; planner path).
 - Learning notes for #14 and #15 written (`learning-last-pr` 15).
 - Lesson: `sanitize()` fails closed on a whole string, so long free text (diffs, traces) must go through it per line.
+
+## 2026-10-18 routine (cycle 2026-10-18T22:24:29-05:00)
+progress 73% (12/22 tasks done, 10 days to submit)
+- T21 container limits merged (#16); T18 batch driver merged (#17). 1332 tests, ruff clean, CI green.
+- No runnable task left: T08 waits on T01 (U3) and the planner (T16, T22); T11 opens 2026-10-21.
+- Spend: $0 (no model, sandbox or Tavily calls).
+
+- Task T21 (#16): one Haiku builder; Sonnet review "fix first" (medium: the sweep removed every `cheatproof=1`
+  container, so a concurrent harden would lose its live one). One Haiku fix round: `cheatproof.owner=<pid>` label,
+  sweep only dead or missing owners, `DOCKER_TMPFS_MB` clamped at 4096, ADR 0002 guard text updated. Opus: merge.
+- Task T18 (#17): two parallel Haiku builders on disjoint files (cli; site) against a fixed `batch.json` schema 1
+  contract. Haiku audit plus Sonnet review in parallel, "fix first" (high: a failed cost check, including a NaN ledger
+  that defeats every cap, let the batch go on to paid tasks). One Haiku fix round: `cost_check_failed` stops the batch
+  (exit 1), dedupe across sources, `invalid_task` reason, run record leads with this batch's own count. Opus: merge.
+- The `learning-notes` agent type is not registered in this session; ran it as a general-purpose Haiku agent that
+  reads `.claude/agents/learning-notes.md` first. Notes for #16 and #17 written (`learning-last-pr` 17).
+- Lesson: fix the writer/reader contract (exact keys) in both briefs up front; the parallel builders then matched
+  on the first try and the audit's round-trip script confirmed it.

@@ -134,7 +134,7 @@ the certificate (`results/diffs/<stem>.<round>.diff`, through `sanitize`, digest
 `sanitize` instead of discarding the run. Also call `load_env()` before importing `cheatproof.attacker` in
 `cli.py` (and note the same order bug in `scripts/smoke.py` for the planner). Tests with fakes only.
 
-### T18 Batch driver for the 40-task run (audit 2026-10-18) — size M — in-progress (cycle 2026-10-18T22:24:29-05:00) — needs T17
+### T18 Batch driver for the 40-task run (audit 2026-10-18) — size M — done #17 — needs T17
 A `cheatproof batch` subcommand: run `harden` over a selected task list serially, resume (skip tasks that already
 have a certificate), record a per-task "not run" row with the reason (`ExecutorRefused`, image cap, disk, budget
 halt) instead of stopping, and stop cleanly at the daily cap. Put the selection rule and the scanned, skipped

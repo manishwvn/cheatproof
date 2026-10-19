@@ -16,8 +16,11 @@
   (T20, #13), 1095 tests. First daily audit: fresh clone green; 18 findings queued as T17–T22.
   Cycle 21:24: traces, sanitized attack diffs and kept paid-run reports (T17, #14); honest outcomes: `no_attempt`,
   certified split, grader-forgery cross-checks, hard-code only as a lead (T19, #15). 1210 tests.
-- **Next for the routine:** T21 (container limits), then T18 (batch driver, now also the T19 CLI and site
-  follow-ups). T08 needs T18 and T01.
+  Cycle 22:24: container tmpfs, per-start disk check and owner-scoped leftover sweep (T21, #16); `cheatproof batch`
+  with resume, not-run rows, budget and cost-check stops and `batch.json` run counts in report and site (T18, #17).
+  1332 tests.
+- **Next for the routine:** no runnable task until T01's sandbox step (U3) or the planner unblocks T08; T11 (video
+  script) opens 2026-10-21. T08 needs T01, plus T16 and T22 from the planner.
 - **Certificates:** schema 2 since #15; schema 1 files are refused (none are committed).
 - **Planner:** T22 (U11): Docker runs are booked at $0.05 each in `budget.py`, so the $4 daily cap would halt the
   40-task Docker run near task 16; plus `llm.py` timeout, workflow pins and git-ignoring `results/traces/`.
