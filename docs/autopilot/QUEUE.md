@@ -179,7 +179,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — waiting: U12 (Docker image cap) — needs T07, T16, T17, T18, T19, T20, T22
+### T08 Eval run and results with raw counts — size M — todo — needs T07, T16, T17, T18, T19, T20, T22
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
@@ -201,6 +201,10 @@ task images should run under emulation). Task specs fetched (rebench scanned 100
 Verified scanned 500, 192 valid, 10 selected, 8 of them sphinx). Blocked before the first pull: colima already holds
 10 images from other projects, so `DOCKER_IMAGE_CAP=6` refuses every task image (U12). Routines may neither delete
 images nor change caps. No model calls; spend $0. Flip back to `todo` when U12 is done.
+Planner note 2026-10-19 (U12 done): `DOCKER_IMAGE_CAP=16`, and 10 images belong to other projects, so about 6
+task images fit and routines cannot remove images. Pick the 6 smallest-image tasks with a visible hole first (T03
+exposure scan), run them end to end, and record raw counts. If the go/no-go needs more tasks, add a USER item asking
+the owner to remove the finished task images (`docker rmi`) so the next batch fits. Report n honestly.
 ### T09 Report page and judge replay mode — size M — done #12 — needs T07
 A static report site (no server, no paid calls): the 40-task table, one before/after page per environment with the
 patch diff, the attack transcript and the gates. Judge mode replays recorded runs, labelled "recorded". Builds from
@@ -242,7 +246,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
-- **U12 Docker image cap blocks T08** (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): colima
+- ~~**U12 Docker image cap blocks T08**~~ Done 2026-10-19: `DOCKER_IMAGE_CAP=16`, colima running. (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): colima
   (profile `default`) holds 10 images from other projects (about 6 GB), and `DOCKER_IMAGE_CAP=6` counts every local
   image, so the executor refuses each task image before pulling. Pick one:
   1. In `.env`, set `DOCKER_IMAGE_CAP=16` (10 existing plus up to 6 task images; `MIN_FREE_DISK_GB=10` still guards
