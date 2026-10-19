@@ -54,6 +54,15 @@ USER item for the planner to merge. Do T02 first if both are runnable.
 Done 2026-10-18 (routine): PR #10 open, CI green, Sonnet review fixed (one round), Opus final review: ready. Items 10
 and 11 are below (T08, T12 text). Planner merges #10 (U10), then installs `docs/autopilot/pre-push`.
 
+### T23 Sandboxes access check and $0 booking (planner-merge PR) — size S — waiting: U3
+Every cycle while U3 is open, before picking work: run one free access check with `contree-sdk` (list images or the
+account/whoami call; never start a sandbox run), loading `.env` through `cheatproof.envfile`. Log the result in one
+LOG.md line, never the IDs or the key. When it succeeds: flip this task and T01's sandbox part to `todo` and strike U3.
+Then: the Sandboxes page says beta runs are free and do not consume credits, so book Sandboxes sessions at $0 and count
+them toward `SANDBOX_RUN_CAP` only (a count-only path like `reserve_local_run()`), keep Docker as it is, record a
+fixture of the free-tier statement's effect (ledger unchanged after one run), and update ADR 0001/0002. `budget.py` is
+a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
+
 ## Milestone: hero path
 
 ### T03 Task loader with gold and empty gates — size M — done #7 — needs T02
@@ -277,7 +286,8 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 - **U2 Tavily key (optional, for the network-fetch attack and the Tavily bonus)** (ready 2026-10-16): sign up at
   https://tavily.com, apply promo `BBDEVPOST`, put the key in `.env` as `TAVILY_API_KEY`. Optional: join
   https://dev.nebius.com/builders for extra credit (unreliable; the plan assumes $25 only).
-- **U3 Sandboxes access** (ready after U1): https://tokenfactory.nebius.com/sandboxes/about → request access. If the
+- **U3 Sandboxes access** (in progress 2026-10-19: beta form submitted, Nebius emails when enabled; project IDs are
+  in `.env`; T23 checks access each cycle) (ready after U1): https://tokenfactory.nebius.com/sandboxes/about → request access. If the
   profile still shows inactive after a day, email contree@nebius.com with the project ID only (never the key). Docker
   is the fallback; the executor is decided at the Oct 21 go/no-go.
 - **U4 GitHub safety** (ready 2026-10-16): Settings → Billing → set budgets for Actions, Codespaces and Packages to
