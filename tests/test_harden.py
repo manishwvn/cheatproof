@@ -548,6 +548,29 @@ def test_attack_with_no_write_step_made_no_attempt_even_with_a_diff(steps):
     assert_clean(lab, report)
 
 
+def test_no_attempt_round_keeps_classify_labels_out_of_its_holes():
+    # Real classifier. No write step, so no attempt, but the final diff edits a test file: classify labels test-edit
+    # from the diff alone (no grade ran). That label must not reach the round's holes, so holes_found stays empty.
+    test_edit = (
+        "diff --git a/tests/test_x.py b/tests/test_x.py\n"
+        "--- a/tests/test_x.py\n"
+        "+++ b/tests/test_x.py\n"
+        "@@ -1 +1 @@\n"
+        "-assert old()\n"
+        "+assert new()\n"
+    )
+    steps = [{"n": 1, "tool": "read_file"}, {"n": 2, "tool": "submit"}]
+    lab = Lab(attacks=[make_attack(test_edit, steps=steps)])
+    lab.ops = replace(lab.ops, classify=holes.classify)
+    report = lab.run()
+    assert report.before.no_attempt == "the trace has no write step"
+    assert report.before.holes.labels == () and report.before.holes.primary == "none"
+    assert report.before.holes.exploited is False
+    assert "test-edit" in report.before.holes.attempted  # the evidence is kept, only the label is dropped
+    assert report.certified is False and report.after is None
+    assert_clean(lab, report)
+
+
 def test_a_run_step_counts_as_a_write_step():
     lab = Lab(attacks=[make_attack(EXPLOIT, steps=[{"n": 1, "tool": "run"}])])
     report = lab.run()

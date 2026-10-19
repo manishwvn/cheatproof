@@ -24,10 +24,11 @@ unknown top-level key is refused. cost_usd is the budgeted ledger delta over the
 says so; it is not a measured bill. The attacker mapping must name its model in "model", and a key that
 looks like a credential is refused, so no secret reaches git. The attacker block also records executor
 (backend name), attacks_per_round, max_output_tokens, cmd_timeout and strategy. Each one is null when the
-caller did not pass it. Every string in a certificate, keys included, is at most 2000 chars and holds no
-always-secret pattern from sanitize.py. The free-text fields (attack error, hole explanation and notes,
-patch notes, reasons, round error, inconclusive and no_attempt) are cut to 300 chars at build time, after
-the secret check on the full text.
+caller did not pass it. visible_passed_basis is always "PASS_TO_PASS intact": the visible result is judged from the
+repo's PASS_TO_PASS tests, not from the attacker's own run. Every string in a certificate, keys included, is at most
+2000 chars and holds no always-secret pattern from sanitize.py. The free-text fields (attack error, hole
+explanation and notes, patch notes, reasons, round error, inconclusive and no_attempt) are cut to 300 chars at
+build time, after the secret check on the full text.
 
 holes_found lists the labels exploited with a passing hidden grade only. Attempted-but-failed holes are
 in harden.before.holes.attempted.
@@ -49,7 +50,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from cheatproof.harden import ATTACKS_PER_ROUND
+from cheatproof.harden import ATTACKS_PER_ROUND, VISIBLE_PASSED_BASIS
 from cheatproof.sanitize import _always_secret  # private on purpose: sanitize() would redact valid SHAs
 
 if TYPE_CHECKING:
@@ -86,8 +87,16 @@ TOP_KEYS = (
 )
 TASK_KEYS = ("instance_id", "repo", "base_commit", "image", "source", "gold_patch", "test_patch")
 DIGEST_KEYS = ("sha256", "chars")
-# Required in the attacker block. build_certificate fills each one, with null when the caller gave no value.
-ATTACKER_KEYS = ("executor", "attacks_per_round", "max_output_tokens", "cmd_timeout", "strategy")
+# Required in the attacker block. build_certificate fills each one, with null when the caller gave no value, except
+# visible_passed_basis, which is always harden.VISIBLE_PASSED_BASIS (the visible result is a PASS_TO_PASS proxy).
+ATTACKER_KEYS = (
+    "executor",
+    "attacks_per_round",
+    "max_output_tokens",
+    "cmd_timeout",
+    "strategy",
+    "visible_passed_basis",
+)
 HARDEN_KEYS = (
     "instance_id",
     "before",
@@ -226,6 +235,10 @@ def _check_attacker(value: Any) -> None:
     _want(
         value["strategy"] is None or isinstance(value["strategy"], str),
         "attacker.strategy must be a string or null",
+    )
+    _want(
+        value["visible_passed_basis"] == VISIBLE_PASSED_BASIS,
+        f"attacker.visible_passed_basis must be {VISIBLE_PASSED_BASIS!r}, got {_show(value['visible_passed_basis'])}",
     )
 
 
@@ -446,9 +459,10 @@ def build_certificate(
     those is refused. The cut is made on a copy, so the report is not changed. timestamp must be ISO 8601 with
     a timezone, and cost_usd a finite number >= 0. cost is recorded with cost_basis COST_BASIS.
 
-    The attacker block is attacker plus executor, attacks_per_round, max_output_tokens, cmd_timeout and
-    strategy. A keyword given here wins; otherwise a value in attacker is kept; otherwise the field is null.
-    attacks_per_round is always harden.ATTACKS_PER_ROUND.
+    The attacker block is attacker plus executor, attacks_per_round, max_output_tokens, cmd_timeout, strategy and
+    visible_passed_basis. A keyword given here wins; otherwise a value in attacker is kept; otherwise the field is
+    null. attacks_per_round is always harden.ATTACKS_PER_ROUND, and visible_passed_basis is always
+    harden.VISIBLE_PASSED_BASIS: the visible result is a PASS_TO_PASS proxy, and the certificate says so.
 
     holes_found lists the labels exploited with a passing hidden grade only. Attempted-but-failed holes are
     in harden.before.holes.attempted.
@@ -473,6 +487,7 @@ def build_certificate(
             block[key] = value
         block.setdefault(key, None)
     block["attacks_per_round"] = ATTACKS_PER_ROUND
+    block["visible_passed_basis"] = VISIBLE_PASSED_BASIS
     full = _clip_free_text(report.to_dict(), None, "harden")
     before, after = full["before"], full["after"]
     cert = {

@@ -64,7 +64,14 @@ EXPECTED_KEYS = [
     "notes",
     "harden",
 ]
-ATTACKER_RUN_KEYS = ["executor", "attacks_per_round", "max_output_tokens", "cmd_timeout", "strategy"]
+ATTACKER_RUN_KEYS = [
+    "executor",
+    "attacks_per_round",
+    "max_output_tokens",
+    "cmd_timeout",
+    "strategy",
+    "visible_passed_basis",
+]
 # The attacker block cert_for() writes when the caller gives no run settings: each run setting is null.
 ATTACKER_DEFAULTS = {
     **ATTACKER,
@@ -73,6 +80,7 @@ ATTACKER_DEFAULTS = {
     "max_output_tokens": None,
     "cmd_timeout": None,
     "strategy": None,
+    "visible_passed_basis": "PASS_TO_PASS intact",
 }
 
 
@@ -647,6 +655,7 @@ def test_attacker_limits_that_are_not_secrets_are_kept():
         "max_output_tokens": None,
         "cmd_timeout": None,
         "strategy": None,
+        "visible_passed_basis": "PASS_TO_PASS intact",
     }
 
 
@@ -670,6 +679,7 @@ def test_attacker_run_settings_are_recorded_from_the_keywords():
         "max_output_tokens": 2048,
         "cmd_timeout": 120,
         "strategy": "planner-3",
+        "visible_passed_basis": "PASS_TO_PASS intact",
     }
 
 
@@ -695,6 +705,28 @@ def test_attacks_per_round_is_the_one_harden_makes_even_if_the_caller_says_other
         clean_report(), task_for(), image_digest=None, attacker=attacker, cost_usd=0.1, timestamp=TIMESTAMP
     )
     assert cert["attacker"]["attacks_per_round"] == 1
+
+
+def test_visible_passed_basis_says_the_visible_result_is_the_pass_to_pass_proxy():
+    cert = cert_for(clean_report())
+    assert cert["attacker"]["visible_passed_basis"] == "PASS_TO_PASS intact"
+
+
+def test_visible_passed_basis_is_the_proxy_even_if_the_attacker_mapping_says_otherwise():
+    attacker = {**ATTACKER, "visible_passed_basis": "attacker's own visible run"}
+    cert = build_certificate(
+        clean_report(), task_for(), image_digest=None, attacker=attacker, cost_usd=0.1, timestamp=TIMESTAMP
+    )
+    assert cert["attacker"]["visible_passed_basis"] == "PASS_TO_PASS intact"
+
+
+def test_a_certificate_with_another_visible_passed_basis_is_refused():
+    cert = valid_cert()
+    cert["attacker"]["visible_passed_basis"] = "attacker's own visible run"
+    with pytest.raises(
+        ValueError, match=re.escape("attacker.visible_passed_basis must be 'PASS_TO_PASS intact'")
+    ):
+        validate_certificate(cert)
 
 
 @pytest.mark.parametrize("key", ATTACKER_RUN_KEYS)

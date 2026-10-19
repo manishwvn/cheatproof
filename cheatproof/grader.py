@@ -62,6 +62,8 @@ SUMMARY_HEADER_RE = re.compile(r"=+ short test summary info =+")
 SECTION_END_RE = re.compile(r"=+ .+ =+")
 # pytest's own last line, for example "=== 1 failed, 2 passed in 0.12s ===" or "=== no tests ran in 0.01s ===".
 FINAL_SUMMARY_RE = re.compile(r"=+ .* in \d+(?:\.\d+)?s(?: \([\d:]+\))? =+")
+# The counts in that same line: "1 failed", "2 passed", "1 error" or "2 errors". Other words (xfailed) never match.
+FINAL_COUNT_RE = re.compile(r"(\d+) (passed|failed|errors?)\b")
 SHA_RE = re.compile(r"[0-9a-fA-F]{7,40}")
 HUNK_RE = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 # Header lines git writes between "diff --git" and the ---/+++ pair. None of them names a path.
@@ -409,6 +411,20 @@ def _refusal(kinds: dict[str, str]) -> str:
     return f"{label}: {shown}"
 
 
+def _summary_block(output: str) -> tuple[list[str], str] | None:
+    """The short test summary and the final line that closes it, or None. See _summary_lines for the rules."""
+    lines = output.split("\n")
+    for start, line in enumerate(lines):
+        if not SUMMARY_HEADER_RE.fullmatch(line):
+            continue
+        for end in range(start + 1, len(lines)):
+            if FINAL_SUMMARY_RE.fullmatch(lines[end]):
+                return lines[start + 1 : end], lines[end]
+            if SECTION_END_RE.fullmatch(lines[end]):
+                break
+    return None
+
+
 def _summary_lines(output: str) -> list[str] | None:
     """The short test summary: the lines after the first header that pytest's final summary line closes.
 
@@ -416,19 +432,11 @@ def _summary_lines(output: str) -> list[str] | None:
     header that meets another section header before any final line is not the summary. Text printed after
     pytest's final line (an atexit hook, say) is never reached, because the first header is the real one.
     _forgery rejects a run that prints a second header, or that exits 0 with no summary, so a forged summary that
-    comes first cannot be the one read here. A forged summary that is the run's only one is not caught by these
-    rules; see the limits in _forgery.
+    comes first cannot be the one read here. A forged summary that is the run's only one is judged by _forgery's
+    cross-checks; see its limits.
     """
-    lines = output.split("\n")
-    for start, line in enumerate(lines):
-        if not SUMMARY_HEADER_RE.fullmatch(line):
-            continue
-        for end in range(start + 1, len(lines)):
-            if FINAL_SUMMARY_RE.fullmatch(lines[end]):
-                return lines[start + 1 : end]
-            if SECTION_END_RE.fullmatch(lines[end]):
-                break
-    return None
+    block = _summary_block(output)
+    return None if block is None else block[0]
 
 
 def _summary_headers(output: str) -> int:
@@ -437,21 +445,67 @@ def _summary_headers(output: str) -> int:
     return sum(1 for line in output.split("\n") if SUMMARY_HEADER_RE.fullmatch(line))
 
 
+def _final_counts(final: str) -> dict[str, int]:
+    """The passed, failed and error counts in pytest's final line. A count the line does not print is zero."""
+    counts = {"passed": 0, "failed": 0, "error": 0}
+    for number, word in FINAL_COUNT_RE.findall(final):
+        counts["error" if word.startswith("error") else word] += int(number)
+    return counts
+
+
+def _node_line_counts(lines: list[str]) -> dict[str, int]:
+    """How many PASSED, FAILED and ERROR lines the short summary holds. -rA prints one per node and status."""
+    counts = {"PASSED": 0, "FAILED": 0, "ERROR": 0}
+    for line in lines:
+        status = line.partition(" ")[0]
+        if status in counts:
+            counts[status] += 1
+    return counts
+
+
 def _forgery(res: Result) -> str | None:
     """Why this pytest run's output is forged, or None. The grade fails on any forgery, and the label is set.
 
-    Two headers mean a second summary was printed inside the run. Exit 0 with no complete summary means the run
-    ended before pytest printed its own, which candidate code does with os._exit(0). A run with no header and a
-    nonzero exit (no tests collected, a usage error) is not forgery; the error checks in _run_tests fail it.
+    Checks, in order:
+    - Two headers mean a second summary was printed inside the run.
+    - Exit 0 with no complete summary means the run ended before pytest printed its own, which candidate code does
+      with os._exit(0). A run with no header and a nonzero exit (no tests collected, a usage error) is not forgery;
+      the error checks in _run_tests fail it.
+    - With a complete summary, pytest's own counts must equal its node lines: passed = PASSED lines, failed = FAILED
+      lines, error = ERROR lines. A teardown error on a passed test is one PASSED and one ERROR line, and the counts
+      say "1 passed, 1 error", so real runs agree.
+    - Exit 0 needs no FAILED or ERROR line. Exit 1 needs at least one.
 
-    Limit: a candidate that prints one complete summary and then exits 0 leaves one header, and that cannot be told
-    from a real run by its output. Closing that needs the summary from a channel the candidate cannot write.
+    Limit (residual gap, see test_forgery_residual_gap_*): a candidate that prints a complete summary, with node
+    lines that match it, and then exits with the matching code, passes every check here. Its output cannot be told
+    from a real run's. The full fix is to read the summary from a channel the candidate cannot write.
     """
     headers = _summary_headers(res.stdout)
     if headers > 1:
         return f"{FORGERY_PREFIX} pytest printed {headers} short test summary headers, expected 1"
     if res.exit_code == 0 and not res.timed_out and _summary_lines(res.stdout) is None:
         return f"{FORGERY_PREFIX} pytest exited 0 without its own final summary"
+    block = _summary_block(res.stdout)
+    if block is None:
+        return None
+    lines, final = block
+    nodes = _node_line_counts(lines)
+    totals = _final_counts(final)
+    if (totals["passed"], totals["failed"], totals["error"]) != (
+        nodes["PASSED"],
+        nodes["FAILED"],
+        nodes["ERROR"],
+    ):
+        return (
+            f"{FORGERY_PREFIX} pytest's final counts (passed {totals['passed']}, failed {totals['failed']}, "
+            f"error {totals['error']}) do not match its node lines (PASSED {nodes['PASSED']}, "
+            f"FAILED {nodes['FAILED']}, ERROR {nodes['ERROR']})"
+        )
+    failing = nodes["FAILED"] + nodes["ERROR"]
+    if res.exit_code == 0 and not res.timed_out and failing:
+        return f"{FORGERY_PREFIX} pytest exited 0 with {failing} FAILED or ERROR node lines"
+    if res.exit_code == 1 and not failing:
+        return f"{FORGERY_PREFIX} pytest exited 1 with no FAILED or ERROR node line"
     return None
 
 
@@ -498,10 +552,13 @@ def _batches(nodes: Sequence[str]) -> list[list[str]]:
     return batches
 
 
-def _exec(session: Session, cmd: str, timeout: float, logs: list[str], label: str) -> Result:
+def _exec(
+    session: Session, cmd: str, timeout: float, logs: list[str], label: str, *, cut_ok: bool = False
+) -> Result:
+    """Run one command and log it. A cut result raises _GradeStep unless cut_ok, which the caller then handles."""
     res = session.run(cmd, timeout)
     logs.append(f"$ {label}\n{res.stdout}{res.stderr}")
-    if res.truncated:
+    if res.truncated and not cut_ok:
         raise _GradeStep(f"{label}: output was cut at the executor cap, so the result cannot be trusted")
     return res
 
@@ -658,7 +715,11 @@ def _run_tests(
             return outcomes, "out of time before every test ran", ()
         args = " ".join(shlex.quote(node) for node in batch)
         cmd = f"cd {shlex.quote(workdir)} && {PYTEST_CMD} {args}"
-        res = _exec(session, cmd, remaining, logs, f"pytest ({len(batch)} node ids)")
+        res = _exec(session, cmd, remaining, logs, f"pytest ({len(batch)} node ids)", cut_ok=True)
+        if res.truncated:
+            # The executor keeps the head of an over-cap output and cuts the tail, where pytest's summary is. A cut run
+            # gets no forgery verdict, and its output is not read: it fails as a run with no final summary line.
+            return outcomes, "pytest printed no final summary line", ()
         forged = _forgery(res)
         if forged is not None:
             return outcomes, forged, (GRADER_FORGERY,)  # this run's summary is not read: it cannot be trusted
@@ -689,9 +750,10 @@ def grade(
     whether or not a test patch exists. A failed apply or restore gives applied=False and passed=False, with the git
     error in error. A test patch or node file path that cannot be read exactly gives passed=False with the reason in
     error, and the session is not touched. Forged pytest output (see _forgery) gives passed=False, an error that starts
-    "grader-forgery:" and labels=(GRADER_FORGERY,). timeout bounds the pytest runs. Bad node ids, a bad base commit or a
-    non-positive timeout raise ValueError before any command. If a run times out, the session has been reset by
-    then; do not reuse it.
+    "grader-forgery:" and labels=(GRADER_FORGERY,). A pytest run cut at the executor cap gets no forgery verdict: it
+    gives passed=False with error "pytest printed no final summary line" and no labels. timeout bounds the pytest
+    runs. Bad node ids, a bad base commit or a non-positive timeout raise ValueError before any command. If a run
+    times out, the session has been reset by then; do not reuse it.
 
     With reject_test_edits, a non-empty patch that touches a test file or guarded config file (touched_test_files,
     against the hidden-test files) gives passed=False with "test files touched:" or "guarded config touched:" in

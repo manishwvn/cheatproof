@@ -38,14 +38,16 @@ No attempt. A conclusive attack that took no step, whose final_diff is empty, or
 made no attempt. Its round reports no_attempt with the reason, and that round is not graded. A write step is a
 write_file or run step: a shell command may write, so run counts. A trace of only read_file, web_search and submit
 steps has none. A no_attempt round never certifies, and score() counts it apart from failed attacks: an attacker
-that did not try says nothing about the patches.
+that did not try says nothing about the patches. Its hole labels are dropped (labels empty, primary "none"), so they
+never reach holes_found or hackable_before. Its evidence stays in attempted.
 
 Visible and hidden results. The grade's PASS_TO_PASS nodes are the repo's own tests, which the attacker can run.
 FAIL_TO_PASS nodes come from the hidden test patch. _visible_passed reads the PASS_TO_PASS result: True when all of
 them pass on the attack's diff, None when the grade did not run them (not applied, errored, or no PASS_TO_PASS
 nodes). An empty diff uses the empty gate's grade, which graded the same state. classify gets visible_passed and
-hidden_passed, so hard-code can be found; it is reported as attempted only when the hidden grade fails. This is a
-proxy: the attacker's own run of its visible tests is not recorded.
+hidden_passed, so hard-code can be found. hard-code is never a confirmed label: it is only attempted, on any grade.
+visible_passed is a proxy: the attacker's own run of its visible tests is not recorded. The certificate's attacker
+block says so as visible_passed_basis = VISIBLE_PASSED_BASIS.
 
 certified means: the gates held, the attack did not exploit after hardening, the attack verdicts are conclusive
 (neither inconclusive nor no_attempt), the after exposure scan no longer lists the labels the accepted patches close,
@@ -75,7 +77,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from cheatproof.budget import Budget, BudgetExceeded
@@ -101,6 +103,10 @@ ATTACK_LOST_PREFIXES = ("test files touched:", "guarded config touched:", "candi
 WRITE_TOOLS = frozenset({"write_file", "run"})
 # harden() calls the attack once per round. certify.build_certificate records this in the attacker block.
 ATTACKS_PER_ROUND = 1
+# What visible_passed means: the grade's PASS_TO_PASS nodes all pass (_visible_passed). The repo's own tests are a
+# proxy for the attacker's visible run, which is not recorded. certify.build_certificate records this in the attacker
+# block as visible_passed_basis, so a certificate says which proxy it used.
+VISIBLE_PASSED_BASIS = "PASS_TO_PASS intact"
 # Patch name -> the exposure label it closes, as exposure.scan reports it. test-edit is closed at grade time.
 EXPOSURE_CLOSED_BY = {"strip-future-git": HOLE_GIT_HISTORY, "network-off": HOLE_NETWORK}
 # The caller binds llm, prompts and AttackConfig. The same function and limits run before and after hardening.
@@ -510,7 +516,7 @@ class _Loop:
             # The empty gate of this round graded this same state and failed it.
             hidden_passed = False
             visible_passed = _visible_passed(empty)
-        state.holes = self.ops.classify(
+        holes = self.ops.classify(
             result.steps,
             diff,
             self.task,
@@ -518,6 +524,11 @@ class _Loop:
             hidden_passed=hidden_passed,
             grader_labels=() if state.attack_grade is None else state.attack_grade.labels,
         )
+        if state.no_attempt is not None:
+            # An attack that made no attempt is not a hole, whatever classify saw in its diff. The labels stay out of
+            # holes_found and hackable_before; the evidence stays in attempted.
+            holes = replace(holes, labels=(), primary="none", exploited=False)
+        state.holes = holes
         state.inconclusive = _inconclusive(result, state.attack_grade, patched, state.no_attempt)
 
     def round(self, env: EnvSpec, names: tuple[str, ...]) -> RoundReport:
