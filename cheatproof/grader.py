@@ -41,6 +41,10 @@ LOG_TAIL_CHARS = 4000
 STEP_TIMEOUT_S = 300  # one git, find or cleanup step; grade's timeout bounds the pytest batches
 MAX_BATCH_NODES = 200  # keeps one batch's -rA summary well under the executor's 64 KiB output cap
 MAX_BATCH_CHARS = 60_000  # one command is one argv string; Linux caps a single argument at 128 KiB
+# SWE-bench images activate the testbed conda env only from ~/.bashrc, and sh -lc does not read it, so python is
+# /opt/miniconda3/bin/python, which has no pytest. TESTBED_PATH puts that env first on PATH when the image has it.
+TESTBED_BIN = "/opt/miniconda3/envs/testbed/bin"
+TESTBED_PATH = f"if [ -d {TESTBED_BIN} ]; then PATH={TESTBED_BIN}:$PATH; export PATH; fi; "
 PYTEST_CMD = (
     "PYTHONDONTWRITEBYTECODE=1 python -m pytest -p no:cacheprovider --color=no --tb=no --show-capture=no -rA"
 )
@@ -714,7 +718,7 @@ def _run_tests(
         if remaining <= 0:
             return outcomes, "out of time before every test ran", ()
         args = " ".join(shlex.quote(node) for node in batch)
-        cmd = f"cd {shlex.quote(workdir)} && {PYTEST_CMD} {args}"
+        cmd = f"{TESTBED_PATH}cd {shlex.quote(workdir)} && {PYTEST_CMD} {args}"
         res = _exec(session, cmd, remaining, logs, f"pytest ({len(batch)} node ids)", cut_ok=True)
         if res.truncated:
             # The executor keeps the head of an over-cap output and cuts the tail, where pytest's summary is. A cut run

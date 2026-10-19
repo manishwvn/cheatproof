@@ -38,6 +38,10 @@ TEST_PATCH = "diff --git a/tests/test_x.py b/tests/test_x.py\n--- a/tests/test_x
 TEST_NEW = "diff --git a/tests/test_new.py b/tests/test_new.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/test_new.py\n@@ -0,0 +1 @@\n+x\n"
 OK = Result(0, "", "", 0.0)
 SUMMARY_HEADER = "=== short test summary info ==="
+TESTBED_SETUP = (
+    "if [ -d /opt/miniconda3/envs/testbed/bin ]; then "
+    "PATH=/opt/miniconda3/envs/testbed/bin:$PATH; export PATH; fi; "
+)
 
 
 def make_task(**overrides) -> TaskSpec:
@@ -825,14 +829,23 @@ def test_pytest_runs_in_testbed_without_bytecode_or_cache_writes():
     session = FakeSession([("pytest", all_pass)])
     grade(session, make_task(), GOLD)
     (cmd,) = session.cmds("pytest")
-    assert cmd.startswith("cd /testbed && PYTHONDONTWRITEBYTECODE=1 python -m pytest ")
+    assert cmd.startswith(TESTBED_SETUP + "cd /testbed && PYTHONDONTWRITEBYTECODE=1 python -m pytest ")
     assert "-p no:cacheprovider" in cmd and "-rA" in cmd
+
+
+def test_testbed_env_is_put_first_on_path_before_python_runs_pytest():
+    # sh -lc does not read ~/.bashrc, where SWE-bench images activate testbed. The guarded PATH line supplies it.
+    session = FakeSession([("pytest", all_pass)])
+    grade(session, make_task(), GOLD)
+    (cmd,) = session.cmds("pytest")
+    assert TESTBED_SETUP in cmd
+    assert cmd.index(TESTBED_SETUP) < cmd.index("python -m pytest")
 
 
 def test_workdir_can_be_overridden():
     session = FakeSession([("pytest", all_pass)])
     grade(session, make_task(), GOLD, workdir="/work tree")
-    assert session.cmds("pytest")[0].startswith("cd '/work tree' && ")
+    assert session.cmds("pytest")[0].startswith(TESTBED_SETUP + "cd '/work tree' && ")
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan")])
