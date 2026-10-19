@@ -47,6 +47,11 @@ READ_CHUNK = 64 * 1024
 PIPE_POLL_S = 0.05
 PIPE_JOIN_S = 2
 IMAGE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./:@-]*")
+TMPFS_MAX_MB = 4096  # DOCKER_TMPFS_MB above this is clamped: tmpfs pages come out of the memory limit
+OWNER_RE = re.compile(r"[1-9][0-9]*")  # a cheatproof.owner label is a decimal pid: no 0, no leading zeros
+PID_MAX = 2**31 - 1  # pid_t is a signed 32-bit int: a larger label cannot name a process
+# One line per container: its ID, then its cheatproof.owner label (empty when the label is missing).
+SWEEP_FORMAT = '{{.ID}} {{.Label "cheatproof.owner"}}'
 
 # Runs in the container as `sh -lc <this> cheatproof <cmd>`, so $1 is the command. timeout(1) with KILL
 # stops a command that ignores TERM. Without timeout(1) in the image the command is unbounded inside, and
@@ -299,6 +304,7 @@ class DockerExecutor:
         disk_free_gb: Callable[[], float] = _root_free_gb,
         min_free_gb: float | None = None,
         image_cap: int | None = None,
+        pid: Callable[[], int] | None = None,
         platform: str = sys.platform,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
@@ -309,7 +315,9 @@ class DockerExecutor:
             min_free_gb if min_free_gb is not None else _env_min_one("MIN_FREE_DISK_GB", 10.0, float)
         )
         self._image_cap = image_cap if image_cap is not None else _env_min_one("DOCKER_IMAGE_CAP", 6, int)
-        self._tmpfs_mb = _env_min_one("DOCKER_TMPFS_MB", 512, int)
+        # Clamped, not refused: a larger tmpfs would take more of the container memory limit.
+        self._tmpfs_mb = min(_env_min_one("DOCKER_TMPFS_MB", 512, int), TMPFS_MAX_MB)
+        self._pid = pid if pid is not None else os.getpid  # owner of the containers this process starts
         self._platform = platform
         self._sleep = sleep
         self._clock = clock
@@ -373,6 +381,7 @@ class DockerExecutor:
         # /tmp is a sized tmpfs, so scratch files cannot fill the host disk. The root fs is not --read-only:
         # task repos must stay writable for the attacker and the grader. --storage-opt size= is not used
         # because Docker Desktop's overlay2 does not support it without xfs pquota.
+        # tmpfs pages are charged to the --memory cgroup: a full /tmp hits the memory limit, not ENOSPC.
         argv = [
             "run",
             "-d",
@@ -381,6 +390,8 @@ class DockerExecutor:
             name,
             "--label",
             "cheatproof=1",
+            "--label",
+            f"cheatproof.owner={self._pid()}",
             "--network",
             network,
             "--cpus",
@@ -423,16 +434,41 @@ class DockerExecutor:
         with contextlib.suppress(Exception):
             self._docker(["rm", "-f", name], DESTROY_TIMEOUT_S)
 
+    def _owner_alive(self, owner: str) -> bool:
+        """True only for a pid this host has alive. A missing or garbage label is not alive."""
+        if not OWNER_RE.fullmatch(owner):
+            return False
+        pid = int(owner)
+        if pid > PID_MAX:
+            return False
+        if pid == self._pid():
+            return True
+        try:
+            os.kill(pid, 0)  # signal 0 checks that the pid exists and sends nothing
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True  # exists, owned by another user
+        return True
+
     def sweep_leftovers(self) -> int:
-        """Stop and remove containers that an earlier run left behind (label cheatproof=1). Returns how many
-        docker rm reported removed. Containers only: never images, volumes or the build cache. Best-effort: a
-        docker error returns 0 and leaves the containers for the next sweep."""
+        """Stop and remove cheatproof=1 containers whose cheatproof.owner pid is dead on this host, or whose
+        owner label is missing or garbage. A live owner's container is kept, so a concurrent harden is not
+        killed. Returns how many docker rm reported removed. Containers only: never images, volumes or the
+        build cache. Best-effort: a docker error returns 0 and leaves the containers for the next sweep."""
         removed = 0
         with contextlib.suppress(Exception):
-            listed = self._docker(["ps", "-aq", "--filter", "label=cheatproof=1"], IO_TIMEOUT_S)
-            ids = listed.stdout.split() if listed.exit_code == 0 else []
-            if ids:
-                removed = len(self._docker(["rm", "-f", *ids], DESTROY_TIMEOUT_S).stdout.split())
+            listed = self._docker(
+                ["ps", "-a", "--filter", "label=cheatproof=1", "--format", SWEEP_FORMAT], IO_TIMEOUT_S
+            )
+            dead: list[str] = []
+            if listed.exit_code == 0:
+                for line in listed.stdout.splitlines():
+                    fields = line.split()
+                    if fields and not self._owner_alive(fields[1] if len(fields) > 1 else ""):
+                        dead.append(fields[0])
+            if dead:
+                removed = len(self._docker(["rm", "-f", *dead], DESTROY_TIMEOUT_S).stdout.split())
         return removed
 
     def _base_commit(self, cid: str, workdir: str) -> str:

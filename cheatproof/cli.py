@@ -358,11 +358,18 @@ def _rotate_trace(traces_dir: Path, stem: str, trace_path: Path) -> None:
 
 
 def _sweep_leftovers(executor: Any) -> None:
-    """Remove cheatproof containers an earlier run left behind. Only executors with a sweep are asked."""
+    """Remove cheatproof containers an earlier run left behind. Only executors with a sweep are asked.
+
+    Best-effort: a failing sweep is reported on stderr and harden goes on, so it cannot change the exit code.
+    """
     sweep = getattr(executor, "sweep_leftovers", None)
     if sweep is None:
         return
-    swept = sweep()
+    try:
+        swept = sweep()
+    except Exception as exc:  # noqa: BLE001 - the sweep never decides whether harden runs
+        print(f"warning: leftover sweep skipped: {exc}", file=sys.stderr)
+        return
     if swept > 0:
         print(f"swept {swept} leftover cheatproof containers", file=sys.stderr)
 
