@@ -1,6 +1,7 @@
 """CLI tests: fakes only. No model, network, Docker or paid call, and no certify.py internals."""
 
 import dataclasses
+import hashlib
 import json
 import re
 import sys
@@ -9,7 +10,9 @@ from pathlib import Path
 
 import pytest
 
+import cheatproof
 from cheatproof import certify, cli
+from cheatproof.attacker import AttackResult
 from cheatproof.budget import BudgetExceeded
 from cheatproof.executor import ExecutorRefused, ExecutorUnavailable
 from cheatproof.grader import GateReport, GradeResult
@@ -129,6 +132,7 @@ class Spy:
         self.certs: list[dict] = []
         self.score_calls: list[Path] = []
         self.site_calls: list[tuple] = []
+        self.trace_paths: list[Path | None] = []
 
 
 @dataclasses.dataclass(frozen=True)
@@ -156,8 +160,9 @@ def make_deps(spy: Spy, **overrides) -> cli.Deps:
     def find_tasks(instance_id, source, cache_dir):
         return [make_task()] if instance_id == INSTANCE else []
 
-    def attack(llm, session, system_prompt, task_prompt, config):
+    def attack(llm, session, system_prompt, task_prompt, config, trace_path=None):
         spy.attack_calls.append((llm, session, system_prompt, task_prompt, config))
+        spy.trace_paths.append(trace_path)
         return "attack-result"
 
     def harden(executor, env, task, attack_fn, *, budget, **kwargs):
@@ -838,13 +843,48 @@ def test_site_success_prints_one_summary_line_and_exits_0(tmp_path, capsys):
     assert captured.err == ""
 
 
-def test_site_traces_reach_build_site_only_when_given(tmp_path):
+def test_site_traces_reach_build_site_when_given_or_found_beside_the_certificates(tmp_path):
     spy = Spy()
     certs, out, traces = make_certs_dir(tmp_path), tmp_path / "site", tmp_path / "traces"
     traces.mkdir()
     assert cli.main(site_argv(certs, out, "--traces", str(traces)), deps=make_deps(spy)) == 0
     assert cli.main(site_argv(certs, out), deps=make_deps(spy)) == 0
-    assert spy.site_calls == [(certs, out, traces), (certs, out, None)]
+    assert spy.site_calls == [(certs, out, traces), (certs, out, traces)]
+
+
+def test_site_default_traces_is_the_directory_beside_the_certificates_when_it_exists(tmp_path):
+    spy = Spy()
+    certs, out = make_certs_dir(tmp_path), tmp_path / "site"
+    assert cli.main(site_argv(certs, out), deps=make_deps(spy)) == 0  # no traces/ beside the certificates yet
+    (tmp_path / "traces").mkdir()
+    assert cli.main(site_argv(certs, out), deps=make_deps(spy)) == 0
+    other = tmp_path / "other"
+    other.mkdir()
+    assert cli.main(site_argv(certs, out, "--traces", str(other)), deps=make_deps(spy)) == 0  # --traces wins
+    assert spy.site_calls == [(certs, out, None), (certs, out, tmp_path / "traces"), (certs, out, other)]
+
+
+def test_site_symlinked_default_traces_dir_is_not_used(tmp_path):
+    spy = Spy()
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "traces").symlink_to(real, target_is_directory=True)
+    certs = make_certs_dir(tmp_path)
+    assert cli.main(site_argv(certs, tmp_path / "site"), deps=make_deps(spy)) == 0
+    assert spy.site_calls == [(certs, tmp_path / "site", None)]
+
+
+def test_site_symlinked_traces_dir_is_refused_without_building(tmp_path, capsys):
+    spy = Spy()
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "linked"
+    link.symlink_to(real, target_is_directory=True)
+    certs = make_certs_dir(tmp_path)
+    rc = cli.main(site_argv(certs, tmp_path / "site", "--traces", str(link)), deps=make_deps(spy))
+    assert rc == 2
+    assert spy.site_calls == []
+    assert "symbolic link" in capsys.readouterr().err
 
 
 def test_site_load_errors_are_listed_on_stderr_and_exit_1(tmp_path, capsys):
@@ -977,3 +1017,315 @@ def test_site_end_to_end_with_default_deps_writes_the_index(tmp_path, monkeypatc
     assert (out / "index.html").is_file()
     assert INSTANCE in (out / "index.html").read_text(encoding="utf-8")
     assert captured.err == ""
+
+
+# Traces, diffs and reports that a paid harden run keeps beside the certificates. Fakes only.
+
+RAW_MARKER = "RAW-DIFF-MARKER"
+RAW_DIFF = f"diff --git a/src/mod.py b/src/mod.py\n+{RAW_MARKER} = 1\n"
+ATTACK_SUMMARY = {
+    "submitted": True,
+    "stop_reason": "submit",
+    "tokens_in": 120,
+    "tokens_out": 30,
+    "diff_ok": True,
+    "error": "",
+    "steps": 1,
+}
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
+
+
+def _attacked_report(raw: str | None, recorded: str | None = None) -> HardenReport:
+    """A report whose before round ran one attack with this raw diff. The summary records its sha256 unless given."""
+    digest = None if raw is None else _sha256(raw)
+    summary = {
+        **ATTACK_SUMMARY,
+        "final_diff_sha256": digest if recorded is None else recorded,
+        "final_diff_chars": None if raw is None else len(raw),
+    }
+    before = dataclasses.replace(make_report().before, attack=summary)
+    result = AttackResult(
+        submitted=True,
+        stop_reason="submit",
+        steps=[{"type": "step", "step": 1}],
+        tokens_in=120,
+        tokens_out=30,
+        final_diff=raw,
+        error="",
+        diff_ok=raw is not None,
+    )
+    return dataclasses.replace(make_report(certified=False), before=before, attacks=(result,))
+
+
+def test_harden_passes_a_trace_path_beside_the_certificates(tmp_path):
+    spy = Spy()
+    out = tmp_path / "results" / "certificates"
+    assert cli.main(_harden_argv(tmp_path, out), deps=make_deps(spy)) == 0
+    # The trace is named by the certificate's file stem, in traces/ next to certificates/.
+    assert spy.trace_paths == [tmp_path / "results" / "traces" / f"{INSTANCE}.jsonl"]
+
+
+def test_diff_file_is_written_when_its_raw_digest_matches(tmp_path, capsys):
+    out = tmp_path / "certs"
+    deps = make_deps(Spy(), harden=lambda *args, **kwargs: _attacked_report(RAW_DIFF))
+    assert cli.main(_harden_argv(tmp_path, out), deps=deps) == 0
+    diff_file = tmp_path / "diffs" / f"{INSTANCE}.before.diff"
+    assert (
+        diff_file.read_text(encoding="utf-8") == RAW_DIFF
+    )  # no secret-like value, so sanitize leaves it as is
+    assert (out / f"{INSTANCE}.json").is_file()
+    assert "does not match" not in capsys.readouterr().err
+
+
+def test_diff_file_holds_the_sanitized_text_not_the_raw_one(tmp_path):
+    raw = f"diff --git a/x b/x\n+token = 'Bearer abcdef0123456789'  # {RAW_MARKER}\n"
+    deps = make_deps(Spy(), harden=lambda *args, **kwargs: _attacked_report(raw))
+    assert cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=deps) == 0
+    written = (tmp_path / "diffs" / f"{INSTANCE}.before.diff").read_text(encoding="utf-8")
+    assert written == "diff --git a/x b/x\n+REDACTED\n"  # only the secret-like line is replaced
+    assert "abcdef0123456789" not in written and RAW_MARKER not in written
+
+
+def test_diff_whose_raw_digest_does_not_match_is_not_written_and_is_noted(tmp_path, capsys):
+    out = tmp_path / "certs"
+    deps = make_deps(Spy(), harden=lambda *args, **kwargs: _attacked_report(RAW_DIFF, recorded="0" * 64))
+    rc = cli.main(_harden_argv(tmp_path, out), deps=deps)
+    captured = capsys.readouterr()
+    assert rc == 0  # the certificate is still written; only the diff is withheld
+    assert (out / f"{INSTANCE}.json").is_file()
+    assert not (tmp_path / "diffs").exists()
+    assert "the before attack diff does not match its recorded sha256: not written" in captured.err
+    assert RAW_MARKER not in captured.err and RAW_MARKER not in captured.out
+
+
+def test_round_without_a_final_diff_writes_no_file(tmp_path):
+    deps = make_deps(Spy(), harden=lambda *args, **kwargs: _attacked_report(None))
+    assert cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=deps) == 0
+    assert not (tmp_path / "diffs").exists()
+
+
+def test_paid_run_keeps_report_and_diff_when_build_certificate_raises(tmp_path, capsys):
+    out = tmp_path / "certs"
+
+    def refusing_build(report, task, **kwargs):
+        raise ValueError("secret-like values remain at: harden/before/error")
+
+    deps = make_deps(
+        Spy(),
+        harden=lambda *args, **kwargs: _attacked_report(RAW_DIFF),
+        build_certificate=refusing_build,
+        make_budget=lambda: FakeBudget(0.10, 0.25),
+    )
+    rc = cli.main(_harden_argv(tmp_path, out), deps=deps)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "certificate not written: ValueError" in captured.err
+    assert "cost: $0.1500" in captured.err
+    assert "Traceback" not in captured.err and "Traceback" not in captured.out
+    assert not out.exists()
+
+    # The digest-only report is kept, in reports/ beside certificates/. It never holds the raw diff or the attacks.
+    report_file = tmp_path / "reports" / f"{INSTANCE}.report.json"
+    text = report_file.read_text(encoding="utf-8")
+    kept = json.loads(text)
+    assert kept["instance_id"] == INSTANCE and "before" in kept and "attacks" not in kept
+    assert RAW_MARKER not in text
+    assert f"report kept: {report_file}" in captured.err
+    # The diff of the same run is kept too, so the paid attack is not lost.
+    assert (tmp_path / "diffs" / f"{INSTANCE}.before.diff").read_text(encoding="utf-8") == RAW_DIFF
+
+
+def _forbidden(*args, **kwargs):
+    raise AssertionError("no paid collaborator may be built before the usage error")
+
+
+def test_a_long_name_and_a_home_path_redact_only_their_own_lines(tmp_path, capsys):
+    long_name = "test_" + "n" * 40  # one run of 45 word characters: sanitize() reads it as a secret
+    raw = (
+        f"diff --git a/{'f' * 40}.py b/{'f' * 40}.py\n"  # a header line with a long file name
+        "diff --git a/tests/test_mod.py b/tests/test_mod.py\n"
+        "--- a/tests/test_mod.py\n"
+        "+++ b/tests/test_mod.py\n"
+        "@@ -1,2 +1,3 @@\n"
+        f"+def {long_name}():\n"
+        "+    path = '/home/alice/work/data.txt'\n"
+        "+    keep_me = 1\n"
+        " context line\n"
+    )
+    out = tmp_path / "certs"
+    deps = make_deps(Spy(), harden=lambda *args, **kwargs: _attacked_report(raw))
+    assert cli.main(_harden_argv(tmp_path, out), deps=deps) == 0
+    diffs = tmp_path / "diffs"
+    text = (diffs / f"{INSTANCE}.before.diff").read_text(encoding="utf-8")
+    assert text == (
+        "diff --git REDACTED\n"
+        "diff --git a/tests/test_mod.py b/tests/test_mod.py\n"
+        "--- a/tests/test_mod.py\n"
+        "+++ b/tests/test_mod.py\n"
+        "@@ -1,2 +1,3 @@\n"
+        "+REDACTED\n"
+        "+REDACTED\n"
+        "+    keep_me = 1\n"
+        " context line\n"
+    )
+    assert long_name not in text and "alice" not in text
+    sidecar = json.loads((diffs / f"{INSTANCE}.before.diff.json").read_text(encoding="utf-8"))
+    assert sidecar == {"raw_sha256": _sha256(raw), "chars": len(raw), "redacted_lines": 3}
+    assert "not written" not in capsys.readouterr().err
+
+
+def test_a_diff_with_a_lone_surrogate_is_still_written(tmp_path, capsys):
+    raw = "diff --git a/x b/x\n+text = '\ud800'\n"  # a lone surrogate, as model text can carry
+    out = tmp_path / "certs"
+    deps = make_deps(Spy(), harden=lambda *args, **kwargs: _attacked_report(raw))
+    assert cli.main(_harden_argv(tmp_path, out), deps=deps) == 0
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err and "not written" not in captured.err
+    assert (out / f"{INSTANCE}.json").is_file()
+    diffs = tmp_path / "diffs"
+    assert (diffs / f"{INSTANCE}.before.diff").read_text(
+        encoding="utf-8"
+    ) == "diff --git a/x b/x\n+text = '?'\n"
+    sidecar = json.loads((diffs / f"{INSTANCE}.before.diff.json").read_text(encoding="utf-8"))
+    assert sidecar["raw_sha256"] == _sha256(raw) and sidecar["redacted_lines"] == 0
+
+
+@pytest.mark.parametrize(
+    ("raw", "recorded"), [(None, None), (RAW_DIFF, "0" * 64)], ids=["round-without-diff", "digest-mismatch"]
+)
+def test_a_rerun_that_writes_no_diff_removes_the_stale_diff_and_sidecar(tmp_path, raw, recorded):
+    out = tmp_path / "certs"
+    first = make_deps(Spy(), harden=lambda *args, **kwargs: _attacked_report(RAW_DIFF))
+    assert cli.main(_harden_argv(tmp_path, out), deps=first) == 0
+    diffs = tmp_path / "diffs"
+    assert (diffs / f"{INSTANCE}.before.diff").is_file()
+    assert (diffs / f"{INSTANCE}.before.diff.json").is_file()
+
+    second = make_deps(Spy(), harden=lambda *args, **kwargs: _attacked_report(raw, recorded=recorded))
+    assert cli.main(_harden_argv(tmp_path, out), deps=second) == 0
+    assert not (diffs / f"{INSTANCE}.before.diff").exists()
+    assert not (diffs / f"{INSTANCE}.before.diff.json").exists()
+
+
+def test_a_key_error_from_build_certificate_keeps_the_report_and_the_diff(tmp_path, capsys):
+    out = tmp_path / "certs"
+
+    def missing_field(report, task, **kwargs):
+        raise KeyError("timestamp")
+
+    deps = make_deps(
+        Spy(),
+        harden=lambda *args, **kwargs: _attacked_report(RAW_DIFF),
+        build_certificate=missing_field,
+        make_budget=lambda: FakeBudget(0.10, 0.25),
+    )
+    rc = cli.main(_harden_argv(tmp_path, out), deps=deps)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "certificate not written: KeyError" in captured.err
+    assert "cost: $0.1500" in captured.err
+    assert "Traceback" not in captured.err
+    assert not out.exists()
+    assert (tmp_path / "reports" / f"{INSTANCE}.report.json").is_file()
+    assert (tmp_path / "diffs" / f"{INSTANCE}.before.diff").is_file()
+
+
+def test_a_non_finite_spend_keeps_the_report_and_the_diff(tmp_path, capsys):
+    out = tmp_path / "certs"
+    deps = make_deps(
+        Spy(),
+        harden=lambda *args, **kwargs: _attacked_report(RAW_DIFF),
+        make_budget=lambda: FakeBudget(0.0, float("inf")),
+    )
+    rc = cli.main(_harden_argv(tmp_path, out), deps=deps)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "cost check failed" in captured.err
+    assert not out.exists()
+    assert (tmp_path / "reports" / f"{INSTANCE}.report.json").is_file()
+    assert (tmp_path / "diffs" / f"{INSTANCE}.before.diff").is_file()
+
+
+def test_a_symlinked_traces_dir_is_refused_before_the_paid_run(tmp_path, capsys):
+    spy = Spy()
+    real = tmp_path / "elsewhere"
+    real.mkdir()
+    (tmp_path / "traces").symlink_to(real, target_is_directory=True)
+    deps = make_deps(spy, make_executor=_forbidden, make_budget=_forbidden, make_llm=_forbidden)
+    rc = cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=deps)
+    assert rc == 2
+    assert "symbolic link" in capsys.readouterr().err
+    assert spy.harden_calls == [] and spy.attack_calls == [] and spy.certs == []
+    assert list(real.iterdir()) == []
+
+
+def test_a_symlinked_trace_file_is_refused_before_the_paid_run(tmp_path, capsys):
+    spy = Spy()
+    traces = tmp_path / "traces"
+    traces.mkdir()
+    secret = tmp_path / "secret.jsonl"
+    secret.write_text("SECRET-TRACE\n", encoding="utf-8")
+    (traces / f"{INSTANCE}.jsonl").symlink_to(secret)
+    deps = make_deps(spy, make_executor=_forbidden, make_budget=_forbidden, make_llm=_forbidden)
+    rc = cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=deps)
+    assert rc == 2
+    assert "symbolic link" in capsys.readouterr().err
+    assert spy.harden_calls == [] and spy.attack_calls == []
+    assert secret.read_text(encoding="utf-8") == "SECRET-TRACE\n"
+
+
+def test_an_earlier_trace_is_set_aside_before_the_run_so_the_new_one_is_not_appended(tmp_path):
+    traces = tmp_path / "traces"
+    traces.mkdir()
+    (traces / f"{INSTANCE}.jsonl").write_text("OLD-TRACE\n", encoding="utf-8")
+    seen = []
+
+    def attack(llm, session, system_prompt, task_prompt, config, trace_path=None):
+        seen.append(trace_path.exists())  # the earlier trace has already been renamed
+        with trace_path.open("a", encoding="utf-8") as handle:
+            handle.write("NEW-TRACE\n")
+        return "attack-result"
+
+    deps = make_deps(Spy(), attack=attack)
+    assert cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=deps) == 0
+    assert seen == [False]
+    assert (traces / f"{INSTANCE}.jsonl").read_text(encoding="utf-8") == "NEW-TRACE\n"
+    (old,) = traces.glob(f"{INSTANCE}.*.jsonl.old")
+    assert old.read_text(encoding="utf-8") == "OLD-TRACE\n"
+
+
+def test_a_stale_report_is_removed_once_a_certificate_is_written(tmp_path):
+    out = tmp_path / "certs"
+
+    def refusing_build(report, task, **kwargs):
+        raise ValueError("timestamp is not ISO 8601")
+
+    failing = make_deps(Spy(), build_certificate=refusing_build, make_budget=lambda: FakeBudget(0.10, 0.25))
+    assert cli.main(_harden_argv(tmp_path, out), deps=failing) == 1
+    report_file = tmp_path / "reports" / f"{INSTANCE}.report.json"
+    assert report_file.is_file()
+
+    assert cli.main(_harden_argv(tmp_path, out), deps=make_deps(Spy())) == 0
+    assert (out / f"{INSTANCE}.json").is_file()
+    assert not report_file.exists()
+
+
+def test_load_env_runs_before_the_attacker_is_imported(monkeypatch):
+    seen = []
+
+    def recording_load_env(*args, **kwargs):
+        seen.append("cheatproof.attacker" in sys.modules)
+        return False
+
+    # Forget the attacker module for this test, so Deps.default() imports it again and the order is observable.
+    monkeypatch.delitem(sys.modules, "cheatproof.attacker", raising=False)
+    monkeypatch.delattr(cheatproof, "attacker", raising=False)
+    monkeypatch.setattr("cheatproof.envfile.load_env", recording_load_env)
+
+    deps = cli.Deps.default()
+    assert seen == [False]  # load_env ran while the attacker was not yet imported
+    assert "cheatproof.attacker" in sys.modules
+    assert deps.attack is sys.modules["cheatproof.attacker"].attack

@@ -10,6 +10,12 @@ Names and traces. <name> is the file stem with each character outside [A-Za-z0-9
 own file stem (its file name without ".json"). When that file is missing, traces_dir/<name>.jsonl is tried. A later
 certificate whose instance id an earlier file (in name order) already holds is an error row, not a page.
 
+Attack diffs. Each round's sanitized attack diff is cert_dir.parent/diffs/<stem>.<before|after>.diff, the file that
+cli harden writes beside the certificates, with its sidecar <stem>.<before|after>.diff.json. It is shown escaped, and
+only when the sidecar's raw_sha256 equals the certificate's final_diff_sha256 for that round. Otherwise, or when the
+file is missing, the round shows the digest that the certificate records, and the note that no diff was recorded.
+A symlink is never read: not a traces or diffs directory, not a file in one.
+
 The site replays committed records. Nothing here calls a model or the network, and the pages have no JavaScript. A
 certificate, trace or diff is untrusted attacker or model text, so every value reaches a page through _cell(), which
 escapes with html.escape(quote=True) and shows control and bidi characters as [U+XXXX]. Trace values pass through
@@ -40,6 +46,8 @@ NO_ATTACK_DIFF = "attack diff not recorded in certificate"
 UNREADABLE_LINE = "unreadable line"
 RUN_COMMAND = "python -m cheatproof.cli harden <instance id> ..."
 DEFAULT_CERT_DIR = "results/certificates"
+DIFFS_DIR = "diffs"  # read from the sibling of the certificates directory, where cli harden writes them
+ROUNDS = ("before", "after")
 UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
 # C0 controls except tab and newline, DEL, C1 controls and bidi controls. _cell shows each one as [U+XXXX].
 CONTROL_OR_BIDI = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]")
@@ -148,6 +156,7 @@ def build_site(cert_dir: Path, out_dir: Path, *, traces_dir: Path | None = None)
     out = Path(out_dir)
     _prepare_out_dir(out)
     entries, errors = _load_all(root)
+    diffs_dir = root.parent / DIFFS_DIR
     env_dir = out / "env"
     env_dir.mkdir(parents=True, exist_ok=True)
     _write(out / MARKER, MARKER_TEXT)
@@ -158,7 +167,11 @@ def build_site(cert_dir: Path, out_dir: Path, *, traces_dir: Path | None = None)
     pages = []
     for entry in entries:
         page = env_dir / f"{entry.name}.html"
-        body = _env_body(entry.cert, _transcript_body(traces_dir, entry))
+        diffs = {
+            name: _diff_text(diffs_dir, entry.stem, name, _recorded_digest(entry.cert, name))
+            for name in ROUNDS
+        }
+        body = _env_body(entry.cert, _transcript_body(traces_dir, entry), diffs)
         _write(page, _document(f"Cheatproof: {entry.cert['task']['instance_id']}", body))
         pages.append(page)
     return SiteResult(index=index, pages=pages, errors=errors)
@@ -536,7 +549,7 @@ def _errors_section(errors: Sequence[tuple[str, str]]) -> str:
 # Environment pages
 
 
-def _env_body(cert: Mapping[str, Any], transcript: str) -> str:
+def _env_body(cert: Mapping[str, Any], transcript: str, diffs: Mapping[str, str | None] | None = None) -> str:
     task = cert["task"]
     return "\n".join(
         [
@@ -553,7 +566,7 @@ def _env_body(cert: Mapping[str, Any], transcript: str) -> str:
             _exposure_section(cert["exposure_before"]),
             _holes_section(cert["harden"]),
             _patches_section(cert["harden"]),
-            _rounds_section(cert["harden"]),
+            _rounds_section(cert["harden"], diffs or {}),
             _section("transcript", "Transcript", transcript),
         ]
     )
@@ -711,7 +724,7 @@ def _patches_section(harden: Mapping[str, Any]) -> str:
     )
 
 
-def _round_block(label: str, rnd: Any) -> str:
+def _round_block(label: str, rnd: Any, diff: str | None) -> str:
     rnd = _map(rnd)
     attack = _map(rnd.get("attack"))
     grade = rnd.get("attack_grade")
@@ -736,17 +749,61 @@ def _round_block(label: str, rnd: Any) -> str:
         [
             f"<h3>{_cell(label)}</h3>",
             _kv_table(f"{label}: attack and grade", attack_rows),
-            _diff_block(attack),
+            _diff_block(attack, diff),
         ]
     )
 
 
-def _diff_block(attack: Mapping[str, Any]) -> str:
-    """The attack diff when the round holds one. Otherwise a note, and the digest that is recorded."""
+def _regular_file(folder: Path, name: str) -> Path | None:
+    """folder/name when folder is a directory and name a regular file, and neither is a symbolic link. Else None.
+
+    The one check that traces and diffs both go through. A link is never followed, so its target is never read.
+    """
+    if folder.is_symlink() or not folder.is_dir():
+        return None
+    path = folder / name
+    if path.is_symlink() or not path.is_file():
+        return None
+    return path
+
+
+def _recorded_digest(cert: Mapping[str, Any], name: str) -> str | None:
+    """The sha256 of one round's final attack diff, as the certificate records it, or None."""
+    rnd = _map(_map(cert.get("harden")).get(name))
+    digest = _map(rnd.get("attack")).get("final_diff_sha256")
+    return digest if isinstance(digest, str) else None
+
+
+def _diff_text(diffs_dir: Path, stem: str, name: str, digest: str | None) -> str | None:
+    """The sanitized attack diff of one round, or None. It is shown only when diffs_dir/<stem>.<name>.diff.json
+    records raw_sha256 equal to the digest that the certificate records for this round (digest). A diff without
+    such a sidecar is stale, so it is not shown.
+
+    A symlinked diffs directory or file is refused, and a file that cannot be read is None too.
+    """
+    if digest is None:
+        return None
+    path = _regular_file(diffs_dir, f"{stem}.{name}.diff")
+    sidecar = _regular_file(diffs_dir, f"{stem}.{name}.diff.json")
+    if path is None or sidecar is None:
+        return None
+    try:
+        meta = json.loads(sidecar.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError, RecursionError):
+        return None
+    if not isinstance(meta, Mapping) or meta.get("raw_sha256") != digest:
+        return None
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _diff_block(attack: Mapping[str, Any], diff: str | None) -> str:
+    """The attack diff when its file was written. Otherwise a note, and the digest that is recorded."""
     if not attack:
         return "<p>No attack ran in this round.</p>"
-    diff = attack.get("final_diff")
-    text = f'<pre tabindex="0">{_cell(diff)}</pre>' if isinstance(diff, str) else f"<p>{NO_ATTACK_DIFF}</p>"
+    text = f'<pre tabindex="0">{_cell(diff)}</pre>' if diff is not None else f"<p>{NO_ATTACK_DIFF}</p>"
     if attack.get("final_diff_sha256") is None:
         digest = "<p>No final diff digest was recorded.</p>"
     else:
@@ -757,12 +814,12 @@ def _diff_block(attack: Mapping[str, Any]) -> str:
     return f"{text}\n{digest}"
 
 
-def _rounds_section(harden: Mapping[str, Any]) -> str:
-    parts = [_round_block("Before hardening", harden["before"])]
+def _rounds_section(harden: Mapping[str, Any], diffs: Mapping[str, str | None]) -> str:
+    parts = [_round_block("Before hardening", harden["before"], diffs.get("before"))]
     if harden["after"] is None:
         parts.append("<h3>After hardening</h3>\n<p>No after round was run.</p>")
     else:
-        parts.append(_round_block("After hardening", harden["after"]))
+        parts.append(_round_block("After hardening", harden["after"], diffs.get("after")))
     return _section("rounds", "Attack rounds", *parts)
 
 
@@ -792,8 +849,8 @@ def _trace_path(traces_dir: Path | None, entry: _Entry) -> Path | None:
     if traces_dir is None:
         return None
     for stem in (entry.stem, entry.name):
-        path = Path(traces_dir) / f"{stem}.jsonl"
-        if path.is_file():
+        path = _regular_file(Path(traces_dir), f"{stem}.jsonl")
+        if path is not None:
             return path
     return None
 
