@@ -55,8 +55,10 @@ Done 2026-10-18 (routine): PR #10 open, CI green, Sonnet review fixed (one round
 and 11 are below (T08, T12 text). Planner merges #10 (U10), then installs `docs/autopilot/pre-push`.
 
 ### T23 Sandboxes access check and $0 booking (planner-merge PR) — size S — waiting: U3
-Every cycle while U3 is open, before picking work: run one free access check with `contree-sdk` (list images or the
-account/whoami call; never start a sandbox run), loading `.env` through `cheatproof.envfile`. Log the result in one
+Every cycle while U3 is open, before picking work (even though this task waits on U3): run
+`uv run python scripts/sandbox_access.py` (free: whoami plus image list; never starts a sandbox run). Exit 2
+(`NO ACCESS`) means still waiting; exit 0 (`ACCESS OK`) means access is on. Checked 2026-10-19: key valid, image list
+forbidden. Log the result in one
 LOG.md line, never the IDs or the key. When it succeeds: flip this task and T01's sandbox part to `todo` and strike U3.
 Then: the Sandboxes page says beta runs are free and do not consume credits, so book Sandboxes sessions at $0 and count
 them toward `SANDBOX_RUN_CAP` only (a count-only path like `reserve_local_run()`), keep Docker as it is, record a
