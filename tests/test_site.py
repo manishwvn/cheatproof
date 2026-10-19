@@ -1,7 +1,8 @@
-"""Tests for cheatproof/site.py (queue T09, part A).
+"""Tests for cheatproof/site.py (queue T09, part A; queue T18, the batch record and the summary split).
 
 Certificates come from the fixture builders in test_certify.py and are written with certify.write_certificate. Traces
-are written by hand. No model, network or sandbox run.
+are written by hand. The batch record is written by hand too, in the schema cli batch writes. No model, network or
+sandbox run.
 """
 
 import dataclasses
@@ -17,12 +18,14 @@ from test_certify import (
     exploited,
     fixed_report,
     gate_failed_report,
+    no_attempt_report,
     still_report,
     with_before,
 )
 
+from cheatproof import site
 from cheatproof.certify import SCHEMA, score_directory, write_certificate
-from cheatproof.site import _page_name, build_site
+from cheatproof.site import _money_basis, _page_name, build_site
 
 CSP_META = (
     """<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">"""
@@ -743,3 +746,334 @@ def test_a_symlinked_diffs_directory_is_refused_and_its_target_is_not_read(tmp_p
     page = read(out / "env" / "owner__repo-1.html")
     assert "TARGET-MARKER" not in page
     assert NO_DIFF_NOTE in page
+
+
+# The batch record (cli batch, schema_version 1) and the summary split. Hand-written records, no model or network.
+
+RUN_RECORD_HEAD = '<h3 id="run-record">Run record</h3>'
+BATCH_OK_RUN = "n run 3 of 4 selected."
+CERTIFIED_UNHARDENED = "Certified, attacker never succeeded before patching (certified_unhardened)"
+CERTIFIED_HARDENED = "Certified, attacker succeeded before patching and the patches held (certified_hardened)"
+NO_ATTEMPT = "No attempt, attacker never tried (no_attempt, also counted in the outcomes)"
+
+
+def batch_record(**changes) -> dict:
+    """A schema 1 batch record for the fixture_dir certificates: four selected, three run, one not run."""
+    record = {
+        "schema_version": 1,
+        "source": ["swe-rebench"],
+        "selection_rule": "first 4 valid tasks in source order",
+        "scanned": 5,
+        "valid": 4,
+        "skipped": {"no test patch": 1},
+        "selected": 4,
+        "selected_ids": ["owner__repo-1", "owner__repo-2", "owner__repo-3", "owner__repo-4"],
+        "run": 3,
+        "already_certified": 0,
+        "not_run": [
+            {"instance_id": "owner__repo-4", "reason": "sandbox error", "error": "timeout after 600 s"}
+        ],
+        "started": "2026-10-18T10:00:00Z",
+        "updated": "2026-10-18T10:30:00Z",
+    }
+    record.update(changes)
+    return record
+
+
+def put_batch(parent: Path, record: dict | str) -> Path:
+    """Write the batch record as parent/batch.json. A str is written as it is, for bad JSON."""
+    path = parent / "batch.json"
+    path.write_text(record if isinstance(record, str) else json.dumps(record), encoding="utf-8")
+    return path
+
+
+def test_a_batch_record_gives_the_counts_skips_and_the_not_run_table(tmp_path):
+    cert_dir = fixture_dir(tmp_path)
+    put_batch(tmp_path, batch_record())
+    result = build_site(cert_dir, tmp_path / "site")
+    index = read(result.index)
+    assert result.errors == []
+    assert BATCH_OK_RUN in index  # 3 certificates loaded, 4 selected
+    assert RUN_RECORD_HEAD in index
+    assert index.index('id="score"') < index.index(RUN_RECORD_HEAD) < index.index('id="environments"')
+    for label, value in (
+        ("Selection rule", "first 4 valid tasks in source order"),
+        ("Scanned", 5),
+        ("Valid", 4),
+        ("Selected", 4),
+        ("Run by this batch", 3),
+        ("Already certified", 0),
+        ("Not run", 1),
+        ("Started", "2026-10-18T10:00:00Z"),
+    ):
+        assert f'<tr><th scope="row">{label}</th><td>{value}</td></tr>' in index
+    assert '<tr><th scope="row">no test patch</th><td>1</td></tr>' in index
+    assert (
+        '<tr><th scope="row">owner__repo-4</th><td>sandbox error</td><td>timeout after 600 s</td></tr>'
+        in index
+    )
+    for caption in (
+        "Selection record counts",
+        "Instances skipped, by reason",
+        "Not run, with reason and error",
+    ):
+        assert f"<caption>{caption}</caption>" in index
+        assert f'aria-label="{caption}"' in index
+    assert "selection record not available" not in index
+    assert "batch record not loaded" not in index
+
+
+def test_the_first_number_counts_certificates_loaded_not_the_batch_run(tmp_path):
+    cert_dir = fixture_dir(tmp_path)  # three certificates load
+    put_batch(
+        tmp_path,
+        batch_record(run=1, not_run=[{"instance_id": "owner__repo-2", "reason": "x", "error": ""}] * 3),
+    )
+    index = read(build_site(cert_dir, tmp_path / "site").index)
+    assert BATCH_OK_RUN in index  # X is the loaded count, 3
+    assert '<tr><th scope="row">Run by this batch</th><td>1</td></tr>' in index
+    assert (
+        '<tr><th scope="row">owner__repo-2</th><td>x</td><td>none</td></tr>' in index
+    )  # an empty error reads none
+
+
+def test_hostile_batch_strings_are_escaped_and_bidi_shown_as_codes(tmp_path):
+    hostile = MIXED_PAYLOAD + "\N{RIGHT-TO-LEFT OVERRIDE}\x07"
+    record = batch_record(
+        selection_rule=hostile,
+        started=ATTR_PAYLOAD,
+        skipped={hostile: 1},
+        not_run=[{"instance_id": hostile, "reason": ATTR_PAYLOAD, "error": "bad\x1b"}],
+    )
+    cert_dir = fixture_dir(tmp_path)
+    put_batch(tmp_path, record)
+    result = build_site(cert_dir, tmp_path / "site")
+    index = read(result.index)
+    assert result.errors == []
+    assert MIXED_PAYLOAD not in index
+    assert "<script" not in index.lower()
+    assert ATTR_PAYLOAD not in index
+    assert "\N{RIGHT-TO-LEFT OVERRIDE}" not in index
+    assert "\x07" not in index and "\x1b" not in index
+    assert ESCAPED_TAG in index
+    assert "[U+202E][U+0007]" in index
+    assert "[U+001B]" in index
+    assert "&quot;onload=alert(1)" in index
+
+
+def test_without_a_batch_file_the_page_says_the_selection_record_is_not_available(tmp_path):
+    cert_dir = fixture_dir(tmp_path)
+    result = build_site(cert_dir, tmp_path / "site")
+    index = read(result.index)
+    assert result.errors == []
+    assert RUN_RECORD_HEAD in index
+    assert "selection record not available" in index
+    assert "n run" not in index
+    assert "Not run, with reason and error" not in index
+    assert "batch record not loaded" not in index
+
+
+def test_no_certificates_and_no_batch_still_say_the_record_is_not_available(tmp_path):
+    cert_dir = tmp_path / "certs"
+    cert_dir.mkdir()
+    index = read(build_site(cert_dir, tmp_path / "site").index)
+    assert "No certificates were found in the certificates directory." in index
+    assert "selection record not available" in index
+
+
+def test_a_valid_batch_with_no_certificates_loaded_says_zero_run(tmp_path):
+    cert_dir = tmp_path / "certs"
+    cert_dir.mkdir()
+    put_batch(tmp_path, batch_record())
+    index = read(build_site(cert_dir, tmp_path / "site").index)
+    assert "n run 0 of 4 selected." in index
+    assert "Hackability score" not in index
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("{not json", "batch record is not valid JSON"),
+        ('{"schema_version": NaN}', "batch record is not valid JSON"),
+        ("[]", "batch record must be a JSON object"),
+    ],
+    ids=["not-json", "nan", "not-an-object"],
+)
+def test_a_batch_that_does_not_parse_is_an_error_row_and_is_not_loaded(tmp_path, text, message):
+    cert_dir = fixture_dir(tmp_path)
+    put_batch(tmp_path, text)
+    out = tmp_path / "site"
+    result = build_site(cert_dir, out)
+    index = read(result.index)
+    assert result.errors == [("batch.json", message)]
+    assert [page.name for page in result.pages] == NAMES  # the certificates still build
+    assert "batch record not loaded" in index
+    assert "selection record not available" not in index
+    assert "n run" not in index
+    assert "n = 3 valid certificates. A certified task" in index  # a bad batch is not an excluded certificate
+    assert "excluded (see" not in index
+    assert "batch.json" in index
+
+
+def test_a_bad_batch_with_no_certificates_does_not_say_certificates_failed(tmp_path):
+    cert_dir = tmp_path / "certs"
+    cert_dir.mkdir()
+    put_batch(tmp_path, "{not json")
+    result = build_site(cert_dir, tmp_path / "site")
+    index = read(result.index)
+    assert result.errors == [("batch.json", "batch record is not valid JSON")]
+    assert "No certificates were found in the certificates directory." in index
+    assert "Every certificate file failed" not in index
+    assert "batch record not loaded" in index
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"schema_version": 2}, "batch record schema_version must be 1"),
+        ({"schema_version": "1"}, "batch record schema_version must be 1"),
+        ({"schema_version": True}, "batch record schema_version must be 1"),
+        ({"scanned": -1}, "batch record field scanned has the wrong type"),
+        ({"valid": True}, "batch record field valid has the wrong type"),
+        ({"selected": "4"}, "batch record field selected has the wrong type"),
+        ({"run": 1.0}, "batch record field run has the wrong type"),
+        ({"selected": 3}, "batch record selected must equal the length of selected_ids"),
+        ({"valid": 6}, "batch record valid must not exceed scanned"),
+        ({"source": "swe-rebench"}, "batch record field source has the wrong type"),
+        ({"selected_ids": [1, 2, 3, 4]}, "batch record field selected_ids has the wrong type"),
+        ({"selection_rule": None}, "batch record field selection_rule has the wrong type"),
+        ({"skipped": {"no test patch": -2}}, "batch record field skipped has the wrong type"),
+        ({"skipped": ["no test patch"]}, "batch record field skipped has the wrong type"),
+        (
+            {"not_run": [{"instance_id": "x", "reason": "r"}]},
+            "batch record field not_run has the wrong type",
+        ),
+        (
+            {"not_run": [{"instance_id": "x", "reason": "r", "error": "e", "extra": "y"}]},
+            "batch record field not_run has the wrong type",
+        ),
+        (
+            {"not_run": [{"instance_id": "x", "reason": "r", "error": 3}]},
+            "batch record field not_run has the wrong type",
+        ),
+    ],
+    ids=[
+        "version-2",
+        "version-string",
+        "version-bool",
+        "scanned-negative",
+        "valid-bool",
+        "selected-string",
+        "run-float",
+        "selected-vs-ids",
+        "valid-over-scanned",
+        "source-string",
+        "ids-not-strings",
+        "rule-none",
+        "skipped-negative",
+        "skipped-list",
+        "not-run-missing-key",
+        "not-run-extra-key",
+        "not-run-int-error",
+    ],
+)
+def test_a_batch_that_breaks_the_schema_is_refused_with_its_field_named(tmp_path, change, message):
+    cert_dir = fixture_dir(tmp_path)
+    put_batch(tmp_path, batch_record(**change))
+    result = build_site(cert_dir, tmp_path / "site")
+    index = read(result.index)
+    assert result.errors == [("batch.json", message)]
+    assert "batch record not loaded" in index
+    assert "n run" not in index
+
+
+def test_a_batch_missing_a_key_or_with_an_extra_key_is_refused(tmp_path):
+    cert_dir = fixture_dir(tmp_path)
+    missing = batch_record()
+    del missing["started"]
+    put_batch(tmp_path, missing)
+    assert build_site(cert_dir, tmp_path / "site").errors == [("batch.json", "batch record is missing a key")]
+    put_batch(tmp_path, batch_record(extra="x"))
+    assert build_site(cert_dir, tmp_path / "site2").errors == [
+        ("batch.json", "batch record has an unknown key")
+    ]
+
+
+def test_an_explicit_batch_file_is_read_and_a_missing_one_is_an_error(tmp_path):
+    cert_dir = fixture_dir(tmp_path)
+    put_batch(tmp_path, batch_record(selection_rule="DEFAULT-RULE"))  # the default file is not used
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    explicit = elsewhere / "run.json"
+    explicit.write_text(json.dumps(batch_record(selection_rule="EXPLICIT-RULE")), encoding="utf-8")
+    index = read(build_site(cert_dir, tmp_path / "site", batch_file=explicit).index)
+    assert BATCH_OK_RUN in index
+    assert "EXPLICIT-RULE" in index
+    assert "DEFAULT-RULE" not in index
+    result = build_site(cert_dir, tmp_path / "site2", batch_file=elsewhere / "missing.json")
+    assert result.errors == [("missing.json", "batch record not found")]
+    assert "batch record not loaded" in read(result.index)
+
+
+def test_a_symlinked_batch_is_refused_and_its_target_is_not_read(tmp_path):
+    real = tmp_path / "real.json"
+    real.write_text(json.dumps(batch_record(selection_rule="SECRET-MARKER")), encoding="utf-8")
+    (tmp_path / "batch.json").symlink_to(real)
+    cert_dir = fixture_dir(tmp_path)
+    result = build_site(cert_dir, tmp_path / "site")
+    index = read(result.index)
+    assert "SECRET-MARKER" not in index
+    assert [name for name, _ in result.errors] == ["batch.json"]
+    assert "symlink refused" in result.errors[0][1]
+    assert "batch record not loaded" in index
+    assert "n run" not in index
+
+
+def test_the_summary_shows_the_certified_split_no_attempt_and_the_cost_basis(tmp_path):
+    cert_dir = tmp_path / "certs"
+    write_certs(
+        cert_dir,
+        fixed_report("owner__repo-1"),
+        clean_report("owner__repo-2"),
+        no_attempt_report("owner__repo-3"),
+    )
+    out = tmp_path / "site"
+    result = build_site(cert_dir, out)
+    index = read(result.index)
+    summary = score_directory(cert_dir)
+    assert (summary["certified_unhardened"], summary["certified_hardened"], summary["no_attempt"]) == (
+        1,
+        1,
+        1,
+    )
+    assert f'<tr><th scope="row">{CERTIFIED_UNHARDENED}</th><td>1</td></tr>' in index
+    assert f'<tr><th scope="row">{CERTIFIED_HARDENED}</th><td>1</td></tr>' in index
+    assert f'<tr><th scope="row">{NO_ATTEMPT}</th><td>1</td></tr>' in index
+    assert '<tr><th scope="row">Cost, total (USD)</th><td>$0.7500 (budgeted ledger delta)</td></tr>' in index
+    assert "<td>no_attempt</td><td>1</td>" in index  # the outcome row is still there
+    assert "<td>$0.2500 (budgeted ledger delta)</td>" in read(
+        result.pages[1]
+    )  # the page's own cost, with its basis
+
+
+def test_a_score_without_the_new_keys_says_not_recorded(tmp_path, monkeypatch):
+    real_score = site.score
+
+    def older_score(certs):
+        result = real_score(certs)
+        for key in ("certified_unhardened", "certified_hardened", "no_attempt", "cost_basis"):
+            del result[key]
+        return result
+
+    monkeypatch.setattr(site, "score", older_score)
+    index = read(build_site(fixture_dir(tmp_path), tmp_path / "site").index)
+    assert f'<tr><th scope="row">{CERTIFIED_UNHARDENED}</th><td>not recorded</td></tr>' in index
+    assert f'<tr><th scope="row">{CERTIFIED_HARDENED}</th><td>not recorded</td></tr>' in index
+    assert f'<tr><th scope="row">{NO_ATTEMPT}</th><td>not recorded</td></tr>' in index
+    assert '<tr><th scope="row">Cost, total (USD)</th><td>$0.7500 (not recorded)</td></tr>' in index
+
+
+def test_money_shows_its_basis_and_says_not_recorded_when_either_is_missing():
+    assert _money_basis(0.25, "budgeted ledger delta") == "$0.2500 (budgeted ledger delta)"
+    assert _money_basis(0.25, None) == "$0.2500 (not recorded)"
+    assert _money_basis(None, "budgeted ledger delta") == "not recorded"

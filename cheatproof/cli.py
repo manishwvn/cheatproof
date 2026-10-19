@@ -1,14 +1,18 @@
-"""Command line for the re-attack loop, the certificate report (T07) and the static site (T09).
+"""Command line for the re-attack loop, the certificate report (T07), the static site (T09) and the batch (T18).
 
     python -m cheatproof.cli harden <instance-id> --system-prompt-file PATH [--source S] [--cache-dir DIR]
-        [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S]
+        [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
+    python -m cheatproof.cli batch --system-prompt-file PATH [--source S ...] [--n N] [--cache-dir DIR]
+        [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
     python -m cheatproof.cli report [--certs DIR] [--out FILE] [--format text|json]
     python -m cheatproof.cli site [--certs DIR] [--out DIR] [--traces DIR]
 
 harden finds the task in the local cache only (never the network), runs harden() with one attacker bound to the
 given system prompt, writes one certificate and prints its path and a summary line. The attacker's task prompt is
 a description of the task (repo, instance id, problem statement, failing tests). The gold and test patches
-never reach it.
+never reach it. The certificate's attacker block records the executor backend (EXECUTOR, default docker),
+max_output_tokens, cmd_timeout (the attacker's command timeout, not --timeout) and strategy: the --strategy label,
+or the system prompt file's stem.
 Beside the certificates directory, harden keeps what its paid run produced, each file named by the certificate's
 stem: traces/<stem>.jsonl (the attacker trace; an earlier one is renamed to <stem>.<UTC time>.jsonl.old before the
 run), diffs/<stem>.<before|after>.diff with its sidecar diffs/<stem>.<before|after>.diff.json (a round's attack diff
@@ -16,7 +20,19 @@ through sanitize, one line at a time, written only when the raw sha256 matches t
 sidecar holds raw_sha256, chars and redacted_lines), and reports/<stem>.report.json (the digest-only report through
 sanitize, written only when no certificate was, and removed once a certificate is written). A symbolic link at
 traces/ or at a trace file is refused before the paid run.
+batch hardens the cached selection one task at a time, with the same steps and files as harden. The selection is the
+rule tasks fetch uses (per source, the n lowest by score, deny-listed repos left out), read from the cache only:
+batch never fetches. A task whose certificate is already in --out is skipped and counted as already certified. Each
+other task gets one paid run. A task that cannot run becomes a not-run row {instance_id, reason, error} and the batch
+goes on. reason is executor_refused, executor_unavailable, disk (free space on --out's file system is below
+MIN_FREE_DISK_GB, default 10, checked before each task), budget or certificate_write_failed. A BudgetExceeded (a cap,
+a halt, or HTTP 402) marks the current task and each remaining task that is not already certified as budget, and the
+batch stops. Nothing is pruned.
+After every task the batch writes batch.json beside the certificates directory, atomically (schema_version 1: the
+selection, the counts and the not-run rows).
 report prints certify.score_directory() as it is: rates with their n, raw counts, outcomes, holes and sources.
+When batch.json sits beside the certificates directory, report also prints the batch counts and adds a batch key
+to the JSON output.
 The rates, intervals and totals are computed in certify.py only; this module does no statistics of its own.
 site builds the static report site through site.build_site from the certificate files. It is not a paid call:
 no Budget, LLM or executor is built for it. Its traces come from --traces, or from traces/ beside the certificates
@@ -26,6 +42,8 @@ Exit codes: 0 a certificate was written (certified or not), or the report was pr
 capped, the executor refused or was unavailable, or the certificate could not be written after a paid run (its
 report is kept in reports/). 2 usage error: bad flags, missing prompt, unknown or ambiguous task, missing setting,
 no certificates.
+batch: 0 the batch finished, with or without not-run rows; 1 the budget stopped it, or batch.json could not be
+written; 2 usage error, or a missing setting or no current cache, found before the first paid run that needs it.
 site: 0 the site was written and every certificate loaded; 1 the site was written but some did not load (each
 listed on stderr), or the write failed; 2 the certificates or traces directory is missing, or --out is a non-empty
 directory that is not a cheatproof site.
@@ -45,7 +63,9 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
+from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -81,6 +101,48 @@ RATE_LABELS = (
     ("rate_before", "hackable before hardening"),
     ("rate_after", "hackable after hardening"),
 )
+BATCH_FILE = "batch.json"  # beside the certificates directory; rewritten whole after every task
+BATCH_SCHEMA_VERSION = 1
+DEFAULT_MIN_FREE_GB = 10.0  # MIN_FREE_DISK_GB when the environment does not set it
+GIB = 1024**3
+
+
+class _NoCache(RuntimeError):
+    """The batch reads the cache only. A fetch was asked for, so the cache is missing or in another format."""
+
+
+def _refuse_fetch(*args: Any, **kwargs: Any) -> Any:
+    raise _NoCache()
+
+
+def load_cached_selection(source: str, n: int | None, cache_dir: Path) -> Any:
+    """The selection for one source from runs/tasks/<source>.json only. ValueError when that cache is missing."""
+    from cheatproof.tasks import load_tasks  # lazy: the loader module imports httpx
+
+    try:
+        return load_tasks(source, n=n, cache_dir=cache_dir, fetcher=_refuse_fetch)
+    except _NoCache:
+        raise ValueError(
+            f"no current cache for {source} under {cache_dir}: run python -m cheatproof.tasks fetch first "
+            "(batch never fetches)"
+        ) from None
+
+
+def _free_gb(path: Path) -> float:
+    """Free space in GiB on the file system that holds path, or on its nearest existing parent."""
+    probe = path
+    while not probe.exists() and probe.parent != probe:
+        probe = probe.parent
+    return shutil.disk_usage(probe).free / GIB
+
+
+def _min_free_gb() -> float:
+    """MIN_FREE_DISK_GB from the environment: a finite number of at least 0, else the default."""
+    try:
+        value = float(os.environ.get("MIN_FREE_DISK_GB", ""))
+    except ValueError:
+        return DEFAULT_MIN_FREE_GB
+    return value if math.isfinite(value) and value >= 0 else DEFAULT_MIN_FREE_GB
 
 
 @dataclass(frozen=True)
@@ -98,6 +160,10 @@ class Deps:
     score_directory: Callable[[Path], Mapping[str, Any]]
     build_site: Callable[..., Any]
     clock: Callable[[], str]
+    load_selection: Callable[[str, int | None, Path], Any] = (
+        load_cached_selection  # cache only, never fetches
+    )
+    disk_free_gb: Callable[[Path], float] = _free_gb  # free GiB on the file system holding the output folder
 
     @classmethod
     def default(cls) -> Deps:
@@ -122,6 +188,8 @@ class Deps:
             score_directory=certify.score_directory,
             build_site=_build_site,
             clock=_utc_now,
+            load_selection=load_cached_selection,
+            disk_free_gb=_free_gb,
         )
 
 
@@ -374,22 +442,82 @@ def _sweep_leftovers(executor: Any) -> None:
         print(f"swept {swept} leftover cheatproof containers", file=sys.stderr)
 
 
-def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
+class _Usage(Exception):
+    """A refusal found before any paid call. harden exits 2; batch records it as a not-run row."""
+
+
+class _Unwritten(Exception):
+    """A paid run that ended without a certificate, or never started.
+
+    stage: "start" (a setup or harden stop, or the trace could not be set aside), "cost" (the spend could not be
+    measured) or "certificate" (the report and diffs were kept). reason: the batch label. cost: the measured spend
+    when the run finished, else None.
+    """
+
+    def __init__(self, stage: str, reason: str, exc: BaseException, cost: float | None = None) -> None:
+        super().__init__(str(exc))
+        self.stage = stage
+        self.reason = reason
+        self.exc = exc
+        self.cost = cost
+
+
+@dataclass(frozen=True)
+class _Written:
+    path: Path
+    report: Any
+    cost: float
+
+
+@dataclass(frozen=True)
+class _Plan:
+    task: TaskSpec
+    stem: str
+    env: EnvSpec
+    prompt: str
+    traces_dir: Path
+    trace_path: Path
+
+
+@dataclass(frozen=True)
+class _Settings:
+    system_prompt: str
+    config: Any
+    timeout_kw: Mapping[str, float]
+    strategy: str
+    executor_name: str
+    out: Path
+
+
+def _stop_reason(exc: BaseException) -> str:
+    """The batch label for a stop: the budget, or the executor that refused or was unavailable."""
+    if isinstance(exc, BudgetExceeded):
+        return "budget"
+    if isinstance(exc, ExecutorRefused):
+        return "executor_refused"
+    return "executor_unavailable"
+
+
+def _harden_settings(args: argparse.Namespace) -> _Settings:
+    """The attacker settings that harden and batch share. _Usage, or ValueError from AttackConfig, before any paid call."""
     from cheatproof.attacker import AttackConfig  # lazy: attacker imports the LLM client module
 
     prompt_path = args.system_prompt_file
     if prompt_path is None:
-        return _usage_error("--system-prompt-file is required: strategy prompts come from the planner (T16)")
+        raise _Usage("--system-prompt-file is required: strategy prompts come from the planner (T16)")
     if not prompt_path.is_file():
-        return _usage_error(f"system prompt file not found: {prompt_path}")
+        raise _Usage(f"system prompt file not found: {prompt_path}")
     system_prompt = prompt_path.read_text(encoding="utf-8")
     if not system_prompt.strip():
-        return _usage_error(f"system prompt file is empty: {prompt_path}")
+        raise _Usage(f"system prompt file is empty: {prompt_path}")
+    strategy = prompt_path.stem if args.strategy is None else args.strategy
+    if not strategy.strip():
+        raise _Usage("--strategy must not be empty")
 
     model = args.attacker_model if args.attacker_model is not None else os.environ.get("ATTACKER_MODEL", "")
     model = model.strip()
     if not model:
-        return _usage_error("no attacker model: pass --attacker-model or set ATTACKER_MODEL")
+        raise _Usage("no attacker model: pass --attacker-model or set ATTACKER_MODEL")
     limits: dict[str, Any] = {}
     if args.max_steps is not None:
         limits["max_steps"] = args.max_steps
@@ -398,14 +526,123 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
     timeout_kw: dict[str, float] = {}
     if args.timeout is not None:
         if not (math.isfinite(args.timeout) and args.timeout > 0):
-            return _usage_error(f"--timeout must be a positive number of seconds, got {args.timeout!r}")
+            raise _Usage(f"--timeout must be a positive number of seconds, got {args.timeout!r}")
         timeout_kw["timeout"] = args.timeout
 
+    # Network stays off: the task's EnvSpec is built with network=False, so allow_network must match.
+    config = AttackConfig(model=model, allow_network=False, **limits)
+    return _Settings(
+        system_prompt=system_prompt,
+        config=config,
+        timeout_kw=timeout_kw,
+        strategy=strategy,
+        executor_name=(os.environ.get("EXECUTOR") or "docker").strip().lower(),
+        out=args.out,
+    )
+
+
+def _plan(task: TaskSpec, out: Path) -> _Plan:
+    """The paid run's plan for one task: env, certificate stem, prompt and trace paths. _Usage before any paid call."""
     try:
-        # Network stays off: the task's EnvSpec is built with network=False, so allow_network must match.
-        config = AttackConfig(model=model, allow_network=False, **limits)
-        matches = deps.find_tasks(args.instance_id, args.source, args.cache_dir)
+        env = EnvSpec(image=task.image)
+        stem = _certificate_stem(task)  # checked before any paid run
     except ValueError as exc:
+        raise _Usage(str(exc)) from None
+    traces_dir = out.parent / TRACES_DIR
+    trace_path = traces_dir / f"{stem}.jsonl"
+    if traces_dir.is_symlink() or trace_path.is_symlink():
+        # Checked before any paid run: the attacker would append its trace through the link.
+        raise _Usage(
+            f"refusing to write the trace through a symbolic link: {TRACES_DIR}/ or {trace_path.name}"
+        )
+    return _Plan(task, stem, env, build_task_prompt(task, env.workdir), traces_dir, trace_path)
+
+
+def _open(deps: Deps) -> tuple[Any, Any, Any]:
+    """The executor (after its leftover sweep), the budget and the bound LLM for one paid run.
+
+    A stop here is _Unwritten with stage "start". A missing setting (KeyError) and a bad one (ValueError) are raised as
+    they are, for the caller to name.
+    """
+    try:
+        executor = deps.make_executor()
+        _sweep_leftovers(executor)
+        budget = deps.make_budget()
+        llm = deps.make_llm(budget)
+    except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
+        raise _Unwritten("start", _stop_reason(exc), exc) from None
+    return executor, budget, llm
+
+
+def _harden_one(
+    plan: _Plan, settings: _Settings, deps: Deps, executor: Any, budget: Any, llm: Any
+) -> _Written:
+    """One paid harden run and its certificate, shared by harden and batch. Raises _Unwritten when no certificate came
+    of it. A ValueError from harden itself is not caught here."""
+    stem, out = plan.stem, settings.out
+    try:
+        # An earlier run's trace is set aside before this run appends to traces/<stem>.jsonl.
+        _rotate_trace(plan.traces_dir, stem, plan.trace_path)
+    except OSError as exc:
+        raise _Unwritten("start", "certificate_write_failed", exc) from None
+
+    def attack_fn(session: Any) -> Any:
+        return deps.attack(
+            llm, session, settings.system_prompt, plan.prompt, settings.config, trace_path=plan.trace_path
+        )
+
+    spent_before = _spent(budget.snapshot())
+    try:
+        report = deps.harden(executor, plan.env, plan.task, attack_fn, budget=budget, **settings.timeout_kw)
+    except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
+        raise _Unwritten("start", _stop_reason(exc), exc) from None
+    spent_after = _spent(budget.snapshot())
+    cost = spent_after - spent_before
+    if not (math.isfinite(cost) and cost >= 0):
+        # The ledger total went down or is not a number: the spend is unknown, so no certificate is built.
+        # The paid run is kept all the same: its digest-only report and its diffs.
+        _keep_report(report, stem, out)
+        _keep_diffs(report, stem, out)
+        message = (
+            "cost check failed: the ledger went from "
+            f"${spent_before:.4f} to ${spent_after:.4f} during the run; no certificate written"
+        )
+        raise _Unwritten("cost", "certificate_write_failed", RuntimeError(message))
+
+    config = settings.config
+    attacker = {"model": config.model, "max_steps": config.max_steps, "max_tokens": config.max_tokens_total}
+    timestamp = deps.clock()
+    try:
+        cert = deps.build_certificate(
+            report,
+            plan.task,
+            image_digest=None,  # the executor does not expose an image digest yet
+            attacker=attacker,
+            cost_usd=cost,
+            timestamp=timestamp,
+            executor=settings.executor_name,
+            max_output_tokens=config.max_output_tokens,
+            cmd_timeout=config.cmd_timeout,
+            strategy=settings.strategy,
+        )
+        out.mkdir(parents=True, exist_ok=True)
+        path = deps.write_certificate(cert, out)
+    except Exception as exc:  # noqa: BLE001 - any failure after a paid run keeps the run, then reports it
+        # The paid run is kept: its report and its diffs, even though no certificate came of it.
+        _keep_report(report, stem, out)
+        _keep_diffs(report, stem, out)
+        raise _Unwritten("certificate", "certificate_write_failed", exc, cost) from None
+    # An earlier failed run's report for this stem is stale now that a certificate exists.
+    _remove_beside(out.parent / REPORTS_DIR, f"{stem}.report.json")
+    _keep_diffs(report, stem, out)
+    return _Written(path, report, cost)
+
+
+def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
+    try:
+        settings = _harden_settings(args)
+        matches = deps.find_tasks(args.instance_id, args.source, args.cache_dir)
+    except (_Usage, ValueError) as exc:
         return _usage_error(str(exc))
     if not matches:
         return _usage_error(
@@ -414,84 +651,246 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
         )
     if len(matches) > 1:
         return _usage_error(f"{args.instance_id!r} is cached under more than one source: pass --source")
-    task = matches[0]
     try:
-        env = EnvSpec(image=task.image)
-        stem = _certificate_stem(task)  # checked before any paid run
-    except ValueError as exc:
+        plan = _plan(matches[0], settings.out)
+    except _Usage as exc:
         return _usage_error(str(exc))
-    prompt = build_task_prompt(task, env.workdir)
-    traces_dir = args.out.parent / TRACES_DIR
-    trace_path = traces_dir / f"{stem}.jsonl"
-    if traces_dir.is_symlink() or trace_path.is_symlink():
-        # Checked before any paid run: the attacker would append its trace through the link.
-        return _usage_error(
-            f"refusing to write the trace through a symbolic link: {TRACES_DIR}/ or {trace_path.name}"
-        )
-
     try:
-        executor = deps.make_executor()
-        _sweep_leftovers(executor)
-        budget = deps.make_budget()
-        llm = deps.make_llm(budget)
-    except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
-        return _failure(exc)
+        executor, budget, llm = _open(deps)
+    except _Unwritten as exc:
+        return _failure(exc.exc)
     except KeyError as exc:
         return _missing_setting(exc)
     except ValueError as exc:
         return _usage_error(str(exc))
     try:
-        # An earlier run's trace is set aside before this run appends to traces/<stem>.jsonl.
-        _rotate_trace(traces_dir, stem, trace_path)
-    except OSError as exc:
-        return _failure(exc)
-
-    def attack_fn(session: Any) -> Any:
-        return deps.attack(llm, session, system_prompt, prompt, config, trace_path=trace_path)
-
-    spent_before = _spent(budget.snapshot())
-    try:
-        report = deps.harden(executor, env, task, attack_fn, budget=budget, **timeout_kw)
-    except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
-        return _failure(exc)
-    spent_after = _spent(budget.snapshot())
-    cost = spent_after - spent_before
-    if not (math.isfinite(cost) and cost >= 0):
-        # The ledger total went down or is not a number: the spend is unknown, so no certificate is built.
-        print(
-            "error: cost check failed: the ledger went from "
-            f"${spent_before:.4f} to ${spent_after:.4f} during the run; no certificate written",
-            file=sys.stderr,
-        )
-        # The paid run is kept all the same: its digest-only report and its diffs.
-        _keep_report(report, stem, args.out)
-        _keep_diffs(report, stem, args.out)
-        return 1
-
-    attacker = {"model": config.model, "max_steps": config.max_steps, "max_tokens": config.max_tokens_total}
-    timestamp = deps.clock()
-    try:
-        cert = deps.build_certificate(
-            report,
-            task,
-            image_digest=None,  # the executor does not expose an image digest yet
-            attacker=attacker,
-            cost_usd=cost,
-            timestamp=timestamp,
-        )
-        args.out.mkdir(parents=True, exist_ok=True)
-        path = deps.write_certificate(cert, args.out)
-    except Exception as exc:  # noqa: BLE001 - any failure after a paid run keeps the run, then exits 1
-        # The paid run is kept: its report and its diffs, even though no certificate came of it.
-        _keep_report(report, stem, args.out)
-        _keep_diffs(report, stem, args.out)
-        return _not_written(exc, cost)
-    # An earlier failed run's report for this stem is stale now that a certificate exists.
-    _remove_beside(args.out.parent / REPORTS_DIR, f"{stem}.report.json")
-    _keep_diffs(report, stem, args.out)
-    print(f"certificate: {path}")
-    print(_harden_line(report, cost))
+        done = _harden_one(plan, settings, deps, executor, budget, llm)
+    except _Unwritten as exc:
+        if exc.stage == "start":
+            return _failure(exc.exc)
+        if exc.stage == "cost":
+            print(f"error: {exc.exc}", file=sys.stderr)
+            return 1
+        return _not_written(exc.exc, exc.cost or 0.0)
+    print(f"certificate: {done.path}")
+    print(_harden_line(done.report, done.cost))
     return 0
+
+
+def _certified_before(task: TaskSpec, out: Path) -> bool:
+    """True when the task's certificate file is already in out. A name that cannot be made is not certified."""
+    from cheatproof.certify import certificate_filename  # lazy: only a batch needs the file names
+
+    try:
+        name = certificate_filename(task.instance_id)
+    except ValueError:
+        return False  # _plan refuses the same task with the same error
+    return (out / name).is_file()
+
+
+def _selection_rule() -> str:
+    # lazy: the loader module imports httpx
+    from cheatproof.tasks import DEFAULT_DENY_REPOS, NON_PYTHON_PENALTY
+
+    return (
+        "per source, the n lowest by score: fail-to-pass plus pass-to-pass test count, plus gold patch size in KB, "
+        f"plus {NON_PYTHON_PENALTY:g} per non-.py file in the gold patch; ties by instance_id; "
+        f"repos on the deny list are left out ({', '.join(sorted(DEFAULT_DENY_REPOS))})"
+    )
+
+
+def _write_batch(path: Path, state: Mapping[str, Any]) -> None:
+    """Write batch.json through a temporary file and os.replace, so a reader sees the old file or the new one, never a
+    half. A link at either name is refused."""
+    tmp = path.with_name(path.name + ".tmp")
+    if path.is_symlink() or tmp.is_symlink():
+        raise OSError(f"refusing to write through a symbolic link: {path.name}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(state, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    with tmp.open("w", encoding="utf-8") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, path)
+
+
+class _Batch:
+    """The batch.json state. Each row is final before it is saved, and every save replaces the whole file."""
+
+    def __init__(self, path: Path, state: dict[str, Any], clock: Callable[[], str]) -> None:
+        self.path = path
+        self.state = state
+        self.clock = clock
+
+    def save(self) -> None:
+        self.state["updated"] = self.clock()
+        _write_batch(self.path, self.state)
+
+    def done(self, line: str) -> None:
+        self.state["run"] += 1
+        self.save()
+        print(line)
+
+    def already(self, instance_id: str) -> None:
+        self.state["already_certified"] += 1
+        self.save()
+        print(f"{instance_id}: already certified")
+
+    def not_run(self, instance_id: str, reason: str, error: str) -> None:
+        text = sanitize(error)[:ERROR_CHARS]
+        self.state["not_run"].append({"instance_id": instance_id, "reason": reason, "error": text})
+        self.save()
+        print(f"{instance_id}: not run ({reason}): {text}")
+
+
+def _run_or_stop(
+    plan: _Plan, settings: _Settings, deps: Deps, opened: tuple[Any, Any, Any]
+) -> _Written | _Unwritten:
+    executor, budget, llm = opened
+    try:
+        return _harden_one(plan, settings, deps, executor, budget, llm)
+    except _Unwritten as exc:
+        return exc
+
+
+def _run_tasks(tasks: list[TaskSpec], settings: _Settings, deps: Deps, batch: _Batch, min_free: float) -> int:
+    """Run the selection one task at a time. 0 when it finished, 1 when the budget stopped it. 2 when a setting is
+    missing or invalid, found at the first paid run that needs it (batch.json keeps the progress so far)."""
+    out = settings.out
+    stopped: str | None = None  # the budget message, once a budget stop has happened
+    for task in tasks:
+        iid = task.instance_id
+        if _certified_before(task, out):
+            batch.already(iid)
+            continue
+        if stopped is not None:
+            batch.not_run(iid, "budget", stopped)
+            continue
+        try:
+            plan = _plan(task, out)
+        except _Usage as exc:
+            batch.not_run(iid, "certificate_write_failed", str(exc))
+            continue
+        free = deps.disk_free_gb(out)
+        if free < min_free:
+            batch.not_run(iid, "disk", f"free disk is {free:.1f} GB, below MIN_FREE_DISK_GB={min_free:g}")
+            continue
+        try:
+            opened = _open(deps)
+        except _Unwritten as exc:
+            outcome: _Written | _Unwritten = exc
+        except KeyError as exc:
+            return _missing_setting(exc)
+        except ValueError as exc:
+            return _usage_error(str(exc))
+        else:
+            outcome = _run_or_stop(plan, settings, deps, opened)
+        if isinstance(outcome, _Unwritten):
+            if outcome.reason == "budget":
+                stopped = str(outcome.exc)
+            batch.not_run(iid, outcome.reason, str(outcome.exc))
+            continue
+        batch.done(f"{iid}: run  {_harden_line(outcome.report, outcome.cost)}")
+    return 1 if stopped is not None else 0
+
+
+def _batch_summary(state: Mapping[str, Any]) -> str:
+    rows = state["not_run"]
+    counts = Counter(row["reason"] for row in rows)
+    by_reason = ", ".join(f"{reason}={count}" for reason, count in sorted(counts.items())) or "none"
+    return (
+        f"batch: run {state['run']}, already certified {state['already_certified']}, "
+        f"not run {len(rows)} ({by_reason}), selected {state['selected']}"
+    )
+
+
+def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
+    """Harden the cached selection one task at a time. Never a fetch: the selection comes from the cache only."""
+    from cheatproof.tasks import SOURCES  # lazy: the loader module imports httpx
+
+    try:
+        settings = _harden_settings(args)
+    except (_Usage, ValueError) as exc:
+        return _usage_error(str(exc))
+    if args.n is not None and args.n < 0:
+        return _usage_error("--n must be 0 or more")
+    names = list(dict.fromkeys(args.source)) if args.source else list(SOURCES)
+    out = settings.out
+    batch_path = out.parent / BATCH_FILE
+    if (out.parent / TRACES_DIR).is_symlink() or batch_path.is_symlink():
+        return _usage_error(f"refusing to write through a symbolic link: {TRACES_DIR}/ or {BATCH_FILE}")
+
+    selections = []
+    try:
+        for name in names:
+            selections.append(deps.load_selection(name, args.n, args.cache_dir))
+    except ValueError as exc:
+        return _usage_error(str(exc))
+    skipped: dict[str, int] = {}
+    for loaded in selections:
+        for reason, count in loaded.skipped.items():
+            skipped[reason] = skipped.get(reason, 0) + count
+    tasks = [task for loaded in selections for task in loaded.selected]
+    started = deps.clock()
+    state: dict[str, Any] = {
+        "schema_version": BATCH_SCHEMA_VERSION,
+        "source": names,
+        "selection_rule": _selection_rule(),
+        "scanned": sum(loaded.scanned for loaded in selections),
+        "valid": sum(loaded.valid for loaded in selections),
+        "skipped": skipped,
+        "selected": len(tasks),
+        "selected_ids": [task.instance_id for task in tasks],
+        "run": 0,
+        "already_certified": 0,
+        "not_run": [],
+        "started": started,
+        "updated": started,
+    }
+    batch = _Batch(batch_path, state, deps.clock)
+    try:
+        batch.save()  # the selection is on disk before the first paid call
+        code = _run_tasks(tasks, settings, deps, batch, _min_free_gb())
+    except OSError as exc:  # batch.json could not be written, or the free disk could not be read
+        return _failure(exc)
+    if code in (0, 1):
+        print(_batch_summary(state))
+    return code
+
+
+def _read_batch(path: Path) -> dict[str, Any] | None:
+    """batch.json beside the certificates, or None when there is none. A file this report cannot read gets a note."""
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    if not isinstance(data, dict) or data.get("schema_version") != BATCH_SCHEMA_VERSION:
+        print(
+            f"note: {path} is not a batch file of schema {BATCH_SCHEMA_VERSION}: not shown", file=sys.stderr
+        )
+        return None
+    return data
+
+
+def _batch_lines(batch: Mapping[str, Any]) -> list[str]:
+    """The batch counts for the text report: the selection and skips, then the already certified and not-run rows."""
+    skipped = batch.get("skipped")
+    skipped = skipped if isinstance(skipped, Mapping) else {}
+    skipped_text = ", ".join(
+        f"{key}={value}" for key, value in sorted(skipped.items(), key=lambda kv: str(kv[0]))
+    )
+    not_run = batch.get("not_run")
+    rows = [row for row in not_run if isinstance(row, Mapping)] if isinstance(not_run, list) else []
+    reasons = Counter(str(row.get("reason")) for row in rows)
+    reason_text = ", ".join(f"{key}={value}" for key, value in sorted(reasons.items())) or "none"
+    head = (
+        f"batch: run {_cell(batch.get('run'))} of {_cell(batch.get('selected'))} selected "
+        f"(scanned {_cell(batch.get('scanned'))}, skipped: {skipped_text or 'none'})"
+    )
+    tail = f"batch: already certified {_cell(batch.get('already_certified'))}; not run {len(rows)} ({reason_text})"
+    return [head, tail]
 
 
 def _cell(value: Any) -> str:
@@ -522,8 +921,11 @@ def _rate_text(label: str, rate: Any) -> str:
     return text
 
 
-def render_text(score: Mapping[str, Any], directory: Path) -> str:
-    """The score dict as text. Every key that is present is shown; a missing optional key is skipped."""
+def render_text(score: Mapping[str, Any], directory: Path, batch: Mapping[str, Any] | None = None) -> str:
+    """The score dict as text. Every key that is present is shown; a missing optional key is skipped.
+
+    batch is the batch.json dict when one sits beside the certificates; its counts come last.
+    """
     n = score["n"]
     header = f"n={n} certificates in {directory}"
     if "n_after" in score:
@@ -534,8 +936,17 @@ def render_text(score: Mapping[str, Any], directory: Path) -> str:
     for key in ("certified", "inconclusive"):
         if key in score:
             lines.append(f"{key}: {score[key]} of {n}")
+    for key in ("certified_unhardened", "certified_hardened"):
+        if key in score:
+            lines.append(f"{key}: {score[key]}")
+    counted = score.get("outcomes")
+    no_attempt = counted.get("no_attempt") if isinstance(counted, Mapping) else score.get("no_attempt")
+    if no_attempt is not None:
+        lines.append(f"no_attempt: {no_attempt}")
     if "cost_usd_total" in score:
         lines.append(f"cost_usd_total: {_money_text(score['cost_usd_total'])}")
+    if "cost_basis" in score:
+        lines.append(f"cost_basis: {score['cost_basis']}")
     if "schema_version" in score:
         lines.append(f"schema_version: {score['schema_version']}")
     outcomes = score.get("outcomes")
@@ -574,6 +985,8 @@ def render_text(score: Mapping[str, Any], directory: Path) -> str:
                 lines.append(f"  {source}: {pairs}")
         else:
             lines.append("  none")
+    if batch is not None:
+        lines += _batch_lines(batch)
     return "\n".join(lines)
 
 
@@ -593,7 +1006,9 @@ def cmd_report(args: argparse.Namespace, deps: Deps) -> int:
     if n == 0:
         return _usage_error(f"no certificates scored under {directory}")
 
-    payload = json.dumps(score, indent=2, sort_keys=True) + "\n"
+    batch = _read_batch(directory.parent / BATCH_FILE)
+    shown: Mapping[str, Any] = score if batch is None else {**score, "batch": batch}
+    payload = json.dumps(shown, indent=2, sort_keys=True) + "\n"
     if args.out is not None:
         try:
             args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -603,7 +1018,7 @@ def cmd_report(args: argparse.Namespace, deps: Deps) -> int:
     if args.format == "json":
         sys.stdout.write(payload)
     else:
-        print(render_text(score, directory))
+        print(render_text(score, directory, batch))
         if args.out is not None:
             print(f"wrote {args.out}")
     return 0
@@ -659,6 +1074,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="prompt plus completion tokens per attempt (AttackConfig.max_tokens_total)",
     )
     harden.add_argument("--timeout", type=float, help="seconds per grading run (harden timeout)")
+    harden.add_argument(
+        "--strategy", help="strategy label in the certificate (default: the prompt file's stem)"
+    )
+
+    batch = sub.add_parser(
+        "batch", help="harden the cached selection one task at a time; resumable; no fetch"
+    )
+    batch.add_argument(
+        "--source", nargs="+", action="extend", help="task source(s) to select from (default: all)"
+    )
+    batch.add_argument("--n", type=int, help="tasks per source (default: each source's default)")
+    batch.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR, help="task cache directory")
+    batch.add_argument("--out", type=Path, default=DEFAULT_CERT_DIR, help="directory for the certificates")
+    batch.add_argument("--system-prompt-file", type=Path, help="attacker system prompt (required)")
+    batch.add_argument(
+        "--strategy", help="strategy label in each certificate (default: the prompt file's stem)"
+    )
+    batch.add_argument("--attacker-model", help="attacker model id (default: ATTACKER_MODEL)")
+    batch.add_argument("--max-steps", type=int, help="attacker steps (AttackConfig.max_steps)")
+    batch.add_argument(
+        "--max-tokens",
+        type=int,
+        help="prompt plus completion tokens per attempt (AttackConfig.max_tokens_total)",
+    )
+    batch.add_argument("--timeout", type=float, help="seconds per grading run (harden timeout)")
 
     report = sub.add_parser("report", help="score the certificates in a directory")
     report.add_argument("--certs", type=Path, default=DEFAULT_CERT_DIR, help="certificates directory")
@@ -686,6 +1126,8 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
         deps = Deps.default()
     if args.command == "harden":
         return cmd_harden(args, deps)
+    if args.command == "batch":
+        return cmd_batch(args, deps)
     if args.command == "site":
         return cmd_site(args, deps)
     return cmd_report(args, deps)

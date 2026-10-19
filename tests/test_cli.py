@@ -3,22 +3,24 @@
 import dataclasses
 import hashlib
 import json
+import os
 import re
 import sys
 import types
 from pathlib import Path
 
+import httpx
 import pytest
 
 import cheatproof
 from cheatproof import certify, cli
-from cheatproof.attacker import AttackResult
+from cheatproof.attacker import AttackConfig, AttackResult
 from cheatproof.budget import BudgetExceeded
 from cheatproof.executor import ExecutorRefused, ExecutorUnavailable
 from cheatproof.grader import GateReport, GradeResult
 from cheatproof.harden import HardenReport, RoundReport
 from cheatproof.holes import HoleReport
-from cheatproof.tasks import CACHE_VERSION, TaskSpec
+from cheatproof.tasks import CACHE_VERSION, Loaded, TaskSpec
 
 INSTANCE = "astropy__astropy-7671"
 IMAGE = "swebench/sweb.eval.x86_64.astropy_1776_astropy-7671:latest"
@@ -70,6 +72,9 @@ SCORE = {
 def _no_ambient_model(monkeypatch):
     # Every test passes its model explicitly, or sets ATTACKER_MODEL itself, so the shell cannot change results.
     monkeypatch.delenv("ATTACKER_MODEL", raising=False)
+    # The executor name and the free-disk floor reach the certificate and the batch, so the shell cannot set them.
+    monkeypatch.delenv("EXECUTOR", raising=False)
+    monkeypatch.delenv("MIN_FREE_DISK_GB", raising=False)
 
 
 def make_task() -> TaskSpec:
@@ -130,9 +135,11 @@ class Spy:
         self.harden_calls: list[dict] = []
         self.attack_calls: list[tuple] = []
         self.certs: list[dict] = []
+        self.build_kwargs: list[dict] = []  # the keywords build_certificate got beyond the original five
         self.score_calls: list[Path] = []
         self.site_calls: list[tuple] = []
         self.trace_paths: list[Path | None] = []
+        self.load_calls: list[tuple] = []
 
 
 @dataclasses.dataclass(frozen=True)
@@ -168,9 +175,9 @@ def make_deps(spy: Spy, **overrides) -> cli.Deps:
     def harden(executor, env, task, attack_fn, *, budget, **kwargs):
         spy.harden_calls.append({"env": env, "task": task, "budget": budget, **kwargs})
         attack_fn("session")
-        return make_report()
+        return dataclasses.replace(make_report(), instance_id=task.instance_id)
 
-    def build_certificate(report, task, *, image_digest, attacker, cost_usd, timestamp):
+    def build_certificate(report, task, *, image_digest, attacker, cost_usd, timestamp, **kwargs):
         cert = {
             "instance_id": task.instance_id,
             "certified": report.certified,
@@ -180,6 +187,7 @@ def make_deps(spy: Spy, **overrides) -> cli.Deps:
             "timestamp": timestamp,
         }
         spy.certs.append(cert)
+        spy.build_kwargs.append(kwargs)
         return cert
 
     def write_certificate(cert, directory):
@@ -1404,3 +1412,485 @@ def test_load_env_runs_before_the_attacker_is_imported(monkeypatch):
     assert seen == [False]  # load_env ran while the attacker was not yet imported
     assert "cheatproof.attacker" in sys.modules
     assert deps.attack is sys.modules["cheatproof.attacker"].attack
+
+
+# batch (T18) and the harden keywords. Fakes only: no fetch, model, Docker or paid call.
+
+ID_A = "example__pkg-1"
+ID_B = "example__pkg-2"
+ID_C = "example__pkg-3"
+BATCH_KEYS = {
+    "schema_version",
+    "source",
+    "selection_rule",
+    "scanned",
+    "valid",
+    "skipped",
+    "selected",
+    "selected_ids",
+    "run",
+    "already_certified",
+    "not_run",
+    "started",
+    "updated",
+}
+
+
+def batch_tasks(*ids: str) -> list[TaskSpec]:
+    return [dataclasses.replace(make_task(), instance_id=iid, repo="example/pkg") for iid in ids]
+
+
+def loaded(tasks=(), *, source="swe-bench-verified", scanned=None, valid=None, skipped=None) -> Loaded:
+    tasks = tuple(tasks)
+    return Loaded(
+        source=source,
+        scanned=len(tasks) if scanned is None else scanned,
+        valid=len(tasks) if valid is None else valid,
+        skipped=dict(skipped or {}),
+        selected=tasks,
+    )
+
+
+def batch_deps(spy: Spy, tasks=(), *, selections=None, **overrides) -> cli.Deps:
+    """make_deps with the cache-only selection given per source, and plenty of free disk unless overridden."""
+    by_source = {item.source: item for item in (selections or [loaded(tasks)])}
+
+    def load_selection(source, n, cache_dir):
+        spy.load_calls.append((source, n, cache_dir))
+        return by_source.get(source, loaded((), source=source))
+
+    base = {"load_selection": load_selection, "disk_free_gb": lambda path: 100.0}
+    base.update(overrides)
+    return make_deps(spy, **base)
+
+
+def batch_argv(tmp_path: Path, out: Path, *extra: str) -> list[str]:
+    return [
+        "batch",
+        "--system-prompt-file",
+        str(prompt_file(tmp_path)),
+        "--attacker-model",
+        "fake-model",
+        "--out",
+        str(out),
+        "--source",
+        "swe-bench-verified",
+        *extra,
+    ]
+
+
+def out_dir(tmp_path: Path) -> Path:
+    return tmp_path / "results" / "certificates"
+
+
+def read_batch(out: Path) -> dict:
+    return json.loads((out.parent / "batch.json").read_text(encoding="utf-8"))
+
+
+def certified_file(out: Path, instance_id: str) -> None:
+    out.mkdir(parents=True, exist_ok=True)
+    (out / certify.certificate_filename(instance_id)).write_text("{}", encoding="utf-8")
+
+
+def raise_first(exc: BaseException, delegate):
+    """A fake that raises exc on its first call and delegates after that."""
+    calls: list[bool] = []
+
+    def wrapped(*args, **kwargs):
+        if not calls:
+            calls.append(True)
+            raise exc
+        return delegate(*args, **kwargs)
+
+    return wrapped
+
+
+def harden_stopping_at(spy: Spy, instance_id: str, exc: BaseException):
+    """A harden fake that raises exc for one instance, and otherwise runs the attack and returns a report."""
+
+    def harden(executor, env, task, attack_fn, *, budget, **kwargs):
+        spy.harden_calls.append({"task": task, **kwargs})
+        if task.instance_id == instance_id:
+            raise exc
+        attack_fn("session")
+        return dataclasses.replace(make_report(), instance_id=task.instance_id)
+
+    return harden
+
+
+def no_network(*args, **kwargs):
+    raise AssertionError("batch must not reach the network")
+
+
+def test_batch_skips_a_certified_task_and_runs_the_rest(tmp_path, capsys):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    certified_file(out, ID_A)
+    rc = cli.main(batch_argv(tmp_path, out), deps=batch_deps(spy, batch_tasks(ID_A, ID_B)))
+    assert rc == 0
+    assert [call["task"].instance_id for call in spy.harden_calls] == [ID_B]
+    assert spy.load_calls == [("swe-bench-verified", None, cli.DEFAULT_CACHE_DIR)]
+    state = read_batch(out)
+    assert (state["selected"], state["run"], state["already_certified"], state["not_run"]) == (2, 1, 1, [])
+    assert state["selected_ids"] == [ID_A, ID_B]
+    printed = capsys.readouterr().out
+    assert f"{ID_A}: already certified" in printed
+    assert f"{ID_B}: run  certified: yes" in printed
+    assert "batch: run 1, already certified 1, not run 0 (none), selected 2" in printed
+
+
+@pytest.mark.parametrize(
+    ("field", "exc", "reason"),
+    [
+        ("make_executor", ExecutorUnavailable("docker down"), "executor_unavailable"),
+        ("harden", ExecutorRefused("no docker"), "executor_refused"),
+        ("write_certificate", OSError("disk full"), "certificate_write_failed"),
+        ("build_certificate", ValueError("bad certificate"), "certificate_write_failed"),
+    ],
+)
+def test_a_task_that_cannot_run_is_a_not_run_row_and_the_batch_goes_on(tmp_path, field, exc, reason):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    deps = batch_deps(spy, batch_tasks(ID_A, ID_B))
+    deps = dataclasses.replace(deps, **{field: raise_first(exc, getattr(deps, field))})
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0
+    state = read_batch(out)
+    assert state["not_run"] == [{"instance_id": ID_A, "reason": reason, "error": str(exc)}]
+    assert (state["run"], state["already_certified"]) == (1, 0)
+    assert (out / certify.certificate_filename(ID_B)).is_file()
+
+
+def test_a_spend_that_went_down_is_a_certificate_write_failed_row(tmp_path):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    budgets = iter([FakeBudget(0.25, 0.10), FakeBudget(0.10, 0.25)])
+    deps = batch_deps(spy, batch_tasks(ID_A, ID_B), make_budget=lambda: next(budgets))
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0
+    state = read_batch(out)
+    (row,) = state["not_run"]
+    assert (row["instance_id"], row["reason"]) == (ID_A, "certificate_write_failed")
+    assert row["error"].startswith("cost check failed")
+    assert state["run"] == 1
+
+
+def test_a_task_that_names_no_certificate_file_is_a_not_run_row(tmp_path):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    assert cli.main(batch_argv(tmp_path, out), deps=batch_deps(spy, batch_tasks("bad..id", ID_B))) == 0
+    state = read_batch(out)
+    (row,) = state["not_run"]
+    assert row["instance_id"] == "bad..id" and row["reason"] == "certificate_write_failed"
+    assert "'..'" in row["error"]
+    assert [call["task"].instance_id for call in spy.harden_calls] == [ID_B]
+
+
+def test_a_trace_file_that_is_a_link_is_a_not_run_row(tmp_path):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    traces = out.parent / "traces"
+    traces.mkdir(parents=True)
+    target = tmp_path / "elsewhere.jsonl"
+    target.write_text("not yours\n", encoding="utf-8")
+    (traces / f"{Path(certify.certificate_filename(ID_A)).stem}.jsonl").symlink_to(target)
+    assert cli.main(batch_argv(tmp_path, out), deps=batch_deps(spy, batch_tasks(ID_A, ID_B))) == 0
+    state = read_batch(out)
+    (row,) = state["not_run"]
+    assert (row["instance_id"], row["reason"]) == (ID_A, "certificate_write_failed")
+    assert "symbolic link" in row["error"]
+    assert [call["task"].instance_id for call in spy.harden_calls] == [ID_B]
+    assert target.read_text(encoding="utf-8") == "not yours\n"
+
+
+@pytest.mark.parametrize(
+    ("env", "free", "refused"), [(None, 5.0, True), ("50", 20.0, True), ("1", 5.0, False)]
+)
+def test_low_free_disk_records_disk_and_does_not_start_the_task(tmp_path, monkeypatch, env, free, refused):
+    if env is not None:
+        monkeypatch.setenv("MIN_FREE_DISK_GB", env)
+    spy = Spy()
+    out = out_dir(tmp_path)
+    deps = batch_deps(spy, batch_tasks(ID_A, ID_B), disk_free_gb=lambda path: free)
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0
+    state = read_batch(out)
+    if refused:
+        assert spy.harden_calls == []
+        assert [row["reason"] for row in state["not_run"]] == ["disk", "disk"]
+        assert "below MIN_FREE_DISK_GB" in state["not_run"][0]["error"]
+        assert state["run"] == 0
+    else:
+        assert [call["task"].instance_id for call in spy.harden_calls] == [ID_A, ID_B]
+        assert state["run"] == 2 and state["not_run"] == []
+
+
+@pytest.mark.parametrize("certified_last", [False, True])
+def test_budget_stop_marks_the_current_and_remaining_tasks_and_exits_1(tmp_path, capsys, certified_last):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    if certified_last:
+        certified_file(out, ID_C)
+    deps = batch_deps(spy, batch_tasks(ID_A, ID_B, ID_C))
+    stop = BudgetExceeded("daily cap $4.00 reached (today $4.0000)")
+    deps = dataclasses.replace(deps, harden=harden_stopping_at(spy, ID_B, stop))
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 1
+    assert [call["task"].instance_id for call in spy.harden_calls] == [ID_A, ID_B]
+    state = read_batch(out)
+    assert [row["instance_id"] for row in state["not_run"]] == ([ID_B] if certified_last else [ID_B, ID_C])
+    assert {row["reason"] for row in state["not_run"]} == {"budget"}
+    assert all("daily cap" in row["error"] for row in state["not_run"])
+    assert (state["run"], state["already_certified"]) == (1, 1 if certified_last else 0)
+    assert "batch: run 1, already certified" in capsys.readouterr().out
+
+
+def test_an_http_402_from_the_attacker_stops_the_batch_as_budget(tmp_path):
+    spy = Spy()
+    out = out_dir(tmp_path)
+
+    def attack(llm, session, system_prompt, task_prompt, config, trace_path=None):
+        raise BudgetExceeded("HTTP 402 from the LLM provider: balance exhausted, attempt halted")
+
+    deps = batch_deps(spy, batch_tasks(ID_A, ID_B), attack=attack)
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 1
+    state = read_batch(out)
+    assert [row["reason"] for row in state["not_run"]] == ["budget", "budget"]
+    assert state["run"] == 0
+
+
+def test_an_unexpected_error_keeps_the_progress_already_written(tmp_path):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    deps = batch_deps(spy, batch_tasks(ID_A, ID_B))
+    deps = dataclasses.replace(deps, harden=harden_stopping_at(spy, ID_B, RuntimeError("boom")))
+    with pytest.raises(RuntimeError, match="boom"):
+        cli.main(batch_argv(tmp_path, out), deps=deps)
+    state = read_batch(out)
+    assert (state["selected"], state["run"], state["not_run"]) == (2, 1, [])
+
+
+def test_batch_json_is_replaced_whole_after_every_task(tmp_path, monkeypatch):
+    seen: list[dict] = []
+    real_replace = os.replace
+
+    def recording_replace(src, dst):
+        real_replace(src, dst)
+        if Path(dst).name == "batch.json":
+            assert not Path(src).exists()  # the temporary file was moved into place, not copied
+            seen.append(json.loads(Path(dst).read_text(encoding="utf-8")))
+
+    monkeypatch.setattr(os, "replace", recording_replace)
+    out = out_dir(tmp_path)
+    assert cli.main(batch_argv(tmp_path, out), deps=batch_deps(Spy(), batch_tasks(ID_A, ID_B))) == 0
+    assert [state["run"] for state in seen] == [0, 1, 2]  # the selection first, then after each task
+    assert seen[0]["started"] == CLOCK and seen[-1]["updated"] == CLOCK
+    assert not (out.parent / "batch.json.tmp").exists()
+
+
+def test_batch_json_has_the_contract_keys_and_sums_the_sources(tmp_path):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    selections = [
+        loaded(batch_tasks(ID_A), source="swe-rebench", scanned=10, valid=8, skipped={"bad_tests": 2}),
+        loaded(
+            batch_tasks(ID_B, ID_C),
+            source="swe-bench-verified",
+            scanned=5,
+            valid=4,
+            skipped={"bad_tests": 1, "no_image": 1},
+        ),
+    ]
+    argv = [
+        "batch",
+        "--system-prompt-file",
+        str(prompt_file(tmp_path)),
+        "--attacker-model",
+        "fake-model",
+        "--out",
+        str(out),
+    ]
+    assert cli.main(argv, deps=batch_deps(spy, selections=selections)) == 0
+    state = read_batch(out)
+    assert set(state) == BATCH_KEYS
+    assert state["schema_version"] == 1
+    assert state["source"] == ["swe-rebench", "swe-bench-verified"]
+    assert (state["scanned"], state["valid"], state["selected"]) == (15, 12, 3)
+    assert state["skipped"] == {"bad_tests": 3, "no_image": 1}
+    assert state["selected_ids"] == [ID_A, ID_B, ID_C]
+    assert (state["run"], state["already_certified"], state["not_run"]) == (3, 0, [])
+    assert state["started"] == CLOCK and state["updated"] == CLOCK
+    assert "per source" in state["selection_rule"] and "deny list" in state["selection_rule"]
+    assert [call[0] for call in spy.load_calls] == ["swe-rebench", "swe-bench-verified"]
+    assert [kwargs["strategy"] for kwargs in spy.build_kwargs] == ["prompt"] * 3
+
+
+def test_batch_usage_errors_exit_2_before_any_run(tmp_path, capsys):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    no_prompt = ["batch", "--attacker-model", "fake-model", "--out", str(out)]
+    assert cli.main(no_prompt, deps=batch_deps(spy, batch_tasks(ID_A))) == 2
+    assert cli.main(batch_argv(tmp_path, out, "--n", "-1"), deps=batch_deps(spy, batch_tasks(ID_A))) == 2
+    assert spy.harden_calls == [] and not (out.parent / "batch.json").exists()
+    assert "--system-prompt-file is required" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("name", ["traces", "batch.json"])
+def test_a_linked_traces_folder_or_batch_file_is_refused_before_any_run(tmp_path, capsys, name):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    out.parent.mkdir(parents=True)
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    (out.parent / name).symlink_to(target)
+    assert cli.main(batch_argv(tmp_path, out), deps=batch_deps(spy, batch_tasks(ID_A))) == 2
+    assert spy.harden_calls == []
+    assert "symbolic link" in capsys.readouterr().err
+
+
+def test_batch_reads_the_cache_only_and_refuses_when_it_is_missing(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(httpx, "get", no_network)
+    out = out_dir(tmp_path)
+    argv = batch_argv(tmp_path, out, "--cache-dir", str(tmp_path / "runs" / "tasks"))
+    assert cli.main(argv, deps=make_deps(Spy())) == 2  # the real selection loader: no cache, so no fetch
+    assert "fetch first" in capsys.readouterr().err
+    assert not (out.parent / "batch.json").exists()
+
+
+def test_load_cached_selection_reads_the_cache_and_selects_by_score(tmp_path, monkeypatch):
+    monkeypatch.setattr(httpx, "get", no_network)
+    small = dataclasses.replace(make_task(), instance_id=ID_A, repo="example/pkg", pass_to_pass=())
+    big = dataclasses.replace(
+        make_task(),
+        instance_id=ID_B,
+        repo="example/pkg",
+        pass_to_pass=tuple(f"example/test_{i}.py::test_x" for i in range(20)),
+    )
+    payload = {
+        "version": CACHE_VERSION,
+        "source": "swe-bench-verified",
+        "scan_rows": 500,
+        "scanned": 2,
+        "skipped": {"bad_tests": 1},
+        "tasks": [big.to_dict(), small.to_dict()],
+    }
+    (tmp_path / "swe-bench-verified.json").write_text(json.dumps(payload), encoding="utf-8")
+    result = cli.load_cached_selection("swe-bench-verified", 1, tmp_path)
+    assert result.selected == (small,)
+    assert (result.scanned, result.valid, dict(result.skipped)) == (2, 2, {"bad_tests": 1})
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"), [("", 10.0), ("abc", 10.0), ("nan", 10.0), ("-1", 10.0), ("2.5", 2.5), ("0", 0.0)]
+)
+def test_min_free_disk_comes_from_the_environment_or_10_gb(monkeypatch, raw, expected):
+    monkeypatch.setenv("MIN_FREE_DISK_GB", raw)
+    assert cli._min_free_gb() == expected
+
+
+def test_free_disk_is_read_from_the_nearest_folder_that_exists(tmp_path):
+    assert cli._free_gb(tmp_path / "not" / "yet") > 0
+
+
+def test_batch_parser_takes_repeated_and_listed_sources():
+    args = cli.build_parser().parse_args(["batch", "--source", "a", "b", "--source", "c"])
+    assert args.source == ["a", "b", "c"]
+    assert cli.build_parser().parse_args(["batch"]).source is None
+
+
+def test_harden_passes_executor_limits_and_strategy_to_build_certificate(tmp_path):
+    spy = Spy()
+    assert cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=make_deps(spy)) == 0
+    defaults = AttackConfig(model="fake-model")
+    assert spy.build_kwargs == [
+        {
+            "executor": "docker",
+            "max_output_tokens": defaults.max_output_tokens,
+            "cmd_timeout": defaults.cmd_timeout,
+            "strategy": "prompt",  # the system prompt file's stem
+        }
+    ]
+
+
+def test_strategy_flag_and_executor_env_reach_the_certificate_inputs(tmp_path, monkeypatch):
+    monkeypatch.setenv("EXECUTOR", " Sandbox ")
+    spy = Spy()
+    argv = _harden_argv(tmp_path, tmp_path / "certs") + ["--strategy", "shortcuts-v2"]
+    assert cli.main(argv, deps=make_deps(spy)) == 0
+    assert spy.build_kwargs[0]["executor"] == "sandbox"
+    assert spy.build_kwargs[0]["strategy"] == "shortcuts-v2"
+
+
+def test_an_empty_strategy_is_a_usage_error(tmp_path):
+    spy = Spy()
+    argv = _harden_argv(tmp_path, tmp_path / "certs") + ["--strategy", "  "]
+    assert cli.main(argv, deps=make_deps(spy)) == 2
+    assert spy.harden_calls == []
+
+
+def test_a_real_certificate_records_the_executor_limits_and_strategy(tmp_path):
+    out = tmp_path / "certs"
+    deps = make_deps(
+        Spy(),
+        harden=lambda executor, env, task, attack_fn, **kwargs: clean_harden(task.instance_id),
+        build_certificate=certify.build_certificate,
+        write_certificate=certify.write_certificate,
+    )
+    assert cli.main(_harden_argv(tmp_path, out), deps=deps) == 0
+    attacker = json.loads((out / f"{INSTANCE}.json").read_text(encoding="utf-8"))["attacker"]
+    defaults = AttackConfig(model="fake-model")
+    assert attacker["executor"] == "docker"
+    assert attacker["strategy"] == "prompt"
+    assert attacker["max_output_tokens"] == defaults.max_output_tokens
+    assert attacker["cmd_timeout"] == defaults.cmd_timeout
+
+
+def test_render_text_shows_the_certified_split_no_attempt_and_cost_basis():
+    score = {
+        **SCORE,
+        "certified_unhardened": 5,
+        "certified_hardened": 2,
+        "cost_basis": "budgeted ledger delta",
+        "outcomes": {**SCORE["outcomes"], "no_attempt": 3},
+    }
+    text = cli.render_text(score, Path("certs"))
+    assert "certified_unhardened: 5" in text and "certified_hardened: 2" in text
+    assert "no_attempt: 3" in text
+    assert "cost_usd_total: $1.2345\ncost_basis: budgeted ledger delta" in text
+    plain = cli.render_text(SCORE, Path("certs"))
+    assert "certified_unhardened" not in plain and "no_attempt" not in plain and "cost_basis" not in plain
+
+
+def test_report_prints_the_batch_counts_and_adds_a_batch_key_to_json(tmp_path, capsys):
+    spy = Spy()
+    certs = make_certs_dir(tmp_path)
+    batch = {
+        "schema_version": 1,
+        "source": ["swe-bench-verified"],
+        "selection_rule": "rule",
+        "scanned": 10,
+        "valid": 9,
+        "skipped": {"bad_tests": 2},
+        "selected": 3,
+        "selected_ids": [ID_A, ID_B, ID_C],
+        "run": 2,
+        "already_certified": 0,
+        "not_run": [{"instance_id": ID_C, "reason": "disk", "error": "free disk is 2.0 GB"}],
+        "started": CLOCK,
+        "updated": CLOCK,
+    }
+    (tmp_path / "batch.json").write_text(json.dumps(batch), encoding="utf-8")
+    assert cli.main(["report", "--certs", str(certs)], deps=make_deps(spy)) == 0
+    text = capsys.readouterr().out
+    assert "n=12" in text  # the score is shown first, as before
+    assert "batch: run 2 of 3 selected (scanned 10, skipped: bad_tests=2)" in text
+    assert "batch: already certified 0; not run 1 (disk=1)" in text
+    assert cli.main(["report", "--certs", str(certs), "--format", "json"], deps=make_deps(spy)) == 0
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["batch"] == batch
+    assert {key: value for key, value in printed.items() if key != "batch"} == SCORE
+
+
+def test_report_skips_a_batch_file_it_cannot_read_with_a_note(tmp_path, capsys):
+    certs = make_certs_dir(tmp_path)
+    (tmp_path / "batch.json").write_text("{not json", encoding="utf-8")
+    assert cli.main(["report", "--certs", str(certs)], deps=make_deps(Spy())) == 0
+    captured = capsys.readouterr()
+    assert "batch:" not in captured.out
+    assert "note:" in captured.err and "batch.json" in captured.err
