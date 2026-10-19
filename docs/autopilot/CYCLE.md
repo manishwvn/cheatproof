@@ -24,8 +24,11 @@ apart, so 30 minutes from both is impossible). Never read or touch the other pro
   `trash` of `~/.autopilot-pause` in section 2.1.
 - Keep the owner's personal details out of everything.
 - Containment: the attacker's tools run only inside the executor (Sandbox or Docker container), never on the host.
-  Network stays off except in the network-fetch experiment. Never `docker rmi` or prune; alert the owner when free disk
-  is under 10 GB.
+  Network stays off except in the network-fetch experiment. Never `docker rmi` or prune by hand; alert the owner when
+  free disk is under 10 GB. Disk guard (2026-10-19): the executor refuses a pull that would leave less than
+  `MIN_FREE_DISK_GB` free (estimate `PULL_ESTIMATE_GB`, 4.5) and the batch logs that task as `disk`, never failed; it
+  keeps at most `TASK_IMAGE_CAP` (2) `swebench/*` images; after each task the batch removes that task's `swebench/*`
+  image (`docker image rm`, never forced). No other image is ever removed. Prefer Sandboxes once U3 is done.
 - Tests never call models or paid APIs.
 - Never use an extra-billed model. Effort `max` only for Haiku builders on hard size L pieces; every other agent
   stays at `xhigh` or below.

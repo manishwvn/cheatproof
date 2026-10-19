@@ -240,6 +240,10 @@ image is about 4 GB unpacked. The certificate is kept outside the repo (`../chea
 and not committed: `leakcheck.py` flags the attacker model ID because `.env` holds the same public ID (planner: let
 leakcheck skip values that also appear in `.env.example`, or certificates can never be committed). Use Super with
 `--max-tokens 120000 --max-steps 30` next; default `ATTACKER_MODEL` is Ultra.
+Planner note 2026-10-19 (disk guard, PR "executor disk guard"): run tasks only through `cheatproof batch`, which now
+removes each finished task's `swebench/*` image and skips a task as `disk` when its pull would leave under 10 GB. At
+most 2 task images at once (`TASK_IMAGE_CAP`). Never pull by hand. VERIFY: colima may not hand freed space back to
+macOS at once; if free disk does not rise after a release, log it and keep U14 open. Move to Sandboxes when U3 is done.
 ### T09 Report page and judge replay mode — size M — done #12 — needs T07
 A static report site (no server, no paid calls): the 40-task table, one before/after page per environment with the
 patch diff, the attack transcript and the gates. Judge mode replays recorded runs, labelled "recorded". Builds from

@@ -16,6 +16,7 @@ from cheatproof.executor import (
     OUTPUT_KILL_EXIT_CODE,
     OUTPUT_MARGIN_BYTES,
     TIMEOUT_EXIT_CODE,
+    DiskRefused,
     DockerExecutor,
     EnvSpec,
     ExecutorRefused,
@@ -53,7 +54,9 @@ class FakeDocker:
         exec_raises=None,
         rm_results=(),
         ps_result=None,
+        task_images=(),
     ):
+        self.task_images = list(task_images)  # answer to docker images --filter reference=swebench/*
         self.image_present = image_present
         self.images = list(images)
         self.info_down_for = info_down_for
@@ -77,6 +80,8 @@ class FakeDocker:
             return Result(0, "", "", 0.0)
         if argv[:3] == ["docker", "image", "inspect"]:
             return Result(0 if self.image_present else 1, "{}", "", 0.0)
+        if argv[:2] == ["docker", "images"] and "--filter" in argv:
+            return Result(0, "".join(f"{image}\n" for image in self.task_images), "", 0.0)
         if argv[:2] == ["docker", "images"]:
             return Result(0, "".join(f"{image}\n" for image in self.images), "", 0.0)
         if argv[:2] == ["docker", "run"]:
@@ -485,8 +490,9 @@ def test_min_free_disk_env_falls_back_to_default_when_unusable(monkeypatch, tmp_
 
 def test_min_free_disk_env_is_used_when_valid(monkeypatch, tmp_path):
     monkeypatch.setenv("MIN_FREE_DISK_GB", "2")
+    # 7 GB free leaves 2.5 GB after a 4.5 GB pull: allowed at MIN_FREE_DISK_GB=2, refused at the default 10.
     fake = FakeDocker(image_present=False)
-    executor = DockerExecutor(runner=fake, disk_free_gb=lambda: 5.0, platform="linux")
+    executor = DockerExecutor(runner=fake, disk_free_gb=lambda: 7.0, platform="linux")
     with executor.start(ENV, make_budget(tmp_path)):
         pass
     assert len(fake.runs()) == 1
@@ -962,3 +968,53 @@ def test_live_docker_echo():
         res = s.run("echo ok", timeout=120)
     assert res.exit_code == 0
     assert res.stdout.strip() == "ok"
+
+
+TASK_ENV = EnvSpec(image="swebench/sweb.eval.x86_64.demo:latest")
+
+
+def test_pull_refused_when_disk_after_pull_would_be_low(tmp_path):
+    # 14 GB free, a 4.5 GB pull would leave 9.5 GB, under the 10 GB floor: skip as "disk", pull nothing.
+    fake = FakeDocker(image_present=False)
+    with pytest.raises(DiskRefused, match="MIN_FREE_DISK_GB"):
+        make_docker(fake, disk_gb=14.0).start(TASK_ENV, make_budget(tmp_path))
+    assert fake.runs() == []
+
+
+def test_pull_allowed_with_room_after_pull(tmp_path):
+    fake = FakeDocker(image_present=False)
+    with make_docker(fake, disk_gb=15.0).start(TASK_ENV, make_budget(tmp_path)):
+        pass
+    assert len(fake.runs()) == 1
+
+
+def test_local_image_needs_no_pull_room(tmp_path):
+    fake = FakeDocker(image_present=True)
+    with make_docker(fake, disk_gb=11.0).start(TASK_ENV, make_budget(tmp_path)):
+        pass
+    assert len(fake.runs()) == 1
+
+
+def test_task_image_cap_refuses_third_task_image(tmp_path):
+    fake = FakeDocker(image_present=False, task_images=["sha256:a", "sha256:b"])
+    with pytest.raises(ExecutorRefused, match="TASK_IMAGE_CAP"):
+        make_docker(fake).start(TASK_ENV, make_budget(tmp_path))
+    assert fake.runs() == []
+
+
+def test_task_image_cap_ignores_other_images(tmp_path):
+    fake = FakeDocker(image_present=False, images=["x", "y", "z"], task_images=["sha256:a"])
+    with make_docker(fake).start(TASK_ENV, make_budget(tmp_path)):
+        pass
+    assert len(fake.runs()) == 1
+
+
+def test_release_image_removes_only_task_images():
+    fake = FakeDocker()
+    executor = make_docker(fake)
+    assert executor.release_image("swebench/sweb.eval.x86_64.demo:latest") is True
+    assert executor.release_image("pgvector/pgvector:pg16") is False
+    assert executor.release_image("fde1-app:latest") is False
+    removed = fake.argvs(["docker", "image", "rm"])
+    assert removed == [["docker", "image", "rm", "--", "swebench/sweb.eval.x86_64.demo:latest"]]
+    assert all("-f" not in argv and "--force" not in argv for argv in removed)

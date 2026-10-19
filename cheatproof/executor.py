@@ -83,6 +83,18 @@ class ExecutorRefused(RuntimeError):
     """A guard stopped a session start or reset (low disk, too many local images). No image was deleted."""
 
 
+class DiskRefused(ExecutorRefused):
+    """A pull was refused because the free disk left after it would fall under MIN_FREE_DISK_GB. Skip the task."""
+
+
+# Task images this project pulls (SWE-bench eval images, about 4 GB each unpacked). Only these are ever removed.
+TASK_IMAGE_PREFIX = "swebench/"
+
+
+def is_task_image(image: str) -> bool:
+    return image.startswith(TASK_IMAGE_PREFIX)
+
+
 class ExecutorUnavailable(RuntimeError):
     """The backend cannot start a session now (Docker daemon down, Sandboxes not enabled)."""
 
@@ -305,6 +317,8 @@ class DockerExecutor:
         disk_free_gb: Callable[[], float] = _root_free_gb,
         min_free_gb: float | None = None,
         image_cap: int | None = None,
+        task_image_cap: int | None = None,
+        pull_estimate_gb: float | None = None,
         pid: Callable[[], int] | None = None,
         platform: str = sys.platform,
         sleep: Callable[[float], None] = time.sleep,
@@ -316,6 +330,13 @@ class DockerExecutor:
             min_free_gb if min_free_gb is not None else _env_min_one("MIN_FREE_DISK_GB", 10.0, float)
         )
         self._image_cap = image_cap if image_cap is not None else _env_min_one("DOCKER_IMAGE_CAP", 6, int)
+        # At most this many task images on disk at once, and the disk an unknown pull is assumed to take.
+        self._task_image_cap = (
+            task_image_cap if task_image_cap is not None else _env_min_one("TASK_IMAGE_CAP", 2, int)
+        )
+        self._pull_estimate_gb = (
+            pull_estimate_gb if pull_estimate_gb is not None else _env_min_one("PULL_ESTIMATE_GB", 4.5, float)
+        )
         # Clamped, not refused: a larger tmpfs would take more of the container memory limit.
         self._tmpfs_mb = min(_env_min_one("DOCKER_TMPFS_MB", 512, int), TMPFS_MAX_MB)
         self._pid = pid if pid is not None else os.getpid  # owner of the containers this process starts
@@ -368,6 +389,33 @@ class DockerExecutor:
                 f"{image} is not local and {count} images are present, at DOCKER_IMAGE_CAP="
                 f"{self._image_cap}; nothing pulled, nothing deleted"
             )
+        free = self._disk_free_gb()
+        if free - self._pull_estimate_gb < self._min_free_gb:
+            raise DiskRefused(
+                f"{image} is not local: free disk is {free:.1f} GB, and a pull of about "
+                f"{self._pull_estimate_gb:g} GB would leave less than MIN_FREE_DISK_GB={self._min_free_gb:g}; "
+                "nothing pulled"
+            )
+        if is_task_image(image):
+            tasks = self._task_image_count()
+            if tasks >= self._task_image_cap:
+                raise ExecutorRefused(
+                    f"{image} is not local and {tasks} task images are present, at TASK_IMAGE_CAP="
+                    f"{self._task_image_cap}; release finished task images first; nothing pulled"
+                )
+
+    def _task_image_count(self) -> int:
+        res = self._docker(["images", "-q", "--filter", f"reference={TASK_IMAGE_PREFIX}*"], IO_TIMEOUT_S)
+        if res.exit_code != 0:
+            raise ExecutorUnavailable(f"docker images failed: {res.stderr.strip()[-300:]}")
+        return len({line.strip() for line in res.stdout.splitlines() if line.strip()})
+
+    def release_image(self, image: str) -> bool:
+        """Remove a finished task image to free disk. Only task images (TASK_IMAGE_PREFIX); never another project's
+        image, never forced (an image a container still uses stays). True when it was removed."""
+        if not is_task_image(image):
+            return False
+        return self._docker(["image", "rm", "--", image], DESTROY_TIMEOUT_S).exit_code == 0
 
     def _local_image_count(self) -> int:
         res = self._docker(["images", "-q"], IO_TIMEOUT_S)

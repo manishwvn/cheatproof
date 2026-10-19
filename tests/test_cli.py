@@ -16,7 +16,7 @@ import cheatproof
 from cheatproof import certify, cli
 from cheatproof.attacker import AttackConfig, AttackResult
 from cheatproof.budget import BudgetExceeded
-from cheatproof.executor import ExecutorRefused, ExecutorUnavailable
+from cheatproof.executor import DiskRefused, ExecutorRefused, ExecutorUnavailable
 from cheatproof.grader import GateReport, GradeResult
 from cheatproof.harden import HardenReport, RoundReport
 from cheatproof.holes import HoleReport
@@ -1544,6 +1544,7 @@ def test_batch_skips_a_certified_task_and_runs_the_rest(tmp_path, capsys):
     [
         ("make_executor", ExecutorUnavailable("docker down"), "executor_unavailable"),
         ("harden", ExecutorRefused("no docker"), "executor_refused"),
+        ("harden", DiskRefused("no room to pull"), "disk"),
         ("write_certificate", OSError("disk full"), "certificate_write_failed"),
         ("build_certificate", ValueError("bad certificate"), "certificate_write_failed"),
     ],
