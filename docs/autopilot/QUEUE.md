@@ -134,7 +134,7 @@ the certificate (`results/diffs/<stem>.<round>.diff`, through `sanitize`, digest
 `sanitize` instead of discarding the run. Also call `load_env()` before importing `cheatproof.attacker` in
 `cli.py` (and note the same order bug in `scripts/smoke.py` for the planner). Tests with fakes only.
 
-### T18 Batch driver for the 40-task run (audit 2026-10-18) — size M — todo — needs T17
+### T18 Batch driver for the 40-task run (audit 2026-10-18) — size M — in-progress (cycle 2026-10-18T22:24:29-05:00) — needs T17
 A `cheatproof batch` subcommand: run `harden` over a selected task list serially, resume (skip tasks that already
 have a certificate), record a per-task "not run" row with the reason (`ExecutorRefused`, image cap, disk, budget
 halt) instead of stopping, and stop cleanly at the daily cap. Put the selection rule and the scanned, skipped
@@ -161,7 +161,7 @@ header and add a code-computed `grader-forgery` label. (6) Label certificate `co
 it is blind. Store `problem_statement` in `TaskSpec` (`tasks.py`, cache and validation) and show it in the task
 prompt; never show the gold or test patch. Tests with recorded rows.
 
-### T21 Container and client limits (audit 2026-10-18) — size S — in-progress (cycle 2026-10-18T22:24:29-05:00)
+### T21 Container and client limits (audit 2026-10-18) — size S — done #16
 `executor.py:369`: containers have no disk quota, no `--read-only` and no sized tmpfs; add a sized tmpfs for
 scratch (or `--storage-opt size=` when the driver supports it), re-check free disk at each start and reset, and
 sweep leftover `cheatproof=1` containers at CLI start (stop and remove containers only, never images). Tests with the
