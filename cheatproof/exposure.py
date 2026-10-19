@@ -3,8 +3,10 @@
 scan() probes a session and reports the holes an attacker can use:
   git-history  refs, the reflog, FETCH_HEAD or ORIG_HEAD point past base_commit, so the fix may be in .git
   test-edit    the uid running the agent can write a test file the grader does not restore from base. The grader
-               restores its node-id files and test_patch paths before it grades, so a writable one of those is
-               covered. Any other writable test file (a conftest.py, a helper under a tests/ dir) is a hole.
+               restores its node-id files, its test_patch paths and every conftest.py before it grades, so a writable
+               one of those is covered. Any other writable test file (a helper under a tests/ dir) is a hole, except
+               as root: test -w is true for every file as root, so the probe cannot tell those apart. As root such a
+               file is labelled "writable as root" and is not a hole. holes.py still judges the final diff.
   network      a TCP connection to 1.1.1.1:53 succeeds
 
 The scan is read-only: it writes nothing, resets nothing and deletes nothing. A probe that cannot run, or whose
@@ -15,19 +17,18 @@ clean report never rests on a check that did not run.
 from __future__ import annotations
 
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from cheatproof.executor import Result, Session
 from cheatproof.grader import (
     DEFAULT_WORKDIR,
     STEP_TIMEOUT_S,
-    checked_node,
     checked_sha,
-    diff_files,
     error_tail,
     git_command,
-    node_file,
+    restore_paths,
+    restored_conftest,
 )
 
 if TYPE_CHECKING:
@@ -59,19 +60,22 @@ class ExposureReport:
     future_git_evidence: list[str]
     tests_writable: bool  # observed: the probe uid can write at least one test path, covered or not
     writable_tests: list[str]  # those paths, or an "unverified" / "unverifiable" note
-    restore_covered: bool  # every writable test path is one the grader restores from base
+    restore_covered: bool  # every writable test path is restored from base, and none is only writable as root
     unrestored_tests: list[
         str
-    ]  # writable test paths the grader does not restore, or the note; empty if covered
+    ]  # writable test paths the grader does not restore (not as root), or the note; empty if covered
     network: bool
     network_evidence: list[str]
     holes: list[str]  # HOLE_* labels, in the order git-history, test-edit, network
+    # Unrestored test paths seen as root: a note, not a hole. Last, with a default, so older constructions still work.
+    writable_as_root: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class _TestProbe:
     writable: list[str]
     unrestored: list[str]  # a subset of writable
+    as_root: list[str]  # a subset of writable: unrestored paths the probe saw as root
 
 
 def scan(session: Session, task: TaskSpec, *, workdir: str = DEFAULT_WORKDIR) -> ExposureReport:
@@ -97,8 +101,9 @@ def scan(session: Session, task: TaskSpec, *, workdir: str = DEFAULT_WORKDIR) ->
         future_git_evidence=git_evidence,
         tests_writable=bool(tests.writable),
         writable_tests=tests.writable,
-        restore_covered=not tests.unrestored,
+        restore_covered=not tests.unrestored and not tests.as_root,
         unrestored_tests=tests.unrestored,
+        writable_as_root=tests.as_root,
         network=network,
         network_evidence=network_evidence,
         holes=holes,
@@ -175,55 +180,63 @@ def _covered_check(path: str) -> str:
 
 
 def _probe_script(workdir: str, covered: list[str]) -> str:
-    """One shell run that reports the writable test paths. Output lines: 'covered <path>' for a restore-set
-    path the uid can write, 'uncovered <path>' for another writable test file, and a final 'done'.
+    """One shell run that reports the writable test paths. Output lines:
+    'covered <path>' for a path the grader restores (a restore-set path, or any conftest.py) that the uid can write,
+    'uncovered <path>' for another writable test file when the uid is not root,
+    'writable-as-root <path>' for the same file when the uid is root (test -w is true for everything as root), and
+    a final 'done'.
 
     The listing runs before the loop, so a failed find ends the probe with exit 3 rather than a partial list.
     """
     checks = "; ".join(_covered_check(path) for path in covered) or "true"
     skip = "|".join(shlex.quote("./" + path) for path in covered) or "''"
     return (
-        f"cd {shlex.quote(workdir)} || exit 2; {checks}; "
+        f"cd {shlex.quote(workdir)} || exit 2; "
+        'tag=uncovered; [ "$(id -u)" = 0 ] && tag=writable-as-root; '
+        f"{checks}; "
         f"found=$(find . -name .git -prune -o -type f \\( {TEST_FILE_TESTS} \\) -print) "
         "|| { echo 'test file listing failed' >&2; exit 3; }; "
         "printf '%s\\n' \"$found\" | while IFS= read -r f; do "
         f'case "$f" in {skip}) continue ;; esac; '
-        'if [ -w "$f" ]; then printf \'uncovered %s\\n\' "${f#./}"; fi; '
+        'case "$f" in */conftest.py|conftest.py) '
+        'if [ -w "$f" ]; then printf \'covered %s\\n\' "${f#./}"; fi; continue ;; esac; '
+        'if [ -w "$f" ]; then printf \'%s %s\\n\' "$tag" "${f#./}"; fi; '
         "done; printf 'done\\n'"
     )
 
 
 def _writable_tests(session: Session, task: TaskSpec, workdir: str) -> _TestProbe:
     try:
-        nodes = [checked_node(node) for node in (*task.fail_to_pass, *task.pass_to_pass)]
-        covered = sorted(
-            {node_file(node) for node in nodes} | {rel for rel, _ in diff_files(task.test_patch)}
-        )
+        covered = restore_paths(task)  # the grader's restore set; grade() uses the same list
     except ValueError as exc:
         note = _unverifiable(exc)  # the grader would refuse this id or path, so its restore set is unknown
-        return _TestProbe([note], [note])
+        return _TestProbe([note], [note], [])
     res = session.run(_probe_script(workdir, covered), STEP_TIMEOUT_S)
     lines = res.stdout.splitlines()
     if res.truncated:
         note = "unverified: writability check output was cut"
-        return _TestProbe([note], [note])
+        return _TestProbe([note], [note], [])
     if res.exit_code != 0:
         note = _unverified("writability check", res)
-        return _TestProbe([note], [note])
+        return _TestProbe([note], [note], [])
     if "done" not in lines:
         note = "unverified: writability check did not finish"
-        return _TestProbe([note], [note])
+        return _TestProbe([note], [note], [])
     listed = set(covered)
     writable: list[str] = []
     unrestored: list[str] = []
+    as_root: list[str] = []
     for line in lines:
         kind, _, path = line.partition(" ")
-        if kind == "covered" and path in listed:
+        if kind == "covered" and (path in listed or restored_conftest(path)):
             writable.append(path)
         elif kind == "uncovered" and path:
             writable.append(path)
             unrestored.append(path)
-    return _TestProbe(writable, unrestored)
+        elif kind == "writable-as-root" and path:
+            writable.append(path)
+            as_root.append(path)
+    return _TestProbe(writable, unrestored, as_root)
 
 
 def _network(session: Session) -> tuple[bool, list[str]]:

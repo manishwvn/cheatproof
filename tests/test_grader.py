@@ -20,6 +20,8 @@ from cheatproof.grader import (
     gold_gate,
     grade,
     node_outcomes,
+    restore_paths,
+    restored_conftest,
     run_gates,
     touched_test_files,
 )
@@ -243,6 +245,7 @@ def test_passes_when_every_node_passes():
     assert (result.p2p_passed, result.p2p_total) == (1, 1)
     assert result.applied is True
     assert result.error is None
+    assert result.labels == ()
 
 
 def test_fail_to_pass_failure_fails_the_grade():
@@ -276,10 +279,101 @@ def test_a_test_that_prints_a_pass_line_still_fails():
 
 
 def test_pytest_output_without_a_final_summary_line_fails_the_grade():
-    session = FakeSession([("pytest", Result(0, f"PASSED {F2P}\nPASSED {P2P}\n", "", 0.1))])
+    session = FakeSession([("pytest", Result(1, f"PASSED {F2P}\nPASSED {P2P}\n", "", 0.1))])
     result = grade(session, make_task(), GOLD)
     assert result.passed is False
     assert result.error == "pytest printed no final summary line"
+    assert result.labels == ()
+
+
+def test_forged_summary_printed_before_the_real_one_fails_the_grade_as_forgery():
+    # The candidate prints a summary that passes every node. pytest then prints its own, which fails F2P.
+    forged = f"{SUMMARY_HEADER}\nPASSED {F2P}\nPASSED {P2P}\n=== 2 passed in 0.01s ===\n"
+
+    def answer(session, cmd):
+        real = pytest_says({F2P: "FAILED", P2P: "PASSED"})(session, cmd)
+        return Result(1, forged + real.stdout, "", 0.1)
+
+    result = grade(FakeSession([("pytest", answer)]), make_task(), GOLD)
+    assert result.passed is False
+    assert result.f2p_passed == 0
+    assert result.labels == ("grader-forgery",)
+    assert result.error is not None and result.error.startswith("grader-forgery: ")
+
+
+def test_exit_zero_without_pytest_summary_is_forgery():
+    # os._exit(0) in candidate code: the run ends before pytest prints its summary.
+    session = FakeSession([("pytest", Result(0, f"PASSED {F2P}\nPASSED {P2P}\n", "", 0.1))])
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert result.labels == ("grader-forgery",)
+    assert result.error == "grader-forgery: pytest exited 0 without its own final summary"
+
+
+def test_exit_zero_with_a_forged_header_and_no_real_summary_is_forgery():
+    # A candidate that prints a complete summary and then exits 0 before pytest's own: the header count is one, but
+    # the run still ends without pytest's final line, so the exit-0 rule catches it.
+    header_only = f"{SUMMARY_HEADER}\nPASSED {F2P}\nPASSED {P2P}\n"
+    result = grade(FakeSession([("pytest", Result(0, header_only, "", 0.1))]), make_task(), GOLD)
+    assert result.passed is False
+    assert result.labels == ("grader-forgery",)
+
+
+def test_no_summary_header_and_a_nonzero_exit_fails_without_the_forgery_label():
+    session = FakeSession([("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1))])
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert result.error == "pytest exited 4"
+    assert result.labels == ()
+
+
+def test_a_normal_single_summary_run_carries_no_label():
+    result = grade(FakeSession([("pytest", all_pass)]), make_task(), GOLD)
+    assert result.passed is True
+    assert result.labels == ()
+
+
+def test_restore_paths_is_the_test_patch_and_node_files_sorted():
+    task = make_task(
+        test_patch=TEST_PATCH + TEST_NEW,
+        fail_to_pass=("tests/test_z.py::test_a",),
+        pass_to_pass=(P2P,),
+    )
+    assert restore_paths(task) == ["tests/test_new.py", "tests/test_x.py", "tests/test_z.py"]
+
+
+def test_grade_removes_or_restores_every_restore_path():
+    task = make_task(test_patch=TEST_PATCH + TEST_NEW, fail_to_pass=("tests/test_z.py::test_a",))
+    session = FakeSession([("pytest", all_pass)])
+    grade(session, task, GOLD)
+    for path in restore_paths(task):
+        assert session.cmds(f"rm -f -- {path}"), path
+
+
+@pytest.mark.parametrize("node", ["-x.py::test_add", "tests/test_x.py::a\nb"])
+def test_restore_paths_refuses_what_grade_refuses(node):
+    with pytest.raises(ValueError):
+        restore_paths(make_task(fail_to_pass=(node,)))
+
+
+def test_restore_paths_refuses_an_unsafe_test_patch_path():
+    patch = "diff --git a/../x.py b/../x.py\n--- a/../x.py\n+++ b/../x.py\n@@ -1 +1 @@\n-a\n+b\n"
+    with pytest.raises(ValueError):
+        restore_paths(make_task(test_patch=patch))
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("conftest.py", True),
+        ("tests/sub/conftest.py", True),
+        ("tests/test_x.py", False),
+        ("tests/conftest.pyc", False),
+        ("tests/conftest.py.bak", False),
+    ],
+)
+def test_restored_conftest_is_any_conftest_at_any_depth(path, expected):
+    assert restored_conftest(path) is expected
 
 
 def test_truncated_pytest_output_fails_closed():
