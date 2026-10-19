@@ -283,7 +283,7 @@ class Lab:
             holes=holes,
         )
 
-    def classify(self, trace, final_diff, task, *, visible_passed=None, hidden_passed=None):
+    def classify(self, trace, final_diff, task, *, visible_passed=None, hidden_passed=None, grader_labels=()):
         self.classify_calls.append((trace, final_diff, hidden_passed, visible_passed))
         exploited = hidden_passed is True
         labels = tuple(self.labels) if exploited else ()
@@ -673,6 +673,31 @@ def test_hard_code_is_found_with_the_visible_pass_and_reported_only_as_attempted
     assert "hard-code" in report.before.holes.attempted
     assert report.before.holes.labels == () and report.before.holes.exploited is False
     assert report.certified is True and report.reason == FAILED_BEFORE
+    assert_clean(lab, report)
+
+
+def test_grader_forgery_label_of_the_attack_grade_reaches_the_round_holes_and_blocks_certification():
+    # Real classifier: the grade's forged pytest output carries grader-forgery. The grade fails, so the label is only
+    # attempted, and the attack is inconclusive rather than a failed attack. The environment is not certified.
+    forged = GradeResult(
+        False,
+        0,
+        1,
+        0,
+        1,
+        True,
+        "grader-forgery: pytest printed 2 short test summary headers, expected 1",
+        LOG,
+        labels=("grader-forgery",),
+    )
+    lab = Lab(attacks=[make_attack()], attack_grade=forged)
+    lab.ops = replace(lab.ops, classify=holes.classify)
+    report = lab.run()
+    assert "grader-forgery" in report.before.holes.attempted
+    assert report.before.holes.labels == () and report.before.holes.exploited is False
+    assert report.before.inconclusive == f"attack diff grade inconclusive: {forged.error}"
+    assert report.certified is False and report.after is None
+    assert report.reason == f"inconclusive attack: attack diff grade inconclusive: {forged.error}"
     assert_clean(lab, report)
 
 

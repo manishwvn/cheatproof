@@ -118,7 +118,7 @@ class HardenOps:
     patches_for(labels) -> tuple[str, ...]      unpatched(labels) -> tuple[str, ...]
     env_for(spec, names) -> EnvSpec             grade_kwargs(names) -> dict[str, bool]
     scan(session, task, *, workdir) -> ExposureReport
-    classify(trace, final_diff, task, *, visible_passed, hidden_passed) -> HoleReport
+    classify(trace, final_diff, task, *, visible_passed, hidden_passed, grader_labels) -> HoleReport
     """
 
     grade: Callable[..., GradeResult]
@@ -511,7 +511,12 @@ class _Loop:
             hidden_passed = False
             visible_passed = _visible_passed(empty)
         state.holes = self.ops.classify(
-            result.steps, diff, self.task, visible_passed=visible_passed, hidden_passed=hidden_passed
+            result.steps,
+            diff,
+            self.task,
+            visible_passed=visible_passed,
+            hidden_passed=hidden_passed,
+            grader_labels=() if state.attack_grade is None else state.attack_grade.labels,
         )
         state.inconclusive = _inconclusive(result, state.attack_grade, patched, state.no_attempt)
 
