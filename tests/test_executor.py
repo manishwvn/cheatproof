@@ -997,7 +997,7 @@ def test_local_image_needs_no_pull_room(tmp_path):
 
 def test_task_image_cap_refuses_third_task_image(tmp_path):
     fake = FakeDocker(image_present=False, task_images=["sha256:a", "sha256:b"])
-    with pytest.raises(ExecutorRefused, match="TASK_IMAGE_CAP"):
+    with pytest.raises(DiskRefused, match="TASK_IMAGE_CAP"):
         make_docker(fake).start(TASK_ENV, make_budget(tmp_path))
     assert fake.runs() == []
 
@@ -1015,6 +1015,7 @@ def test_release_image_removes_only_task_images():
     assert executor.release_image("swebench/sweb.eval.x86_64.demo:latest") is True
     assert executor.release_image("pgvector/pgvector:pg16") is False
     assert executor.release_image("fde1-app:latest") is False
+    assert executor.release_image("swebench/nested/name:latest") is False
     removed = fake.argvs(["docker", "image", "rm"])
     assert removed == [["docker", "image", "rm", "--", "swebench/sweb.eval.x86_64.demo:latest"]]
     assert all("-f" not in argv and "--force" not in argv for argv in removed)

@@ -92,7 +92,9 @@ TASK_IMAGE_PREFIX = "swebench/"
 
 
 def is_task_image(image: str) -> bool:
-    return image.startswith(TASK_IMAGE_PREFIX)
+    # One name segment after the prefix, the same set `docker images --filter reference=swebench/*` counts.
+    rest = image[len(TASK_IMAGE_PREFIX) :]
+    return image.startswith(TASK_IMAGE_PREFIX) and bool(rest) and "/" not in rest
 
 
 class ExecutorUnavailable(RuntimeError):
@@ -399,7 +401,7 @@ class DockerExecutor:
         if is_task_image(image):
             tasks = self._task_image_count()
             if tasks >= self._task_image_cap:
-                raise ExecutorRefused(
+                raise DiskRefused(
                     f"{image} is not local and {tasks} task images are present, at TASK_IMAGE_CAP="
                     f"{self._task_image_cap}; release finished task images first; nothing pulled"
                 )

@@ -830,8 +830,10 @@ def _run_tasks(tasks: list[TaskSpec], settings: _Settings, deps: Deps, batch: _B
             if free < min_free:
                 batch.not_run(iid, "disk", f"free disk is {free:.1f} GB, below MIN_FREE_DISK_GB={min_free:g}")
                 continue
-            outcome = _run_or_stop(plan, settings, deps, opened)
-            _release_image(opened[0], plan.env.image)
+            try:
+                outcome = _run_or_stop(plan, settings, deps, opened)
+            finally:
+                _release_image(opened[0], plan.env.image)
         if isinstance(outcome, _Unwritten):
             if outcome.reason == "budget":
                 stop = ("budget", str(outcome.exc))
