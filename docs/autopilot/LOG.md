@@ -141,3 +141,23 @@ progress 57% (8/22 tasks done, 10 days to submit)
   `python -m pytest` may need `conda activate testbed`, an empty diff certifies a task, no trace or diff persisted.
 - The audit agent read `.env.example` (tracked template, placeholders only). No `.env` was opened.
 - Lesson: run the first audit early; it found more T08 blockers than all per-PR reviews.
+
+## 2026-10-18 routine (cycle 2026-10-18T21:24:24-05:00)
+progress PLACEHOLDER
+- T17 traces and attack diffs merged (#14); T19 honest outcomes merged (#15). 1210 tests, ruff clean, CI green.
+- T21 not started: the run reached its 50-minute work limit. Daily audit already ran today.
+- Spend: $0 (no model, sandbox or Tavily calls).
+
+- Task T17 (#14): one Haiku builder; Sonnet review "fix first" (3 high: whole-diff `sanitize` redacted any diff
+  holding a 33-char name or a `/home/` path; lone surrogates crashed the write; stale diffs on rerun). One Haiku fix
+  round: per-line sanitizing, `errors="replace"`, sidecar `<stem>.<round>.diff.json` whose `raw_sha256` the site
+  matches against the certificate, trace rotation, symlink refusals. Opus final review: merge.
+- Task T19 (#15): two parallel Haiku builders in one worktree on disjoint files (harden/certify; grader/exposure/
+  holes), then one Haiku wiring step for the grader labels. Sonnet review "fix first" (1 high: one forged summary
+  plus `os._exit` still passed). One Haiku fix round: final counts cross-checked against `-rA` node lines and exit
+  code; a cut output gets no forgery verdict; hard-code is only a lead. Residual gap pinned in a test: a fully
+  consistent forged summary still passes; the real fix is a channel the candidate cannot write.
+- Follow-ups queued in T18 (CLI passes run settings to `build_certificate`; site shows the certified split) and T22
+  (`results/traces/` and `results/reports/` are not git-ignored; planner path).
+- Learning notes for #14 and #15 written (`learning-last-pr` 15).
+- Lesson: `sanitize()` fails closed on a whole string, so long free text (diffs, traces) must go through it per line.
