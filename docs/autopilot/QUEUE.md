@@ -214,6 +214,10 @@ Planner note 2026-10-19 (U12 done): `DOCKER_IMAGE_CAP=16`, and 10 images belong 
 task images fit and routines cannot remove images. Pick the 6 smallest-image tasks with a visible hole first (T03
 exposure scan), run them end to end, and record raw counts. If the go/no-go needs more tasks, add a USER item asking
 the owner to remove the finished task images (`docker rmi`) so the next batch fits. Report n honestly.
+Planner note 2026-10-19 (U2 done): include the network-fetch attack. Run it with `strategy_prompt("network")`
+and `attack(search=make_tavily_search(budget))` on a separate container with network on, only on tasks that still
+pass every gate. Every search goes through `budget.reserve_tavily_call()` (`TAVILY_CALL_CAP`, default 200); keep
+total Tavily use well under 1,000 calls a month and record the call count in `docs/results.md`.
 ### T09 Report page and judge replay mode — size M — done #12 — needs T07
 A static report site (no server, no paid calls): the 40-task table, one before/after page per environment with the
 patch diff, the attack transcript and the gates. Judge mode replays recorded runs, labelled "recorded". Builds from
@@ -283,7 +287,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
      Never paste keys in chat.
 
   Then tell the lead "U1 done" (and "promo applied" after step 4).
-- **U2 Tavily key (optional, for the network-fetch attack and the Tavily bonus)** (ready 2026-10-16): sign up at
+- ~~**U2 Tavily key**~~ Done 2026-10-19: key in `.env` (free plan, 1,000 credits a month). ~~**U2 Tavily key (optional, for the network-fetch attack and the Tavily bonus)** (ready 2026-10-16): sign up at
   https://tavily.com, apply promo `BBDEVPOST`, put the key in `.env` as `TAVILY_API_KEY`. Optional: join
   https://dev.nebius.com/builders for extra credit (unreliable; the plan assumes $25 only).
 - **U3 Sandboxes access** (in progress 2026-10-19: beta form submitted, Nebius emails when enabled; project IDs are
