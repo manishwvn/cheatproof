@@ -161,7 +161,7 @@ header and add a code-computed `grader-forgery` label. (6) Label certificate `co
 it is blind. Store `problem_statement` in `TaskSpec` (`tasks.py`, cache and validation) and show it in the task
 prompt; never show the gold or test patch. Tests with recorded rows.
 
-### T21 Container and client limits (audit 2026-10-18) — size S — todo
+### T21 Container and client limits (audit 2026-10-18) — size S — in-progress (cycle 2026-10-18T22:24:29-05:00)
 `executor.py:369`: containers have no disk quota, no `--read-only` and no sized tmpfs; add a sized tmpfs for
 scratch (or `--storage-opt size=` when the driver supports it), re-check free disk at each start and reset, and
 sweep leftover `cheatproof=1` containers at CLI start (stop and remove containers only, never images). Tests with the
