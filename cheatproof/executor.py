@@ -74,7 +74,7 @@ _DIFF_SCRIPT = (
 
 
 class ExecutorRefused(RuntimeError):
-    """A guard stopped a new image pull (low disk, too many local images). Nothing was deleted."""
+    """A guard stopped a session start or reset (low disk, too many local images). No image was deleted."""
 
 
 class ExecutorUnavailable(RuntimeError):
@@ -309,6 +309,7 @@ class DockerExecutor:
             min_free_gb if min_free_gb is not None else _env_min_one("MIN_FREE_DISK_GB", 10.0, float)
         )
         self._image_cap = image_cap if image_cap is not None else _env_min_one("DOCKER_IMAGE_CAP", 6, int)
+        self._tmpfs_mb = _env_min_one("DOCKER_TMPFS_MB", 512, int)
         self._platform = platform
         self._sleep = sleep
         self._clock = clock
@@ -339,16 +340,19 @@ class DockerExecutor:
                 break
         raise ExecutorUnavailable(f"Docker daemon still down {DAEMON_WAIT_S}s after 'open -a Docker'")
 
-    def _preflight(self, image: str) -> None:
-        # Only a pull needs guards. A local image starts with no disk or image-count check.
-        if self._docker(["image", "inspect", "--", image], IO_TIMEOUT_S).exit_code == 0:
-            return
+    def _check_free_disk(self) -> None:
+        # Every start and every reset, local image or not: a running container writes to the host disk too.
         free = self._disk_free_gb()
         if free < self._min_free_gb:
             raise ExecutorRefused(
-                f"{image} is not local and free disk is {free:.1f} GB, below MIN_FREE_DISK_GB="
-                f"{self._min_free_gb:g}; nothing pulled"
+                f"free disk is {free:.1f} GB, below MIN_FREE_DISK_GB={self._min_free_gb:g}; "
+                "no container started"
             )
+
+    def _preflight(self, image: str) -> None:
+        # Only a pull needs the image-count guard. A local image starts with no image-count check.
+        if self._docker(["image", "inspect", "--", image], IO_TIMEOUT_S).exit_code == 0:
+            return
         count = self._local_image_count()
         if count >= self._image_cap:
             raise ExecutorRefused(
@@ -366,6 +370,9 @@ class DockerExecutor:
         """Start the container. Returns (name, id). A failure after docker run removes the named container."""
         network = "bridge" if env.network else "none"
         name = f"cheatproof-{uuid.uuid4().hex}"
+        # /tmp is a sized tmpfs, so scratch files cannot fill the host disk. The root fs is not --read-only:
+        # task repos must stay writable for the attacker and the grader. --storage-opt size= is not used
+        # because Docker Desktop's overlay2 does not support it without xfs pquota.
         argv = [
             "run",
             "-d",
@@ -384,6 +391,8 @@ class DockerExecutor:
             env.memory,  # equal to --memory, so no swap
             "--pids-limit",
             str(PIDS_LIMIT),
+            "--tmpfs",
+            f"/tmp:rw,nosuid,nodev,size={self._tmpfs_mb}m",
             "--cap-drop",
             "ALL",
             "--security-opt",
@@ -414,6 +423,18 @@ class DockerExecutor:
         with contextlib.suppress(Exception):
             self._docker(["rm", "-f", name], DESTROY_TIMEOUT_S)
 
+    def sweep_leftovers(self) -> int:
+        """Stop and remove containers that an earlier run left behind (label cheatproof=1). Returns how many
+        docker rm reported removed. Containers only: never images, volumes or the build cache. Best-effort: a
+        docker error returns 0 and leaves the containers for the next sweep."""
+        removed = 0
+        with contextlib.suppress(Exception):
+            listed = self._docker(["ps", "-aq", "--filter", "label=cheatproof=1"], IO_TIMEOUT_S)
+            ids = listed.stdout.split() if listed.exit_code == 0 else []
+            if ids:
+                removed = len(self._docker(["rm", "-f", *ids], DESTROY_TIMEOUT_S).stdout.split())
+        return removed
+
     def _base_commit(self, cid: str, workdir: str) -> str:
         script = f"cd {shlex.quote(workdir)} && git rev-parse HEAD"
         res = self._docker(["exec", cid, "sh", "-c", script], IO_TIMEOUT_S)
@@ -432,6 +453,7 @@ class DockerSession(Session):
         self._launch()
 
     def _launch(self) -> None:
+        self._executor._check_free_disk()  # first: a refusal never opens Docker Desktop
         self._executor._ensure_daemon()
         self._executor._preflight(self._env.image)
         self._budget.reserve_sandbox_run()  # before the container exists; BudgetExceeded propagates

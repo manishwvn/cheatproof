@@ -357,6 +357,16 @@ def _rotate_trace(traces_dir: Path, stem: str, trace_path: Path) -> None:
     trace_path.rename(target)
 
 
+def _sweep_leftovers(executor: Any) -> None:
+    """Remove cheatproof containers an earlier run left behind. Only executors with a sweep are asked."""
+    sweep = getattr(executor, "sweep_leftovers", None)
+    if sweep is None:
+        return
+    swept = sweep()
+    if swept > 0:
+        print(f"swept {swept} leftover cheatproof containers", file=sys.stderr)
+
+
 def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
     from cheatproof.attacker import AttackConfig  # lazy: attacker imports the LLM client module
 
@@ -414,6 +424,7 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
 
     try:
         executor = deps.make_executor()
+        _sweep_leftovers(executor)
         budget = deps.make_budget()
         llm = deps.make_llm(budget)
     except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:

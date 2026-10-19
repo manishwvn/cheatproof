@@ -50,6 +50,7 @@ class FakeDocker:
         exec_result=None,
         exec_raises=None,
         rm_results=(),
+        ps_result=None,
     ):
         self.image_present = image_present
         self.images = list(images)
@@ -59,6 +60,7 @@ class FakeDocker:
         self.exec_result = exec_result or Result(0, "", "", 0.0)
         self.exec_raises = exec_raises  # raised by every docker exec
         self.rm_results = list(rm_results)  # answers to docker rm -f, in order; then exit 0
+        self.ps_result = ps_result  # answer to docker ps; prints nothing when unset
         self.on_run = None
         self.log: list[tuple[list[str], bytes | None]] = []
         self.meta: list[tuple[float, int | None]] = []
@@ -83,6 +85,8 @@ class FakeDocker:
             return Result(self.run_exit, f"{CID}\n", "" if self.run_exit == 0 else "pull denied", 0.0)
         if argv[:3] == ["docker", "rm", "-f"]:
             return self.rm_results.pop(0) if self.rm_results else Result(0, "", "", 0.0)
+        if argv[:2] == ["docker", "ps"]:
+            return self.ps_result or Result(0, "", "", 0.0)
         if argv[:2] == ["docker", "exec"]:
             if self.exec_raises is not None:
                 raise self.exec_raises
@@ -213,6 +217,35 @@ def test_container_hardening_flags(tmp_path):
     assert "--read-only" not in argv
 
 
+def test_scratch_tmpfs_is_sized_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("DOCKER_TMPFS_MB", raising=False)
+    fake = FakeDocker()
+    with make_docker(fake).start(ENV, make_budget(tmp_path)):
+        pass
+    (argv,) = fake.runs()
+    assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,size=512m"
+    assert "--read-only" not in argv
+
+
+def test_scratch_tmpfs_size_comes_from_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOCKER_TMPFS_MB", "256")
+    fake = FakeDocker()
+    with make_docker(fake).start(ENV, make_budget(tmp_path)):
+        pass
+    (argv,) = fake.runs()
+    assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,size=256m"
+
+
+@pytest.mark.parametrize("raw", ["abc", "", "0", "-2", "1.5", "nan"])
+def test_scratch_tmpfs_env_falls_back_to_default_when_unusable(monkeypatch, tmp_path, raw):
+    monkeypatch.setenv("DOCKER_TMPFS_MB", raw)
+    fake = FakeDocker()
+    with make_docker(fake).start(ENV, make_budget(tmp_path)):
+        pass
+    (argv,) = fake.runs()
+    assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,size=512m"
+
+
 def test_container_is_named_and_labelled(tmp_path):
     fake = FakeDocker()
     with make_docker(fake).start(ENV, make_budget(tmp_path)):
@@ -298,11 +331,36 @@ def test_disk_guard_refuses_new_image_before_any_pull(tmp_path):
     assert budget.snapshot()["sandbox_runs"] == 0
 
 
-def test_disk_guard_skipped_when_image_is_local(tmp_path):
+def test_disk_guard_applies_to_a_local_image_too(tmp_path):
     fake = FakeDocker(image_present=True)
-    with make_docker(fake, disk_gb=5.0).start(ENV, make_budget(tmp_path)):
+    budget = make_budget(tmp_path)
+    with pytest.raises(ExecutorRefused, match="MIN_FREE_DISK_GB"):
+        make_docker(fake, disk_gb=5.0).start(ENV, budget)
+    assert fake.runs() == []
+    assert budget.snapshot()["sandbox_runs"] == 0
+
+
+def test_local_image_starts_when_disk_is_enough(tmp_path):
+    fake = FakeDocker(image_present=True)
+    with make_docker(fake, disk_gb=50.0).start(ENV, make_budget(tmp_path)):
         pass
     assert len(fake.runs()) == 1
+
+
+def test_reset_refuses_when_disk_has_dropped_and_starts_nothing(tmp_path):
+    free = [100.0]
+    fake = FakeDocker()
+    budget = make_budget(tmp_path)
+    executor = DockerExecutor(runner=fake, disk_free_gb=lambda: free[0], min_free_gb=10.0, platform="linux")
+    s = executor.start(ENV, budget)
+    free[0] = 5.0
+    with pytest.raises(ExecutorRefused, match="MIN_FREE_DISK_GB"):
+        s.reset()
+    assert len(fake.runs()) == 1
+    assert budget.snapshot()["sandbox_runs"] == 1
+    with pytest.raises(RuntimeError, match="reset"):
+        s.run("true", 5)
+    s.close()
 
 
 def test_image_cap_refuses_new_image(tmp_path):
@@ -455,6 +513,60 @@ def test_reset_that_cannot_remove_the_old_container_starts_nothing(tmp_path):
     assert budget.snapshot()["sandbox_runs"] == 1
     s.close()
     assert fake.names_removed() == [run_name(fake), run_name(fake)]
+
+
+# --- sweep: leftover cheatproof=1 containers at CLI start --------------------------------------------
+
+
+def test_sweep_lists_by_label_then_removes_by_id(tmp_path):
+    fake = FakeDocker(ps_result=Result(0, "c1\nc2\n", "", 0.0), rm_results=[Result(0, "c1\nc2\n", "", 0.0)])
+    assert make_docker(fake).sweep_leftovers() == 2
+    assert [argv for argv, _ in fake.log] == [
+        ["docker", "ps", "-aq", "--filter", "label=cheatproof=1"],
+        ["docker", "rm", "-f", "c1", "c2"],
+    ]
+
+
+def test_sweep_never_touches_images_volumes_or_prune(tmp_path):
+    fake = FakeDocker(ps_result=Result(0, "c1\n", "", 0.0))
+    make_docker(fake).sweep_leftovers()
+    tokens = {token for argv, _ in fake.log for token in argv}
+    assert not tokens & {"rmi", "prune", "volume", "system", "image"}
+
+
+def test_sweep_with_no_labelled_containers_makes_no_rm_call(tmp_path):
+    fake = FakeDocker()  # docker ps prints nothing
+    assert make_docker(fake).sweep_leftovers() == 0
+    assert fake.argvs(["docker", "rm"]) == []
+
+
+def test_sweep_counts_only_what_docker_rm_reports(tmp_path):
+    fake = FakeDocker(
+        ps_result=Result(0, "c1\nc2\n", "", 0.0),
+        rm_results=[Result(1, "c1\n", "No such container: c2", 0.0)],
+    )
+    assert make_docker(fake).sweep_leftovers() == 1
+
+
+def test_sweep_when_ps_fails_returns_zero_and_removes_nothing(tmp_path):
+    fake = FakeDocker(ps_result=Result(1, "", "Cannot connect to the Docker daemon", 0.0))
+    assert make_docker(fake).sweep_leftovers() == 0
+    assert fake.argvs(["docker", "rm"]) == []
+
+
+def test_sweep_when_rm_fails_returns_zero_without_raising(tmp_path):
+    fake = FakeDocker(
+        ps_result=Result(0, "c1\n", "", 0.0),
+        rm_results=[Result(1, "", "device or resource busy", 0.0)],
+    )
+    assert make_docker(fake).sweep_leftovers() == 0
+
+
+def test_sweep_when_docker_cannot_run_returns_zero_without_raising(tmp_path):
+    def missing(argv, timeout, stdin=None, max_bytes=None):
+        raise ExecutorUnavailable("docker not found on PATH")
+
+    assert make_docker(missing).sweep_leftovers() == 0
 
 
 # --- run: timeouts, output caps, host backstop -------------------------------------------------------
