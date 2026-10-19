@@ -198,3 +198,9 @@ progress 77% (15/22 tasks done, 9 days to submit)
   the next run or the planner can remove the worktree, and the owner can `colima stop`.
 - Verified Docker 29.5.2 under colima. 8 of the 10 Verified picks are sphinx; expect a sphinx-heavy Verified slice.
 - Lesson: check shared-daemon state (image count, disk) against the executor guards before claiming a live-run task.
+
+## 2026-10-19 routine (cycle 2026-10-19T17:23:54-05:00)
+progress 72% (15/24 tasks done, 9 days to submit)
+- Skipped: weekly usage 88% is over the cap 85 (5-hour 58%). No task claimed, no PR, spend $0.
+- Weekly window resets 2026-10-20 23:59 UTC. Runnable: T08, T24. Alerted the owner (U13): T08 feeds the Oct 21 go/no-go.
+- Lesson: at this burn rate the weekly cap, not the 5-hour cap, gates the routine; T08 should go first after the reset.

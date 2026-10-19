@@ -271,6 +271,10 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
+- **U13 Weekly usage cap reached** (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): the routine
+  read weekly usage at 88% (cap 85) and idles until the reset on 2026-10-20 23:59 UTC. T08 is still todo. Steps: run
+  T08 in an interactive session, or pause the other routines, or write a higher cap into
+  `~/.cheatproof-autopilot/weekly-cap` (owner only). Strike this item when the weekly window resets.
 - ~~**U12 Docker image cap blocks T08**~~ Done 2026-10-19: `DOCKER_IMAGE_CAP=16`, colima running. (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): colima
   (profile `default`) holds 10 images from other projects (about 6 GB), and `DOCKER_IMAGE_CAP=6` counts every local
   image, so the executor refuses each task image before pulling. Pick one:
