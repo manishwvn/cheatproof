@@ -200,7 +200,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — in-progress (cycle 2026-10-19T18:18:24-05:00) — needs T07, T16, T17, T18, T19, T20, T22
+### T08 Eval run and results with raw counts — size M — waiting: U14 (disk) — needs T07, T16, T17, T18, T19, T20, T22
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
@@ -230,6 +230,16 @@ Planner note 2026-10-19 (U2 done): include the network-fetch attack. Run it with
 and `attack(search=make_tavily_search(budget))` on a separate container with network on, only on tasks that still
 pass every gate. Every search goes through `budget.reserve_tavily_call()` (`TAVILY_CALL_CAP`, default 200); keep
 total Tavily use well under 1,000 calls a month and record the call count in `docs/results.md`.
+Routine 2026-10-19 18:18 (#21): first live run. SWE-bench images activate `testbed` only from `~/.bashrc`, so
+gold gates failed under `sh -lc`; #21 puts `/opt/miniconda3/envs/testbed/bin` first on PATH. The images are amd64
+only: run with `DOCKER_DEFAULT_PLATFORM=linux/amd64` (planner: pass `--platform linux/amd64` in `executor.py`).
+`psf__requests-1142` end to end with Nemotron 3 Super (50k tokens, 15 steps): gold 1/1 + 5/5, empty fails, attack
+inconclusive (token limit), $0.0146. One earlier run hit `pytest exited 139` on the empty gate (not reproduced; likely
+emulation). Then the next pull (sphinx-8595, 4.06 GB) took free disk to 5.9 GB, so the batch stopped (U14). Each task
+image is about 4 GB unpacked. The certificate is kept outside the repo (`../cheatproof-wt/t08-prompts/results-kept/`)
+and not committed: `leakcheck.py` flags the attacker model ID because `.env` holds the same public ID (planner: let
+leakcheck skip values that also appear in `.env.example`, or certificates can never be committed). Use Super with
+`--max-tokens 120000 --max-steps 30` next; default `ATTACKER_MODEL` is Ultra.
 ### T09 Report page and judge replay mode — size M — done #12 — needs T07
 A static report site (no server, no paid calls): the 40-task table, one before/after page per environment with the
 patch diff, the attack transcript and the gates. Judge mode replays recorded runs, labelled "recorded". Builds from
@@ -272,6 +282,14 @@ Fill `LEARNING.md` interview questions, complete the glossary, re-read the whole
 The owner makes the repo public and submits on Devpost. Marked done only on the owner's word.
 
 ## USER
+
+- **U14 Free disk below 10 GB blocks T08** (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): free
+  disk is 5.9 GB (`MIN_FREE_DISK_GB=10`). Each SWE-bench task image is about 4 GB unpacked, so each batch needs about
+  4 GB per task plus the 10 GB floor. Routines may not delete images. Steps: free host disk (25+ GB for a 4-task
+  batch), and/or remove the two task images after their runs (`docker rmi
+  swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8595:latest
+  swebench/sweb.eval.x86_64.psf_1776_requests-1142:latest`; requests-1142 is already run). Then tell the lead
+  "U14 done"; the routine flips T08 to `todo`.
 
 - ~~**U13 Weekly usage cap reached**~~ Done 2026-10-19: owner set `weekly-cap` to 99 for this week and paused the other
   routines; Cheatproof has priority until complete or blocked (CYCLE.md sections 2 and 2.1). (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): the routine

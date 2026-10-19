@@ -19,7 +19,9 @@
   Cycle 22:24: container tmpfs, per-start disk check and owner-scoped leftover sweep (T21, #16); `cheatproof batch`
   with resume, not-run rows, budget and cost-check stops and `batch.json` run counts in report and site (T18, #17).
   1332 tests.
-- **Next for the routine:** T08 (eval run) is blocked by U12: the Docker image cap (6) counts colima's 10 images
+  Cycle 2026-10-19 18:18: first live run on Docker (#21: grader uses the SWE-bench `testbed` env). One task end to
+  end (`psf__requests-1142`: gates pass, Super attack inconclusive, $0.0146); batch stopped at 5.9 GB free disk (U14).
+- **Next for the routine:** T08 waits on U14 (free disk; was U12): the Docker image cap (6) counts colima's 10 images
   from other projects. After U12, T08 runs on Docker (colima, x86_64 emulation). T11 opens 2026-10-21.
 - **Certificates:** schema 2 since #15; schema 1 files are refused (none are committed).
 - **Planner:** T22 (U11): Docker runs are booked at $0.05 each in `budget.py`, so the $4 daily cap would halt the

@@ -204,3 +204,16 @@ progress 72% (15/24 tasks done, 9 days to submit)
 - Skipped: weekly usage 88% is over the cap 85 (5-hour 58%). No task claimed, no PR, spend $0.
 - Weekly window resets 2026-10-20 23:59 UTC. Runnable: T08, T24. Alerted the owner (U13): T08 feeds the Oct 21 go/no-go.
 - Lesson: at this burn rate the weekly cap, not the 5-hour cap, gates the routine; T08 should go first after the reset.
+
+## 2026-10-19 routine (cycle 2026-10-19T18:18:24-05:00)
+progress 72% (15/24 tasks done, 9 days to submit)
+- Ran on the owner's `weekly-cap` override (W 89 at start). Took T08 (eval run) on the Docker executor.
+- Merged #21: the grader now runs pytest in the SWE-bench `testbed` conda env (gold gates failed without it). Haiku
+  built, Sonnet reviewed (merge, lows only), Opus final review. 1578 tests.
+- First end-to-end task: `psf__requests-1142`, attacker Nemotron 3 Super, gold and empty gates correct, attack
+  inconclusive at its 50k token limit. Not certified. n = 1. Certificate kept outside the repo (leakcheck flags the
+  public model ID that `.env` also holds; planner note in T08).
+- Blocked: the next image pull left 5.9 GB free disk (floor 10 GB). Owner item U14, alerted. T08 is `waiting: U14`.
+- Spend: $0.0146 (ledger $0.0000336 to $0.0145935). No Ultra, no Tavily, no sandbox runs.
+- Lessons: SWE-bench images need `linux/amd64` and the `testbed` env; each task image is about 4 GB unpacked, so
+  check disk for the whole batch before the first pull.
