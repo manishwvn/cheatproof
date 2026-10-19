@@ -11,8 +11,10 @@ own file stem (its file name without ".json"). When that file is missing, traces
 certificate whose instance id an earlier file (in name order) already holds is an error row, not a page.
 
 Attack diffs. Each round's sanitized attack diff is cert_dir.parent/diffs/<stem>.<before|after>.diff, the file that
-cli harden writes beside the certificates. It is shown escaped. When the file is missing, the round shows the
-digest that the certificate records, and the note that no diff was recorded. A symlink is never read.
+cli harden writes beside the certificates, with its sidecar <stem>.<before|after>.diff.json. It is shown escaped, and
+only when the sidecar's raw_sha256 equals the certificate's final_diff_sha256 for that round. Otherwise, or when the
+file is missing, the round shows the digest that the certificate records, and the note that no diff was recorded.
+A symlink is never read: not a traces or diffs directory, not a file in one.
 
 The site replays committed records. Nothing here calls a model or the network, and the pages have no JavaScript. A
 certificate, trace or diff is untrusted attacker or model text, so every value reaches a page through _cell(), which
@@ -165,7 +167,10 @@ def build_site(cert_dir: Path, out_dir: Path, *, traces_dir: Path | None = None)
     pages = []
     for entry in entries:
         page = env_dir / f"{entry.name}.html"
-        diffs = {name: _diff_text(diffs_dir, entry.stem, name) for name in ROUNDS}
+        diffs = {
+            name: _diff_text(diffs_dir, entry.stem, name, _recorded_digest(entry.cert, name))
+            for name in ROUNDS
+        }
         body = _env_body(entry.cert, _transcript_body(traces_dir, entry), diffs)
         _write(page, _document(f"Cheatproof: {entry.cert['task']['instance_id']}", body))
         pages.append(page)
@@ -749,15 +754,44 @@ def _round_block(label: str, rnd: Any, diff: str | None) -> str:
     )
 
 
-def _diff_text(diffs_dir: Path, stem: str, name: str) -> str | None:
-    """The sanitized attack diff of one round, from diffs_dir/<stem>.<name>.diff, or None when there is none.
+def _regular_file(folder: Path, name: str) -> Path | None:
+    """folder/name when folder is a directory and name a regular file, and neither is a symbolic link. Else None.
 
-    A symlinked diffs directory or file is refused: its target is never read. A file that cannot be read is None too.
+    The one check that traces and diffs both go through. A link is never followed, so its target is never read.
     """
-    if diffs_dir.is_symlink():
+    if folder.is_symlink() or not folder.is_dir():
         return None
-    path = diffs_dir / f"{stem}.{name}.diff"
+    path = folder / name
     if path.is_symlink() or not path.is_file():
+        return None
+    return path
+
+
+def _recorded_digest(cert: Mapping[str, Any], name: str) -> str | None:
+    """The sha256 of one round's final attack diff, as the certificate records it, or None."""
+    rnd = _map(_map(cert.get("harden")).get(name))
+    digest = _map(rnd.get("attack")).get("final_diff_sha256")
+    return digest if isinstance(digest, str) else None
+
+
+def _diff_text(diffs_dir: Path, stem: str, name: str, digest: str | None) -> str | None:
+    """The sanitized attack diff of one round, or None. It is shown only when diffs_dir/<stem>.<name>.diff.json
+    records raw_sha256 equal to the digest that the certificate records for this round (digest). A diff without
+    such a sidecar is stale, so it is not shown.
+
+    A symlinked diffs directory or file is refused, and a file that cannot be read is None too.
+    """
+    if digest is None:
+        return None
+    path = _regular_file(diffs_dir, f"{stem}.{name}.diff")
+    sidecar = _regular_file(diffs_dir, f"{stem}.{name}.diff.json")
+    if path is None or sidecar is None:
+        return None
+    try:
+        meta = json.loads(sidecar.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError, RecursionError):
+        return None
+    if not isinstance(meta, Mapping) or meta.get("raw_sha256") != digest:
         return None
     try:
         return path.read_text(encoding="utf-8", errors="replace")
@@ -815,8 +849,8 @@ def _trace_path(traces_dir: Path | None, entry: _Entry) -> Path | None:
     if traces_dir is None:
         return None
     for stem in (entry.stem, entry.name):
-        path = Path(traces_dir) / f"{stem}.jsonl"
-        if path.is_file():
+        path = _regular_file(Path(traces_dir), f"{stem}.jsonl")
+        if path is not None:
             return path
     return None
 

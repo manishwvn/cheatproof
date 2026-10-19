@@ -61,12 +61,15 @@ def write_trace(traces: Path, name: str, lines: list[str]) -> None:
     (traces / f"{name}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_diff_file(parent: Path, name: str, text: str) -> Path:
-    """A round's sanitized diff in parent/diffs, where cli harden writes it beside the certificates."""
+def write_diff_file(parent: Path, name: str, text: str, digest: str = "0" * 64) -> Path:
+    """A round's sanitized diff in parent/diffs, with the sidecar cli harden writes beside it. The sidecar records
+    digest as raw_sha256. attack_summary() records 64 zeros, so the default matches the certificates built here."""
     diffs = parent / "diffs"
     diffs.mkdir(parents=True, exist_ok=True)
     path = diffs / name
     path.write_text(text, encoding="utf-8")
+    sidecar = {"raw_sha256": digest, "chars": len(text), "redacted_lines": 0}
+    (diffs / f"{name}.json").write_text(json.dumps(sidecar, sort_keys=True), encoding="utf-8")
     return path
 
 
@@ -656,6 +659,76 @@ def test_a_symlinked_diff_file_is_refused_and_its_target_is_not_read(tmp_path):
     page = read(out / "env" / "owner__repo-1.html")
     assert "TARGET-MARKER" not in page
     assert NO_DIFF_NOTE in page
+
+
+def test_a_diff_whose_sidecar_digest_is_another_one_is_not_shown(tmp_path):
+    cert_dir = tmp_path / "certs"
+    with_attack_round(cert_dir)
+    write_diff_file(tmp_path, "owner__repo-1.before.diff", "+STALE-MARKER\n", digest="1" * 64)
+    out = tmp_path / "site"
+    build_site(cert_dir, out)
+    page = read(out / "env" / "owner__repo-1.html")
+    assert "STALE-MARKER" not in page
+    assert NO_DIFF_NOTE in page
+    assert f"Diff digest: sha256 {DIGEST}" in page  # the certificate's own digest still shows
+
+
+def test_a_diff_without_a_sidecar_is_not_shown(tmp_path):
+    cert_dir = tmp_path / "certs"
+    with_attack_round(cert_dir)
+    diffs = tmp_path / "diffs"
+    diffs.mkdir()
+    (diffs / "owner__repo-1.before.diff").write_text("+OLD-MARKER\n", encoding="utf-8")
+    out = tmp_path / "site"
+    build_site(cert_dir, out)
+    page = read(out / "env" / "owner__repo-1.html")
+    assert "OLD-MARKER" not in page
+    assert NO_DIFF_NOTE in page
+
+
+def test_a_symlinked_sidecar_is_refused_and_its_target_is_not_read(tmp_path):
+    secret = tmp_path / "elsewhere.json"
+    secret.write_text(json.dumps({"raw_sha256": DIGEST}), encoding="utf-8")
+    cert_dir = tmp_path / "certs"
+    with_attack_round(cert_dir)
+    diffs = tmp_path / "diffs"
+    diffs.mkdir()
+    (diffs / "owner__repo-1.before.diff").write_text("+LINKED-MARKER\n", encoding="utf-8")
+    (diffs / "owner__repo-1.before.diff.json").symlink_to(secret)
+    out = tmp_path / "site"
+    build_site(cert_dir, out)
+    page = read(out / "env" / "owner__repo-1.html")
+    assert "LINKED-MARKER" not in page
+    assert NO_DIFF_NOTE in page
+
+
+def test_a_symlinked_traces_dir_is_refused_and_its_target_is_not_read(tmp_path):
+    real = tmp_path / "real_traces"
+    write_trace(real, "owner__repo-1", trace_lines(payload="plain"))
+    traces = tmp_path / "traces"
+    traces.symlink_to(real, target_is_directory=True)
+    cert_dir = tmp_path / "certs"
+    write_certs(cert_dir, fixed_report("owner__repo-1"))
+    out = tmp_path / "site"
+    build_site(cert_dir, out, traces_dir=traces)
+    page = read(out / "env" / "owner__repo-1.html")
+    assert "cat .git/packed-refs" not in page
+    assert "no transcript recorded" in page
+
+
+def test_a_symlinked_trace_file_is_refused_and_its_target_is_not_read(tmp_path):
+    secret = tmp_path / "elsewhere.jsonl"
+    secret.write_text("\n".join(trace_lines(payload="plain")) + "\n", encoding="utf-8")
+    traces = tmp_path / "traces"
+    traces.mkdir()
+    (traces / "owner__repo-1.jsonl").symlink_to(secret)
+    cert_dir = tmp_path / "certs"
+    write_certs(cert_dir, fixed_report("owner__repo-1"))
+    out = tmp_path / "site"
+    build_site(cert_dir, out, traces_dir=traces)
+    page = read(out / "env" / "owner__repo-1.html")
+    assert "cat .git/packed-refs" not in page
+    assert "no transcript recorded" in page
 
 
 def test_a_symlinked_diffs_directory_is_refused_and_its_target_is_not_read(tmp_path):

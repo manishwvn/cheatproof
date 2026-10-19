@@ -10,13 +10,17 @@ given system prompt, writes one certificate and prints its path and a summary li
 a description of the task (repo, instance id, problem statement, failing tests). The gold and test patches
 never reach it.
 Beside the certificates directory, harden keeps what its paid run produced, each file named by the certificate's
-stem: traces/<stem>.jsonl (the attacker trace; a rerun appends to it), diffs/<stem>.<before|after>.diff (a round's
-attack diff through sanitize, written only when the raw sha256 matches the report's final_diff_sha256), and
-reports/<stem>.report.json (the digest-only report through sanitize, written only when no certificate was).
+stem: traces/<stem>.jsonl (the attacker trace; an earlier one is renamed to <stem>.<UTC time>.jsonl.old before the
+run), diffs/<stem>.<before|after>.diff with its sidecar diffs/<stem>.<before|after>.diff.json (a round's attack diff
+through sanitize, one line at a time, written only when the raw sha256 matches the report's final_diff_sha256; the
+sidecar holds raw_sha256, chars and redacted_lines), and reports/<stem>.report.json (the digest-only report through
+sanitize, written only when no certificate was, and removed once a certificate is written). A symbolic link at
+traces/ or at a trace file is refused before the paid run.
 report prints certify.score_directory() as it is: rates with their n, raw counts, outcomes, holes and sources.
 The rates, intervals and totals are computed in certify.py only; this module does no statistics of its own.
 site builds the static report site through site.build_site from the certificate files. It is not a paid call:
-no Budget, LLM or executor is built for it.
+no Budget, LLM or executor is built for it. Its traces come from --traces, or from traces/ beside the certificates
+when that directory exists and --traces is not given.
 
 Exit codes: 0 a certificate was written (certified or not), or the report was printed. 1 the budget was halted or
 capped, the executor refused or was unavailable, or the certificate could not be written after a paid run (its
@@ -50,7 +54,7 @@ from typing import TYPE_CHECKING, Any
 
 from cheatproof.budget import Budget, BudgetExceeded
 from cheatproof.executor import EnvSpec, ExecutorRefused, ExecutorUnavailable, make_executor
-from cheatproof.sanitize import sanitize
+from cheatproof.sanitize import REDACTED, sanitize
 
 if TYPE_CHECKING:
     from cheatproof.tasks import TaskSpec
@@ -62,6 +66,12 @@ DEFAULT_SITE_DIR = Path("results/site")
 TRACES_DIR = "traces"
 DIFFS_DIR = "diffs"
 REPORTS_DIR = "reports"
+ROUND_NAMES = ("before", "after")
+# What a redacted diff line keeps when it is a header: the keyword and its space. Changed lines keep their +, - or space.
+DIFF_HEADER = re.compile(
+    r"(?:diff --git|diff|index|new file mode|deleted file mode|old mode|new mode|similarity index|"
+    r"dissimilarity index|rename from|rename to|copy from|copy to|Binary files) |@@ "
+)
 UPPER_BOUND_NOTE = "Upper bound against this attacker, not proof."
 ERROR_CHARS = 300
 ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")  # what an environment variable name looks like
@@ -219,13 +229,27 @@ def _certificate_stem(task: TaskSpec) -> str:
 
 
 def _write_beside(folder: Path, name: str, text: str) -> Path:
-    """Write text to folder/name and create folder. A symlinked folder or file is refused: nothing goes through a link."""
+    """Write text to folder/name and create folder. A symlinked folder or file is refused: nothing goes through a link.
+
+    A lone surrogate is written as "?", so a diff that holds one is still kept.
+    """
     target = folder / name
     if folder.is_symlink() or target.is_symlink():
         raise OSError(f"refusing to write through a symbolic link: {name}")
     folder.mkdir(parents=True, exist_ok=True)
-    target.write_text(text, encoding="utf-8")
+    target.write_text(text, encoding="utf-8", errors="replace")
     return target
+
+
+def _remove_beside(folder: Path, name: str) -> None:
+    """Remove folder/name when it is a file or a link. A symlinked folder is left alone, and a failure is a note."""
+    target = folder / name
+    if folder.is_symlink() or not (target.is_symlink() or target.is_file()):
+        return
+    try:
+        target.unlink()
+    except OSError as exc:
+        print(f"note: could not remove {name}: {type(exc).__name__}", file=sys.stderr)
 
 
 def _raw_digest(text: str) -> str:
@@ -238,13 +262,40 @@ def _plain(data: Any) -> Any:
     return json.loads(json.dumps(data, default=str))
 
 
-def _keep_diffs(report: Any, stem: str, certs_dir: Path) -> None:
-    """Write each round's sanitized attack diff to diffs/<stem>.<round>.diff. Never raises.
+def _line_prefix(line: str) -> str:
+    """What a redacted diff line keeps: its diff header text, or the leading +, - or space of a changed line."""
+    header = DIFF_HEADER.match(line)
+    if header is not None:
+        return header.group()
+    return line[:1] if line[:1] in ("+", "-", " ") else ""
 
-    report.attacks holds one raw result per round whose attack ran, before first. A raw diff whose sha256 does not
-    match that round's recorded final_diff_sha256 is not written, and a note goes to stderr. A round with no diff
-    (final_diff None) is skipped.
+
+def _sanitize_diff(raw: str) -> tuple[str, int]:
+    """The diff through sanitize, one line at a time. A secret-like line becomes its prefix and REDACTED, and the
+    other lines are kept as they are. Returns the text and the number of lines redacted."""
+    lines: list[str] = []
+    redacted = 0
+    for line in raw.split("\n"):
+        if sanitize(line) == line:
+            lines.append(line)
+        else:
+            lines.append(_line_prefix(line) + REDACTED)
+            redacted += 1
+    return "\n".join(lines), redacted
+
+
+def _keep_diffs(report: Any, stem: str, certs_dir: Path) -> None:
+    """Write each round's sanitized attack diff to diffs/<stem>.<round>.diff, with its sidecar. Never raises.
+
+    report.attacks holds one raw result per round whose attack ran, before first. Each round first loses its old diff
+    and sidecar, so a rerun cannot show an earlier run's diff. A raw diff whose sha256 does not match that round's
+    recorded final_diff_sha256 is not written, and a note goes to stderr. A round with no diff (final_diff None)
+    writes nothing. The sidecar is {"raw_sha256", "chars", "redacted_lines"}: the sha256 and length of the raw diff.
     """
+    diffs_dir = certs_dir.parent / DIFFS_DIR
+    for name in ROUND_NAMES:
+        _remove_beside(diffs_dir, f"{stem}.{name}.diff")
+        _remove_beside(diffs_dir, f"{stem}.{name}.diff.json")
     rounds = [
         (name, rnd)
         for name, rnd in (("before", report.before), ("after", report.after))
@@ -261,15 +312,19 @@ def _keep_diffs(report: Any, stem: str, certs_dir: Path) -> None:
         raw = result.final_diff
         if raw is None:
             continue
-        if _raw_digest(raw) != rnd.attack.get("final_diff_sha256"):
+        digest = _raw_digest(raw)
+        if digest != rnd.attack.get("final_diff_sha256"):
             print(
                 f"note: the {name} attack diff does not match its recorded sha256: not written",
                 file=sys.stderr,
             )
             continue
         try:
-            _write_beside(certs_dir.parent / DIFFS_DIR, f"{stem}.{name}.diff", sanitize(raw))
-        except OSError as exc:
+            text, redacted = _sanitize_diff(raw)
+            sidecar = {"raw_sha256": digest, "chars": len(raw), "redacted_lines": redacted}
+            _write_beside(diffs_dir, f"{stem}.{name}.diff", text)
+            _write_beside(diffs_dir, f"{stem}.{name}.diff.json", json.dumps(sidecar, sort_keys=True) + "\n")
+        except (OSError, ValueError) as exc:
             print(f"note: the {name} attack diff was not written: {type(exc).__name__}", file=sys.stderr)
 
 
@@ -284,6 +339,22 @@ def _keep_report(report: Any, stem: str, certs_dir: Path) -> None:
         print(f"note: the report was not kept: {type(exc).__name__}", file=sys.stderr)
         return
     print(f"report kept: {path}", file=sys.stderr)
+
+
+def _rotate_trace(traces_dir: Path, stem: str, trace_path: Path) -> None:
+    """Rename an earlier trace so the new run starts a new one: <stem>.<UTC time>.jsonl.old. Nothing without one.
+
+    The UTC time has microseconds, and a name already taken gets a number, so no older file is overwritten.
+    """
+    if not trace_path.is_file():
+        return
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    target = traces_dir / f"{stem}.{stamp}.jsonl.old"
+    number = 1
+    while target.exists() or target.is_symlink():
+        number += 1
+        target = traces_dir / f"{stem}.{stamp}.{number}.jsonl.old"
+    trace_path.rename(target)
 
 
 def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
@@ -333,7 +404,13 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
     except ValueError as exc:
         return _usage_error(str(exc))
     prompt = build_task_prompt(task, env.workdir)
-    trace_path = args.out.parent / TRACES_DIR / f"{stem}.jsonl"
+    traces_dir = args.out.parent / TRACES_DIR
+    trace_path = traces_dir / f"{stem}.jsonl"
+    if traces_dir.is_symlink() or trace_path.is_symlink():
+        # Checked before any paid run: the attacker would append its trace through the link.
+        return _usage_error(
+            f"refusing to write the trace through a symbolic link: {TRACES_DIR}/ or {trace_path.name}"
+        )
 
     try:
         executor = deps.make_executor()
@@ -345,6 +422,11 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
         return _missing_setting(exc)
     except ValueError as exc:
         return _usage_error(str(exc))
+    try:
+        # An earlier run's trace is set aside before this run appends to traces/<stem>.jsonl.
+        _rotate_trace(traces_dir, stem, trace_path)
+    except OSError as exc:
+        return _failure(exc)
 
     def attack_fn(session: Any) -> Any:
         return deps.attack(llm, session, system_prompt, prompt, config, trace_path=trace_path)
@@ -363,6 +445,9 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
             f"${spent_before:.4f} to ${spent_after:.4f} during the run; no certificate written",
             file=sys.stderr,
         )
+        # The paid run is kept all the same: its digest-only report and its diffs.
+        _keep_report(report, stem, args.out)
+        _keep_diffs(report, stem, args.out)
         return 1
 
     attacker = {"model": config.model, "max_steps": config.max_steps, "max_tokens": config.max_tokens_total}
@@ -378,11 +463,13 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
         )
         args.out.mkdir(parents=True, exist_ok=True)
         path = deps.write_certificate(cert, args.out)
-    except (ValueError, OSError) as exc:
+    except Exception as exc:  # noqa: BLE001 - any failure after a paid run keeps the run, then exits 1
         # The paid run is kept: its report and its diffs, even though no certificate came of it.
         _keep_report(report, stem, args.out)
         _keep_diffs(report, stem, args.out)
         return _not_written(exc, cost)
+    # An earlier failed run's report for this stem is stale now that a certificate exists.
+    _remove_beside(args.out.parent / REPORTS_DIR, f"{stem}.report.json")
     _keep_diffs(report, stem, args.out)
     print(f"certificate: {path}")
     print(_harden_line(report, cost))
@@ -509,10 +596,18 @@ def cmd_site(args: argparse.Namespace, deps: Deps) -> int:
     cert_dir: Path = args.certs
     if not cert_dir.is_dir():
         return _usage_error(f"certificates directory not found: {cert_dir}")
-    if args.traces is not None and not args.traces.is_dir():
-        return _usage_error(f"traces directory not found: {args.traces}")
+    traces = args.traces
+    if traces is not None:
+        if not traces.is_dir():
+            return _usage_error(f"traces directory not found: {traces}")
+        if traces.is_symlink():
+            return _usage_error(f"traces directory is a symbolic link: {traces}")
+    else:
+        beside = cert_dir.parent / TRACES_DIR  # the traces/ that harden keeps beside the certificates
+        if beside.is_dir() and not beside.is_symlink():
+            traces = beside
     try:
-        result = deps.build_site(cert_dir, args.out, traces_dir=args.traces)
+        result = deps.build_site(cert_dir, args.out, traces_dir=traces)
     except FileNotFoundError as exc:
         return _usage_error(f"site input not found: {sanitize(str(exc))[:ERROR_CHARS]}")
     except ValueError as exc:  # --out is a non-empty directory that is not a cheatproof site
@@ -556,7 +651,10 @@ def build_parser() -> argparse.ArgumentParser:
     site.add_argument("--certs", type=Path, default=DEFAULT_CERT_DIR, help="certificates directory")
     site.add_argument("--out", type=Path, default=DEFAULT_SITE_DIR, help="directory for the site")
     site.add_argument(
-        "--traces", type=Path, help="directory of <certificate file stem>.jsonl attacker traces (optional)"
+        "--traces",
+        type=Path,
+        help="directory of <certificate file stem>.jsonl attacker traces (default: traces/ beside the "
+        "certificates, when it exists)",
     )
     return parser
 
