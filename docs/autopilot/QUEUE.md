@@ -7,7 +7,7 @@ Check: `python3 docs/autopilot/progress.py` counts the same tasks as
 
 ## Milestone: live access and executor
 
-### T01 Smoke test, model IDs and prices — size S — waiting: U3 (sandbox run) [85%]
+### T01 Smoke test, model IDs and prices — size S — todo — after 2026-10-21 (sandbox run, with T23) [85%]
 Run `uv run python scripts/smoke.py`. Live scripts load `.env` from the main checkout (the parent of `git rev-parse
 --git-common-dir`), so worktrees share one key file and never copy it. Record the exact Nemotron model IDs (Nano,
 Super, Ultra) from `/v1/models` and their per-1M prices from the public Token Factory price page into `.env.example`
@@ -54,7 +54,14 @@ USER item for the planner to merge. Do T02 first if both are runnable.
 Done 2026-10-18 (routine): PR #10 open, CI green, Sonnet review fixed (one round), Opus final review: ready. Items 10
 and 11 are below (T08, T12 text). Planner merges #10 (U10), then installs `docs/autopilot/pre-push`.
 
-### T23 Sandboxes access check and $0 booking (planner-merge PR) — size S — waiting: U3
+### T23 Sandboxes access check and $0 booking (planner-merge PR) — size S — todo — after 2026-10-21
+Planner note 2026-10-20 (U3 done: Nebius emailed "access is active" 07:30Z). Image listing may stay forbidden while
+runs work, so `scripts/sandbox_access.py` must test a tiny run instead (`images.use("python:3.12-slim").run(...)`,
+free in beta). An owner-side check created operations, but polling `GET /sandboxes/v1/operations/<id>` returned HTTP
+500 twice. Steps: (1) change the check to a tiny run, polling with backoff (e.g. 5 tries, 2 s doubling); (2) if it
+succeeds, try importing one swebench task image and running its gold gate on the Sandbox executor; (3) if the 500
+persists, write an email draft for the owner to `contree@nebius.com` (file in `S/`, never sent by a routine) citing
+the operation IDs in `S/sandbox-ops.txt` and add a USER item to send it; keep T08 on Docker meanwhile.
 Every cycle while U3 is open, before picking work (even though this task waits on U3): run
 `uv run python scripts/sandbox_access.py` (free: whoami plus image list; never starts a sandbox run). Exit 2
 (`NO ACCESS`) means still waiting; exit 0 (`ACCESS OK`) means access is on. Checked 2026-10-19: key valid, image list
@@ -361,7 +368,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 - ~~**U2 Tavily key**~~ Done 2026-10-19: key in `.env` (free plan, 1,000 credits a month). ~~**U2 Tavily key (optional, for the network-fetch attack and the Tavily bonus)** (ready 2026-10-16): sign up at
   https://tavily.com, apply promo `BBDEVPOST`, put the key in `.env` as `TAVILY_API_KEY`. Optional: join
   https://dev.nebius.com/builders for extra credit (unreliable; the plan assumes $25 only).
-- **U3 Sandboxes access** (in progress 2026-10-19: beta form submitted, Nebius emails when enabled; project IDs are
+- ~~**U3 Sandboxes access**~~ Done 2026-10-20: Nebius emailed that Sandboxes (Beta) access is active. (in progress 2026-10-19: beta form submitted, Nebius emails when enabled; project IDs are
   in `.env`; T23 checks access each cycle) (ready after U1): https://tokenfactory.nebius.com/sandboxes/about → request access. If the
   profile still shows inactive after a day, email contree@nebius.com with the project ID only (never the key). Docker
   is the fallback; the executor is decided at the Oct 21 go/no-go.
