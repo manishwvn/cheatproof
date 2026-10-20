@@ -217,3 +217,16 @@ progress 72% (15/24 tasks done, 9 days to submit)
 - Spend: $0.0146 (ledger $0.0000336 to $0.0145935). No Ultra, no Tavily, no sandbox runs.
 - Lessons: SWE-bench images need `linux/amd64` and the `testbed` env; each task image is about 4 GB unpacked, so
   check disk for the whole batch before the first pull.
+
+## 2026-10-19 routine (cycle 2026-10-19T22:23:52-05:00)
+progress 72% (15/24 tasks done, 9 days to submit)
+- Ran on the owner's `weekly-cap` override (W 94, cap 99, one task). Took T08. Sandboxes check: still NO ACCESS (U3).
+- Runs: `sphinx-doc__sphinx-8595` inconclusive (token limit, $0.035); `psf__requests-1142` rerun at 300k tokens
+  ($0.071) wrote nothing, but its diff held the image's untracked `build/lib/**`, the grade could not apply it, and
+  the certificate said certified. Bug fixed in PR #23 (Haiku built, Sonnet review "fix first", one fix round, Opus
+  final review, CI green); planner merge (U16). Both certificates void until rerun.
+- Blocked: host free disk stayed 7.4 GB after the task images were removed (colima keeps freed blocks), so the guard
+  refuses every pull (U15, alerted). T08 is `waiting: U15, U16`.
+- Spend: $0.107 (ledger $0.0146 to $0.1214). No Ultra, no Tavily, no sandbox runs.
+- Lessons: diff only what the attacker changed (record the untracked list at start); a disk guard must measure the
+  disk the pull lands on (the VM), not the host.
