@@ -1,6 +1,7 @@
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -9,8 +10,11 @@ import pytest
 
 from cheatproof.budget import Budget, BudgetExceeded
 from cheatproof.executor import (
-    BASELINE_UNTRACKED,
+    _BASELINE_SCRIPT,
+    _DIFF_SCRIPT,
+    _UNSTAGE_SCRIPT,
     EXEC_GRACE_S,
+    MAX_BASELINE_BYTES,
     MAX_DIFF_BYTES,
     MAX_OUTPUT_BYTES,
     MAX_RUN_TIMEOUT_S,
@@ -25,6 +29,7 @@ from cheatproof.executor import (
     Result,
     SandboxExecutor,
     make_executor,
+    normalise_untracked,
     start,
     subprocess_runner,
 )
@@ -882,7 +887,7 @@ def test_diff_uses_fresh_index_and_ignores_repo_side_tricks(tmp_path):
     with make_docker(fake).start(ENV, make_budget(tmp_path)) as s:
         fake.exec_result = Result(0, "diff --git a/x b/x\n", "", 0.0)
         out = s.diff()
-        script = fake.argvs(["docker", "exec", CID, "sh", "-c"])[-1][-1]
+        script = fake.argvs(["docker", "exec", "-i", CID, "sh", "-c"])[-1][-1]
         diff_max_bytes = fake.meta[-1][1]
     assert out == "diff --git a/x b/x\n"
     for flag in (
@@ -932,48 +937,58 @@ def test_diff_timeout_raises(tmp_path):
             s.diff()
 
 
-# --- untracked-file baseline -------------------------------------------------------------------------
+# --- untracked-file start list -----------------------------------------------------------------------
+
+
+def diff_calls(fake):
+    """(argv, stdin) of each docker exec that builds a diff, in call order."""
+    return [
+        (argv, stdin)
+        for argv, stdin in fake.log
+        if argv[:2] == ["docker", "exec"] and "diff --cached" in argv[-1]
+    ]
 
 
 def baseline_calls(fake):
-    """argv of each docker exec that records the untracked-file baseline, in call order."""
+    """(argv, max_bytes) of each docker exec that lists the untracked paths, in call order."""
     return [
-        argv for argv, _ in fake.log if argv[:2] == ["docker", "exec"] and "ls-files --others" in argv[-1]
+        (argv, meta[1])
+        for (argv, _), meta in zip(fake.log, fake.meta, strict=True)
+        if argv[:2] == ["docker", "exec"] and "ls-files --others" in argv[-1]
     ]
 
 
-def diff_scripts(fake):
-    return [
-        argv[-1] for argv, _ in fake.log if argv[:2] == ["docker", "exec"] and "diff --cached" in argv[-1]
-    ]
-
-
-def test_baseline_is_recorded_at_start_and_again_at_reset(tmp_path):
+def test_start_list_is_taken_at_start_and_again_at_reset(tmp_path):
     fake = FakeDocker()
     with make_docker(fake).start(ENV, make_budget(tmp_path)) as s:
         assert len(baseline_calls(fake)) == 1
         s.reset()
         assert len(baseline_calls(fake)) == 2
-    argv = baseline_calls(fake)[-1]
-    script = argv[-1]
+    argv, max_bytes = baseline_calls(fake)[-1]
     assert argv[:3] == ["docker", "exec", CID]
-    assert "ls-files --others -z" in script  # NUL-separated, every untracked path
-    assert "--exclude-standard" not in script  # ignored files are recorded too
-    assert "GIT_CONFIG_NOSYSTEM=1" in script
-    assert "-C /testbed" in script
-    assert f"rm -f -- {BASELINE_UNTRACKED}" in script
-    assert f"> {BASELINE_UNTRACKED}" in script
-    assert not BASELINE_UNTRACKED.startswith(ENV.workdir + "/")  # the file lives outside the workdir
+    assert "ls-files --others -z" in argv[-1]  # NUL-separated, every untracked path
+    assert "--exclude-standard" not in argv[-1]  # ignored files are listed too
+    assert "-C /testbed" in argv[-1]
+    assert max_bytes == MAX_BASELINE_BYTES
 
 
-def test_baseline_failure_at_start_raises_and_removes_the_container(tmp_path):
-    fake = FakeDocker(baseline_result=Result(1, "", "ls-files: permission denied", 0.0))
+@pytest.mark.parametrize(
+    "answer",
+    [
+        Result(1, "", "ls-files: permission denied", 0.0),
+        Result(TIMEOUT_EXIT_CODE, "", "\n[timed out after 120s]", 0.0, timed_out=True),
+        Result(OUTPUT_KILL_EXIT_CODE, "x" * 100, "", 0.0, truncated=True),
+    ],
+    ids=["exit-1", "timeout", "over-cap"],
+)
+def test_start_list_that_is_not_recorded_stops_the_start(tmp_path, answer):
+    fake = FakeDocker(baseline_result=answer)
     with pytest.raises(RuntimeError, match="baseline was not recorded"):
         make_docker(fake).start(ENV, make_budget(tmp_path))
     assert run_name(fake) in fake.names_removed()
 
 
-def test_baseline_timeout_at_reset_raises_and_leaves_no_sandbox_to_diff(tmp_path):
+def test_start_list_that_fails_at_reset_leaves_no_sandbox_to_diff(tmp_path):
     fake = FakeDocker(exec_result=Result(0, "deadbeef\n", "", 0.0))
     with make_docker(fake).start(ENV, make_budget(tmp_path)) as s:
         fake.baseline_result = Result(TIMEOUT_EXIT_CODE, "", "[timed out]", 0.0, timed_out=True)
@@ -981,39 +996,140 @@ def test_baseline_timeout_at_reset_raises_and_leaves_no_sandbox_to_diff(tmp_path
             s.reset()
         with pytest.raises(RuntimeError, match="no live sandbox"):
             s.diff()
-        assert not diff_scripts(fake)
+        assert not diff_calls(fake)
 
 
-def test_diff_refuses_when_the_untracked_baseline_was_not_recorded(tmp_path):
-    fake = FakeDocker(exec_result=Result(0, "deadbeef\n", "", 0.0))
-    with make_docker(fake).start(ENV, make_budget(tmp_path)) as s:
-        s._untracked_recorded = False  # the state a session without a baseline would be in
-        with pytest.raises(RuntimeError, match="untracked-file baseline"):
-            s.diff()
-        assert not diff_scripts(fake)
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (b"", b""),
+        (b"a b.py\0-lead.py\0", b"a b.py\0-lead.py\0"),
+        (b"nested/\0x\0", b"nested\0x\0"),  # a nested repo is listed with a slash and indexed without
+        (b"\0\0nested/\0", b"nested\0"),
+        (b"dir//\0", b"dir/\0"),  # only one trailing slash goes
+    ],
+)
+def test_start_list_is_normalised_for_update_index(raw, expected):
+    assert normalise_untracked(raw) == expected
 
 
-def test_diff_unstages_the_baseline_paths_after_the_add(tmp_path):
-    fake = FakeDocker(exec_result=Result(0, "deadbeef\n", "", 0.0))
+def test_diff_sends_the_start_list_on_stdin_and_unstages_it(tmp_path):
+    fake = FakeDocker(
+        exec_result=Result(0, "deadbeef\n", "", 0.0),  # the base commit
+        baseline_result=Result(0, "build/lib/x.py\0nested/\0", "", 0.0),
+    )
     with make_docker(fake).start(ENV, make_budget(tmp_path)) as s:
         s.diff()
-    script = diff_scripts(fake)[-1]
-    add_at = script.index("add -A -f")
-    unstage_at = script.index("rm --cached")
-    diff_at = script.index("diff --cached --binary")
-    assert add_at < unstage_at < diff_at
-    assert f"if [ ! -f {BASELINE_UNTRACKED} ]" in script  # a missing baseline fails closed
-    assert f"if [ -s {BASELINE_UNTRACKED} ]; then" in script  # nothing to unstage when the list is empty
-    unstage = script[script.index("if [ -s") : diff_at]  # --literal-pathspecs is a global flag before rm
-    for flag in (
-        "--literal-pathspecs",
-        "--pathspec-from-file=" + BASELINE_UNTRACKED,
-        "--pathspec-file-nul",
-        "--ignore-unmatch",
-        " -f ",  # a nested repo's gitlink fails the up-to-date check without it
-    ):
-        assert flag in unstage, flag
-    assert "-C /testbed" in unstage
+    ((argv, stdin),) = diff_calls(fake)
+    script = argv[-1]
+    assert argv[:4] == ["docker", "exec", "-i", CID]
+    assert stdin == b"build/lib/x.py\0nested\0"  # the list the host recorded, normalised
+    unstage_at = script.index("update-index --force-remove -z --stdin")
+    assert script.index("add -A -f") < unstage_at < script.index("diff --cached --binary")
+    assert "-C /testbed" in script
+    assert "rm --cached" not in script
+
+
+def test_empty_start_list_has_no_unstage_step(tmp_path):
+    fake = FakeDocker(exec_result=Result(0, "deadbeef\n", "", 0.0))  # the base commit
+    with make_docker(fake).start(ENV, make_budget(tmp_path)) as s:
+        s.diff()
+    ((argv, stdin),) = diff_calls(fake)
+    assert "update-index" not in argv[-1]
+    assert stdin == b""
+
+
+# --- real git, no docker: the diff script against a repo shaped like a task image ---------------------
+
+
+def _git_env(home):
+    # Nothing from the developer's git config or environment reaches the test repos.
+    return {"PATH": os.environ["PATH"], "HOME": str(home), "GIT_CONFIG_NOSYSTEM": "1"}
+
+
+def _git(home, cwd, *args):
+    out = subprocess.run(
+        ["git", "-C", str(cwd), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_git_env(home),
+    )
+    return out.stdout
+
+
+def _sh(home, script, stdin=None):
+    return subprocess.run(
+        ["sh", "-c", script], input=stdin, capture_output=True, env=_git_env(home), check=False
+    )
+
+
+def _task_image_repo(home, root):
+    """One commit, then the files an install leaves untracked."""
+    repo = root / "testbed"
+    repo.mkdir(parents=True)
+    _git(home, repo, "init", "-q")
+    (repo / ".gitignore").write_text("ignored/\n")
+    (repo / "a.py").write_text("print('a')\n")
+    _git(home, repo, "add", "-A")
+    _git(home, repo, "commit", "-qm", "base")
+    for rel, text in [
+        ("build/lib/x.py", "old build\n"),
+        ("a b.py", "spaces\n"),
+        ("*.py", "literal glob\n"),
+        ("-lead.py", "leading dash\n"),
+        ("ignored/old.txt", "ignored\n"),
+    ]:
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(text)
+    nested = repo / "nested"
+    nested.mkdir()
+    _git(home, nested, "init", "-q")
+    (nested / "inner.txt").write_text("inner\n")
+    _git(home, nested, "add", "-A")
+    _git(home, nested, "commit", "-qm", "inner")
+    return repo
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git on PATH")
+def test_real_git_patch_leaves_start_files_out_and_applies_to_a_fresh_copy(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    repo = _task_image_repo(home, tmp_path / "start")
+    base = _git(home, repo, "rev-parse", "HEAD").strip()
+    listed = _sh(home, _BASELINE_SCRIPT.format(workdir=shlex.quote(str(repo))))
+    assert listed.returncode == 0, listed.stderr
+    baseline = normalise_untracked(listed.stdout)
+    for name in (b"build/lib/x.py", b"a b.py", b"*.py", b"-lead.py", b"ignored/old.txt", b"nested"):
+        assert name + b"\0" in baseline, name
+    # attacker session: a tracked edit, a new file, an edit and a delete of files untracked at start.
+    # A deleted start-list path is not in the temp index, and that must not fail the unstage.
+    (repo / "a.py").write_text("print('changed')\n")
+    (repo / "new.py").write_text("print('new')\n")
+    (repo / "build" / "lib" / "x.py").write_text("attacker build\n")
+    (repo / "-lead.py").unlink()
+    script = _DIFF_SCRIPT.format(
+        workdir=shlex.quote(str(repo)),
+        base=shlex.quote(base),
+        unstage=_UNSTAGE_SCRIPT.format(workdir=shlex.quote(str(repo))),
+    )
+    res = _sh(home, script, stdin=baseline)
+    assert res.returncode == 0, res.stderr
+    headers = [line for line in res.stdout.decode().splitlines() if line.startswith("diff --git ")]
+    assert headers == ["diff --git a/a.py b/a.py", "diff --git a/new.py b/new.py"]
+    assert b"+print('changed')" in res.stdout
+    # the same start state, built again: the patch must apply there
+    fresh = _task_image_repo(home, tmp_path / "fresh")
+    patch = tmp_path / "attack.patch"
+    patch.write_bytes(res.stdout)
+    check = subprocess.run(
+        ["git", "-C", str(fresh), "apply", "--check", str(patch)],
+        capture_output=True,
+        text=True,
+        env=_git_env(home),
+        check=False,
+    )
+    assert check.returncode == 0, check.stderr
 
 
 # --- executor choice and live test -------------------------------------------------------------------
