@@ -32,6 +32,8 @@ from cheatproof.budget import Budget
 MAX_OUTPUT_BYTES = 64 * 1024  # kept per stream, per run() call
 OUTPUT_MARGIN_BYTES = 4 * 1024  # the host reads this far past the cap, then kills the client
 MAX_DIFF_BYTES = 8 * 1024 * 1024  # diff() raises above this; it never truncates a patch
+# The start list of untracked paths. Over this, the session refuses to start.
+MAX_BASELINE_BYTES = 8 * 1024 * 1024
 MAX_RUN_TIMEOUT_S = 1800
 EXEC_GRACE_S = 10  # host waits this long past the in-container timeout before it kills docker exec
 TIMEOUT_EXIT_CODE = 124  # same as timeout(1)
@@ -68,15 +70,39 @@ _IN_CONTAINER_TIMEOUT = (
 # and attributes are still untrusted: T05/T06 restore the hidden tests at grade time. -f stages ignored
 # files too (an attacker can hide a file via .git/info/exclude); bytecode and cache dirs are left out to keep
 # the patch small, so the grader must clear __pycache__ before grading (stale .pyc is a hole of its own).
+# Files untracked at start are not part of the patch. The start list arrives on stdin, and _UNSTAGE_SCRIPT
+# drops those paths from the temp index after the add. update-index takes literal paths.
 _DIFF_SCRIPT = (
     'set -e; export GIT_CONFIG_NOSYSTEM=1; tmp=$(mktemp -d); export GIT_INDEX_FILE="$tmp/index"; '
     "trap 'rm -rf \"$tmp\"' EXIT; "
     "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null read-tree {base}; "
     "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null add -A -f -- . "
     "':(exclude,glob)**/__pycache__/**' ':(exclude,glob)**/.pytest_cache/**' ':(exclude,glob)**/*.egg-info/**'; "
+    "{unstage}"
     "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null "
     "diff --cached --binary --no-color --no-ext-diff --no-textconv {base}"
 )
+
+# Only when the start list is not empty; with an empty list the diff script has no unstage step.
+_UNSTAGE_SCRIPT = (
+    "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null "
+    "update-index --force-remove -z --stdin; "
+)
+
+# Runs in the container at start and at reset, before any attacker command. Lists every untracked path, ignored
+# ones included, NUL-separated and relative to the workdir. The host keeps the list (DockerSession._untracked),
+# so nothing in the container is trusted to hold it.
+_BASELINE_SCRIPT = (
+    "set -e; export GIT_CONFIG_NOSYSTEM=1; "
+    "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null ls-files --others -z"
+)
+
+
+def normalise_untracked(raw: bytes) -> bytes:
+    """Start list in the form update-index --stdin -z reads: NUL-terminated, no empty entries. A nested repo
+    is listed as `name/` and indexed as `name`, so one trailing slash goes."""
+    names = (name.removesuffix(b"/") for name in raw.split(b"\0") if name)
+    return b"".join(name + b"\0" for name in names if name)
 
 
 class ExecutorRefused(RuntimeError):
@@ -287,8 +313,9 @@ class Session(ABC):
 
     @abstractmethod
     def diff(self) -> str:
-        """Patch of all changes since start, tracked and untracked. Raises if git fails, if the base
-        commit was not recorded, or if the patch is larger than MAX_DIFF_BYTES."""
+        """Patch of changes since start, tracked and untracked, except files already untracked at start
+        (see DockerSession.diff). Raises if git fails, if the base commit or the baseline was not recorded,
+        or if the patch is larger than MAX_DIFF_BYTES."""
 
     @abstractmethod
     def reset(self) -> None:
@@ -527,6 +554,18 @@ class DockerExecutor:
         res = self._docker(["exec", cid, "sh", "-c", script], IO_TIMEOUT_S)
         return res.stdout.strip() if res.exit_code == 0 else ""
 
+    def _untracked_paths(self, cid: str, workdir: str) -> bytes:
+        script = _BASELINE_SCRIPT.format(workdir=shlex.quote(workdir))
+        res = self._docker(["exec", cid, "sh", "-c", script], IO_TIMEOUT_S, max_bytes=MAX_BASELINE_BYTES)
+        if res.exit_code != 0 or res.timed_out or res.truncated:
+            raise RuntimeError(
+                f"untracked-file baseline was not recorded (exit {res.exit_code}, timed_out={res.timed_out}, "
+                f"truncated={res.truncated}): {res.stderr.strip()[-300:]}"
+            )
+        # The runner decodes stdout as UTF-8 with replacement, so a name that is not valid UTF-8 comes back
+        # changed and matches no index entry. That file stays in the patch: visible at grading, never hidden.
+        return normalise_untracked(res.stdout.encode("utf-8"))
+
 
 class DockerSession(Session):
     def __init__(self, executor: DockerExecutor, env: EnvSpec, budget: Budget) -> None:
@@ -536,6 +575,8 @@ class DockerSession(Session):
         self._name: str | None = None
         self._cid: str | None = None
         self._base = ""
+        # Start list of untracked paths, NUL-terminated. Held here on the host, never read back from the container.
+        self._untracked: bytes | None = None
         self._closed = False
         self._launch()
 
@@ -547,8 +588,10 @@ class DockerSession(Session):
         self._budget.reserve_local_run()  # before the container exists; BudgetExceeded propagates
         self._name, self._cid = self._executor._create(self._env)
         self._base = ""
+        self._untracked = None
         try:
             self._base = self._executor._base_commit(self._cid, self._env.workdir)
+            self._untracked = self._executor._untracked_paths(self._cid, self._env.workdir)
         except BaseException:
             self._executor._remove_quietly(self._name)
             self._name = self._cid = None
@@ -604,12 +647,29 @@ class DockerSession(Session):
             raise RuntimeError(f"write_file {path!r} failed ({res.exit_code}): {res.stderr.strip()[-300:]}")
 
     def diff(self) -> str:
+        """Patch of changes since start: tracked files, and files created since start.
+
+        Files that were untracked at start (an install's build tree, say) are never graded: changes to them are
+        dropped from the patch. The grader applies this patch to a fresh container from the same image, which
+        already has those files, so including them would fail with "already exists in working directory". The
+        list of those paths is recorded before any attacker command and held on the host. Raises if the base
+        commit or that list was not recorded.
+        """
         cid = self._live()
         if not self._base:
             raise RuntimeError("base commit was not recorded at start; refusing to build a diff")
-        script = _DIFF_SCRIPT.format(workdir=shlex.quote(self._env.workdir), base=shlex.quote(self._base))
+        if self._untracked is None:
+            raise RuntimeError("untracked-file baseline was not recorded at start; refusing to build a diff")
+        unstage = _UNSTAGE_SCRIPT.format(workdir=shlex.quote(self._env.workdir)) if self._untracked else ""
+        script = _DIFF_SCRIPT.format(
+            workdir=shlex.quote(self._env.workdir), base=shlex.quote(self._base), unstage=unstage
+        )
+        # -i: the start list goes to update-index on stdin, as write_file sends its data.
         res = self._executor._docker(
-            ["exec", cid, "sh", "-c", script], IO_TIMEOUT_S, max_bytes=MAX_DIFF_BYTES
+            ["exec", "-i", cid, "sh", "-c", script],
+            IO_TIMEOUT_S,
+            stdin=self._untracked,
+            max_bytes=MAX_DIFF_BYTES,
         )
         if res.timed_out:
             raise RuntimeError(f"diff timed out after {IO_TIMEOUT_S}s")
