@@ -9,6 +9,7 @@ import pytest
 
 from cheatproof.budget import Budget, BudgetExceeded
 from cheatproof.executor import (
+    BASELINE_UNTRACKED,
     EXEC_GRACE_S,
     MAX_DIFF_BYTES,
     MAX_OUTPUT_BYTES,
@@ -55,6 +56,7 @@ class FakeDocker:
         rm_results=(),
         ps_result=None,
         task_images=(),
+        baseline_result=None,
     ):
         self.task_images = list(task_images)  # answer to docker images --filter reference=swebench/*
         self.image_present = image_present
@@ -66,6 +68,8 @@ class FakeDocker:
         self.exec_raises = exec_raises  # raised by every docker exec
         self.rm_results = list(rm_results)  # answers to docker rm -f, in order; then exit 0
         self.ps_result = ps_result  # answer to docker ps; prints nothing when unset
+        # answer to the untracked-file baseline exec, a separate command from exec_result
+        self.baseline_result = Result(0, "", "", 0.0) if baseline_result is None else baseline_result
         self.on_run = None
         self.log: list[tuple[list[str], bytes | None]] = []
         self.meta: list[tuple[float, int | None]] = []
@@ -97,6 +101,8 @@ class FakeDocker:
         if argv[:2] == ["docker", "exec"]:
             if self.exec_raises is not None:
                 raise self.exec_raises
+            if "ls-files --others" in argv[-1]:
+                return self.baseline_result
             return self.exec_result
         return Result(0, "", "", 0.0)
 
@@ -924,6 +930,90 @@ def test_diff_timeout_raises(tmp_path):
         fake.exec_result = Result(TIMEOUT_EXIT_CODE, "", "", 0.0, timed_out=True)
         with pytest.raises(RuntimeError, match="timed out"):
             s.diff()
+
+
+# --- untracked-file baseline -------------------------------------------------------------------------
+
+
+def baseline_calls(fake):
+    """argv of each docker exec that records the untracked-file baseline, in call order."""
+    return [
+        argv for argv, _ in fake.log if argv[:2] == ["docker", "exec"] and "ls-files --others" in argv[-1]
+    ]
+
+
+def diff_scripts(fake):
+    return [
+        argv[-1] for argv, _ in fake.log if argv[:2] == ["docker", "exec"] and "diff --cached" in argv[-1]
+    ]
+
+
+def test_baseline_is_recorded_at_start_and_again_at_reset(tmp_path):
+    fake = FakeDocker()
+    with make_docker(fake).start(ENV, make_budget(tmp_path)) as s:
+        assert len(baseline_calls(fake)) == 1
+        s.reset()
+        assert len(baseline_calls(fake)) == 2
+    argv = baseline_calls(fake)[-1]
+    script = argv[-1]
+    assert argv[:3] == ["docker", "exec", CID]
+    assert "ls-files --others -z" in script  # NUL-separated, every untracked path
+    assert "--exclude-standard" not in script  # ignored files are recorded too
+    assert "GIT_CONFIG_NOSYSTEM=1" in script
+    assert "-C /testbed" in script
+    assert f"rm -f -- {BASELINE_UNTRACKED}" in script
+    assert f"> {BASELINE_UNTRACKED}" in script
+    assert not BASELINE_UNTRACKED.startswith(ENV.workdir + "/")  # the file lives outside the workdir
+
+
+def test_baseline_failure_at_start_raises_and_removes_the_container(tmp_path):
+    fake = FakeDocker(baseline_result=Result(1, "", "ls-files: permission denied", 0.0))
+    with pytest.raises(RuntimeError, match="baseline was not recorded"):
+        make_docker(fake).start(ENV, make_budget(tmp_path))
+    assert run_name(fake) in fake.names_removed()
+
+
+def test_baseline_timeout_at_reset_raises_and_leaves_no_sandbox_to_diff(tmp_path):
+    fake = FakeDocker(exec_result=Result(0, "deadbeef\n", "", 0.0))
+    with make_docker(fake).start(ENV, make_budget(tmp_path)) as s:
+        fake.baseline_result = Result(TIMEOUT_EXIT_CODE, "", "[timed out]", 0.0, timed_out=True)
+        with pytest.raises(RuntimeError, match="baseline was not recorded"):
+            s.reset()
+        with pytest.raises(RuntimeError, match="no live sandbox"):
+            s.diff()
+        assert not diff_scripts(fake)
+
+
+def test_diff_refuses_when_the_untracked_baseline_was_not_recorded(tmp_path):
+    fake = FakeDocker(exec_result=Result(0, "deadbeef\n", "", 0.0))
+    with make_docker(fake).start(ENV, make_budget(tmp_path)) as s:
+        s._untracked_recorded = False  # the state a session without a baseline would be in
+        with pytest.raises(RuntimeError, match="untracked-file baseline"):
+            s.diff()
+        assert not diff_scripts(fake)
+
+
+def test_diff_unstages_the_baseline_paths_after_the_add(tmp_path):
+    fake = FakeDocker(exec_result=Result(0, "deadbeef\n", "", 0.0))
+    with make_docker(fake).start(ENV, make_budget(tmp_path)) as s:
+        s.diff()
+    script = diff_scripts(fake)[-1]
+    add_at = script.index("add -A -f")
+    unstage_at = script.index("rm --cached")
+    diff_at = script.index("diff --cached --binary")
+    assert add_at < unstage_at < diff_at
+    assert f"if [ ! -f {BASELINE_UNTRACKED} ]" in script  # a missing baseline fails closed
+    assert f"if [ -s {BASELINE_UNTRACKED} ]; then" in script  # nothing to unstage when the list is empty
+    unstage = script[script.index("if [ -s") : diff_at]  # --literal-pathspecs is a global flag before rm
+    for flag in (
+        "--literal-pathspecs",
+        "--pathspec-from-file=" + BASELINE_UNTRACKED,
+        "--pathspec-file-nul",
+        "--ignore-unmatch",
+        " -f ",  # a nested repo's gitlink fails the up-to-date check without it
+    ):
+        assert flag in unstage, flag
+    assert "-C /testbed" in unstage
 
 
 # --- executor choice and live test -------------------------------------------------------------------

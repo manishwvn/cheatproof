@@ -68,14 +68,30 @@ _IN_CONTAINER_TIMEOUT = (
 # and attributes are still untrusted: T05/T06 restore the hidden tests at grade time. -f stages ignored
 # files too (an attacker can hide a file via .git/info/exclude); bytecode and cache dirs are left out to keep
 # the patch small, so the grader must clear __pycache__ before grading (stale .pyc is a hole of its own).
+# The paths in BASELINE_UNTRACKED are unstaged after the add, so a file that was already untracked at start
+# (an install's build tree, say) stays out of the patch. rm needs -f: without it git refuses to unstage a nested
+# repo's gitlink and the whole unstage aborts. -f only touches the index, never the worktree.
 _DIFF_SCRIPT = (
     'set -e; export GIT_CONFIG_NOSYSTEM=1; tmp=$(mktemp -d); export GIT_INDEX_FILE="$tmp/index"; '
     "trap 'rm -rf \"$tmp\"' EXIT; "
     "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null read-tree {base}; "
     "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null add -A -f -- . "
     "':(exclude,glob)**/__pycache__/**' ':(exclude,glob)**/.pytest_cache/**' ':(exclude,glob)**/*.egg-info/**'; "
+    "if [ ! -f {baseline} ]; then echo 'untracked-file baseline is missing' >&2; exit 1; fi; "
+    "if [ -s {baseline} ]; then git --literal-pathspecs --no-replace-objects -C {workdir} "
+    "-c core.excludesFile=/dev/null rm --cached -f -q -r --ignore-unmatch --pathspec-from-file={baseline} "
+    "--pathspec-file-nul; fi; "
     "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null "
     "diff --cached --binary --no-color --no-ext-diff --no-textconv {base}"
+)
+
+# Runs in the container at start and at reset, before any attacker command. Records every path that is
+# untracked at that moment, ignored ones included, NUL-separated and relative to the workdir. rm -f first, so
+# a symlink already at the path cannot redirect the write. The path is outside the workdir.
+BASELINE_UNTRACKED = "/var/tmp/.cheatproof-untracked-baseline"
+_BASELINE_SCRIPT = (
+    "set -e; export GIT_CONFIG_NOSYSTEM=1; rm -f -- {path}; "
+    "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null ls-files --others -z > {path}"
 )
 
 
@@ -287,8 +303,9 @@ class Session(ABC):
 
     @abstractmethod
     def diff(self) -> str:
-        """Patch of all changes since start, tracked and untracked. Raises if git fails, if the base
-        commit was not recorded, or if the patch is larger than MAX_DIFF_BYTES."""
+        """Patch of changes since start, tracked and untracked, except files already untracked at start
+        (see DockerSession.diff). Raises if git fails, if the base commit or the baseline was not recorded,
+        or if the patch is larger than MAX_DIFF_BYTES."""
 
     @abstractmethod
     def reset(self) -> None:
@@ -527,6 +544,14 @@ class DockerExecutor:
         res = self._docker(["exec", cid, "sh", "-c", script], IO_TIMEOUT_S)
         return res.stdout.strip() if res.exit_code == 0 else ""
 
+    def _record_untracked_baseline(self, cid: str, workdir: str) -> None:
+        script = _BASELINE_SCRIPT.format(workdir=shlex.quote(workdir), path=shlex.quote(BASELINE_UNTRACKED))
+        res = self._docker(["exec", cid, "sh", "-c", script], IO_TIMEOUT_S)
+        if res.exit_code != 0 or res.timed_out:
+            raise RuntimeError(
+                f"untracked-file baseline was not recorded ({res.exit_code}): {res.stderr.strip()[-300:]}"
+            )
+
 
 class DockerSession(Session):
     def __init__(self, executor: DockerExecutor, env: EnvSpec, budget: Budget) -> None:
@@ -536,6 +561,7 @@ class DockerSession(Session):
         self._name: str | None = None
         self._cid: str | None = None
         self._base = ""
+        self._untracked_recorded = False
         self._closed = False
         self._launch()
 
@@ -547,8 +573,11 @@ class DockerSession(Session):
         self._budget.reserve_local_run()  # before the container exists; BudgetExceeded propagates
         self._name, self._cid = self._executor._create(self._env)
         self._base = ""
+        self._untracked_recorded = False
         try:
             self._base = self._executor._base_commit(self._cid, self._env.workdir)
+            self._executor._record_untracked_baseline(self._cid, self._env.workdir)
+            self._untracked_recorded = True
         except BaseException:
             self._executor._remove_quietly(self._name)
             self._name = self._cid = None
@@ -604,10 +633,25 @@ class DockerSession(Session):
             raise RuntimeError(f"write_file {path!r} failed ({res.exit_code}): {res.stderr.strip()[-300:]}")
 
     def diff(self) -> str:
+        """Patch of changes since start: tracked files, and files created since start.
+
+        Files already untracked at start (an install's build tree, say) are left out, and changes to them are
+        never graded. The grader applies this patch to a fresh container from the same image, which already has
+        those files, so including them would fail with "already exists in working directory". The paths come
+        from the baseline recorded at start. Rewriting that baseline can only change the patch to match a
+        workdir where the listed paths are gone. The attacker can already get that by deleting them, so the
+        rewrite cannot help an attack. Raises if the base commit or the baseline was not recorded.
+        """
         cid = self._live()
         if not self._base:
             raise RuntimeError("base commit was not recorded at start; refusing to build a diff")
-        script = _DIFF_SCRIPT.format(workdir=shlex.quote(self._env.workdir), base=shlex.quote(self._base))
+        if not self._untracked_recorded:
+            raise RuntimeError("untracked-file baseline was not recorded at start; refusing to build a diff")
+        script = _DIFF_SCRIPT.format(
+            workdir=shlex.quote(self._env.workdir),
+            base=shlex.quote(self._base),
+            baseline=shlex.quote(BASELINE_UNTRACKED),
+        )
         res = self._executor._docker(
             ["exec", cid, "sh", "-c", script], IO_TIMEOUT_S, max_bytes=MAX_DIFF_BYTES
         )
