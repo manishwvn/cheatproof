@@ -200,7 +200,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — waiting: U15, U16 — needs T07, T16, T17, T18, T19, T20, T22
+### T08 Eval run and results with raw counts — size M — todo — needs T07, T16, T17, T18, T19, T20, T22
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
@@ -299,11 +299,11 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
-- **U16 Review and merge PR #23** (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): say `review` in
+- ~~**U16 Review and merge PR #23**~~ Done 2026-10-20: PR #23 merged. (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): say `review` in
   an interactive session to merge https://github.com/manishwvn/cheatproof/pull/23 (attack diffs no longer include
   files already untracked in the image; planner-merge path `cheatproof/executor.py`). CI green, Sonnet and Opus
   reviewed. Then tell the lead "U16 done".
-- **U15 Disk guard refuses every pull** (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): the guard
+- ~~**U15 Disk guard refuses every pull**~~ Done 2026-10-20: PR #24 checks pull room in the colima image store. (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): the guard
   measures host free disk (7.4 GB), which does not rise when task images are removed inside colima's sparse 100 GiB VM
   disk, so floor 5 + pull estimate 4.5 refuses every pull. Pick one: (1) planner change in `executor.py`: check free
   space inside the Docker VM for pulls (`docker system df` / `colima ssh -- df -h /var/lib/docker`), keep the host
