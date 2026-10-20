@@ -65,6 +65,15 @@ them toward `SANDBOX_RUN_CAP` only (a count-only path like `reserve_local_run()`
 fixture of the free-tier statement's effect (ledger unchanged after one run), and update ADR 0001/0002. `budget.py` is
 a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
 
+### T25 Image-store disk check hardening (planner-merge PR) — size S — todo — after 2026-10-21
+From the Haiku review of PR #24 (0 blockers, 3 risks). In `cheatproof/executor.py` `_colima_store_free_gb` and its
+caller: (1) when the `colima` binary exists but `colima ssh` fails or times out, refuse the pull (`DiskRefused`,
+"image store unreadable") instead of falling back to host disk; fall back to host only when `colima` is absent
+(`shutil.which("colima") is None`). (2) Parse the df row whose last field is `/var/lib/docker`, not `lines[-1]`.
+(3) CYCLE.md section 0: the "alert the owner when free disk is under 10 GB" rule names both the host disk and the
+Docker image store. Units already match (`GIB = 1024**3`, used by `_root_free_gb` too). Tests for each case with a
+fake runner. `executor.py` is a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
+
 ### T24 Rename the product to RewardSeal — size M — todo
 "Cheatproof" is another company's product name (CheatProof.ai). Rename every user-facing and public mention to
 **RewardSeal**: README, report site, CLI name and help (`rewardseal harden <env-id>`), certificate `tool` field (bump
