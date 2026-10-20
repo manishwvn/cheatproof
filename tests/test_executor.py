@@ -1225,3 +1225,49 @@ def test_release_image_removes_only_task_images():
     removed = fake.argvs(["docker", "image", "rm"])
     assert removed == [["docker", "image", "rm", "--", "swebench/sweb.eval.x86_64.demo:latest"]]
     assert all("-f" not in argv and "--force" not in argv for argv in removed)
+
+
+def test_pull_check_uses_docker_image_store_free_space(tmp_path):
+    # Host has 7 GB (above the floor for runs), the VM store has 90 GB: the pull goes ahead.
+    fake = FakeDocker(image_present=False)
+    executor = DockerExecutor(
+        runner=fake,
+        disk_free_gb=lambda: 7.0,
+        min_free_gb=5.0,
+        image_store_free_gb=lambda: 90.0,
+        platform="linux",
+    )
+    with executor.start(TASK_ENV, make_budget(tmp_path)):
+        pass
+    assert len(fake.runs()) == 1
+
+
+def test_pull_refused_when_image_store_is_low(tmp_path):
+    fake = FakeDocker(image_present=False)
+    executor = DockerExecutor(
+        runner=fake,
+        disk_free_gb=lambda: 90.0,
+        min_free_gb=5.0,
+        image_store_free_gb=lambda: 8.0,
+        platform="linux",
+    )
+    with pytest.raises(DiskRefused, match="Docker image store"):
+        executor.start(TASK_ENV, make_budget(tmp_path))
+    assert fake.runs() == []
+
+
+def test_colima_store_free_parses_df_and_falls_back():
+    df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/vdb1 102624184 2643668 94721356 3% /var/lib/docker\n"
+
+    def runner(argv, timeout, stdin=None, max_bytes=None):
+        assert argv[:2] == ["colima", "ssh"]
+        return Result(0, df, "", 0.0)
+
+    assert round(DockerExecutor(runner=runner, platform="linux")._colima_store_free_gb(), 1) == 90.3
+
+    def missing(argv, timeout, stdin=None, max_bytes=None):
+        raise FileNotFoundError("colima")
+
+    assert DockerExecutor(runner=missing, platform="linux")._colima_store_free_gb() is None
+    failed = DockerExecutor(runner=lambda *a, **k: Result(1, "", "no vm", 0.0), platform="linux")
+    assert failed._colima_store_free_gb() is None

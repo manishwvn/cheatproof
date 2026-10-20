@@ -348,6 +348,7 @@ class DockerExecutor:
         image_cap: int | None = None,
         task_image_cap: int | None = None,
         pull_estimate_gb: float | None = None,
+        image_store_free_gb: Callable[[], float | None] | None = None,
         pid: Callable[[], int] | None = None,
         platform: str = sys.platform,
         sleep: Callable[[float], None] = time.sleep,
@@ -362,6 +363,10 @@ class DockerExecutor:
         # At most this many task images on disk at once, and the disk an unknown pull is assumed to take.
         self._task_image_cap = (
             task_image_cap if task_image_cap is not None else _env_min_one("TASK_IMAGE_CAP", 2, int)
+        )
+        # Pulls land in the Docker VM's image store (colima: a sparse disk), not on the host's free space.
+        self._image_store_free_gb = (
+            image_store_free_gb if image_store_free_gb is not None else self._colima_store_free_gb
         )
         self._pull_estimate_gb = (
             pull_estimate_gb if pull_estimate_gb is not None else _env_min_one("PULL_ESTIMATE_GB", 4.5, float)
@@ -418,10 +423,11 @@ class DockerExecutor:
                 f"{image} is not local and {count} images are present, at DOCKER_IMAGE_CAP="
                 f"{self._image_cap}; nothing pulled, nothing deleted"
             )
-        free = self._disk_free_gb()
+        store = self._image_store_free_gb()
+        free, where = (self._disk_free_gb(), "host") if store is None else (store, "Docker image store")
         if free - self._pull_estimate_gb < self._min_free_gb:
             raise DiskRefused(
-                f"{image} is not local: free disk is {free:.1f} GB, and a pull of about "
+                f"{image} is not local: free {where} disk is {free:.1f} GB, and a pull of about "
                 f"{self._pull_estimate_gb:g} GB would leave less than MIN_FREE_DISK_GB={self._min_free_gb:g}; "
                 "nothing pulled"
             )
@@ -432,6 +438,21 @@ class DockerExecutor:
                     f"{image} is not local and {tasks} task images are present, at TASK_IMAGE_CAP="
                     f"{self._task_image_cap}; release finished task images first; nothing pulled"
                 )
+
+    def _colima_store_free_gb(self) -> float | None:
+        """Free GiB of /var/lib/docker inside the colima VM, or None when colima is not there (then the host counts)."""
+        try:
+            res = self._runner(["colima", "ssh", "--", "df", "-Pk", "/var/lib/docker"], IO_TIMEOUT_S, None)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if res.exit_code != 0:
+            return None
+        lines = [line.split() for line in res.stdout.splitlines() if line.strip()]
+        try:
+            available_kib = int(lines[-1][3])
+        except (IndexError, ValueError):
+            return None
+        return available_kib * 1024 / GIB
 
     def _task_image_count(self) -> int:
         res = self._docker(["images", "-q", "--filter", f"reference={TASK_IMAGE_PREFIX}*"], IO_TIMEOUT_S)
