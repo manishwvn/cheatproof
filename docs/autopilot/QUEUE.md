@@ -7,7 +7,7 @@ Check: `python3 docs/autopilot/progress.py` counts the same tasks as
 
 ## Milestone: live access and executor
 
-### T01 Smoke test, model IDs and prices — size S — todo — after 2026-10-21 (sandbox run, with T23) [85%]
+### T01 Smoke test, model IDs and prices — size S — todo — after 2026-10-21 [85%]
 Run `uv run python scripts/smoke.py`. Live scripts load `.env` from the main checkout (the parent of `git rev-parse
 --git-common-dir`), so worktrees share one key file and never copy it. Record the exact Nemotron model IDs (Nano,
 Super, Ultra) from `/v1/models` and their per-1M prices from the public Token Factory price page into `.env.example`
