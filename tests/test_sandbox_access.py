@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from contree_sdk.sdk.exceptions import ApiStatusCodeError, ForbiddenError
 
-from cheatproof.budget import BudgetExceeded
+from cheatproof.budget import Budget, BudgetExceeded
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "sandbox_access.py"
 spec = importlib.util.spec_from_file_location("sandbox_access", SCRIPT)
@@ -91,12 +91,16 @@ class FakeBudget:
         self.reserved = 0
         self.cap = cap
         self.halts = []
+        self.costs = []
         self.halt_error = halt_error
 
     def reserve_sandbox_run(self):
         if self.cap is not None and self.reserved >= self.cap:
             raise BudgetExceeded("sandbox run cap reached")
         self.reserved += 1
+
+    def book_sandbox_cost(self, usd):  # the real Budget logs and caps it; this fake only records it
+        self.costs.append(usd)
 
     def halt(self, reason):
         if self.halt_error is not None:
@@ -201,31 +205,48 @@ def test_402_halts_budget_without_retry(capsys):
     assert len(budget.halts) == 1
 
 
-def test_paid_run_halts_budget_without_retry(capsys):
-    code, probe, sleeps, budget = run_check([FakeContreeResult("ok\n", cost=0.01)])
+def real_budget(tmp_path):
+    return Budget(tmp_path / "ledger.json", 20.0, 20.0, 250, sandbox_cost_cap_usd=0.5)
+
+
+@pytest.mark.parametrize("cost", [0.0004, 0.5])
+def test_a_cost_under_the_cap_is_logged_and_access_is_ok(capsys, tmp_path, cost):
+    # The SDK reports the cost on done.result.cost. The finished image has no cost of its own, so this must read .result.
+    budget = real_budget(tmp_path)
+    code, probe, sleeps, _ = run_check([FakeContreeResult("ok\n", cost=cost)], budget=budget)
+    assert code == 0
+    assert capsys.readouterr().out == "ACCESS OK\n"
+    snap = budget.snapshot()
+    assert snap["sandbox_cost_usd"] == pytest.approx(cost)
+    assert snap["halted"] is None
+    assert probe.runs == 1 and sleeps == []
+
+
+@pytest.mark.parametrize("cost", [0.6, 1, 2.5])
+def test_a_cost_over_the_cap_halts_the_budget_without_retry(capsys, tmp_path, cost):
+    budget = real_budget(tmp_path)
+    code, probe, sleeps, _ = run_check([FakeContreeResult("ok\n", cost=cost)], budget=budget)
     assert code == 1
     assert capsys.readouterr().out == "ERROR budget halted (cost)\n"
     assert probe.runs == 1
     assert sleeps == []
-    assert len(budget.halts) == 1
+    assert "Sandboxes cost" in budget.snapshot()["halted"]
 
 
-@pytest.mark.parametrize("cost", [0.0004, 1, 2.5])
-def test_nonzero_result_cost_triggers_existing_halt_path(capsys, cost):
-    # The SDK reports billing on done.result.cost. The finished image has no cost of its own, so this must read .result.
-    code, probe, sleeps, budget = run_check([FakeContreeResult("ok\n", cost=cost)])
+def test_a_malformed_cost_halts_the_budget_without_retry(capsys, tmp_path):
+    budget = real_budget(tmp_path)
+    code, probe, sleeps, _ = run_check([FakeContreeResult("ok\n", cost=float("nan"))], budget=budget)
     assert code == 1
     assert capsys.readouterr().out == "ERROR budget halted (cost)\n"
-    assert probe.runs == 1
-    assert sleeps == []
-    assert budget.halts == ["sandbox access check: cost"]
+    assert probe.runs == 1 and sleeps == []
+    assert budget.snapshot()["halted"]
 
 
-def test_zero_cost_run_is_access_ok_and_does_not_halt(capsys):
+def test_zero_cost_run_is_access_ok_and_logs_nothing(capsys):
     code, _, _, budget = run_check([FakeContreeResult("ok\n", cost=0)])
     assert code == 0
     assert capsys.readouterr().out == "ACCESS OK\n"
-    assert budget.halts == []
+    assert budget.costs == [0]
 
 
 def test_halt_that_cannot_be_written_is_reported_by_class(capsys):

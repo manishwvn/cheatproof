@@ -9,10 +9,12 @@ Fail closed. The total cap must be a finite number above 0 and at most MAX_TOTAL
 daily cap must be a finite number above 0 and at most the total cap. Every price must be a finite
 number above 0, and the sandbox, local and Tavily call caps whole numbers of 0 or more. A missing,
 empty, nan, inf, zero, negative or too-large money value, or a bad count cap, raises BudgetExceeded
-before anything is spent, because a bad value must never read as "unlimited". Sandboxes beta runs,
-local Docker runs and Tavily calls book no money; they only count against their caps. A ledger that
-does not match this shape is refused the same way, never repaired. snapshot() only reads the ledger
-and never writes it.
+before anything is spent, because a bad value must never read as "unlimited". Sandboxes runs count
+against SANDBOX_RUN_CAP. Each cost a Sandboxes result reports is logged in the ledger's Sandboxes section,
+never in the Token Factory totals, and the budget halts once the logged sum passes SANDBOX_COST_CAP_USD.
+The trial cap (TRIAL_CREDIT_CAP_USD) limits Token Factory spend counted from when it is set. Local Docker
+runs and Tavily calls book no money; they only count against their caps. A ledger that does not match
+this shape is refused the same way, never repaired. snapshot() only reads the ledger and never writes it.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import fcntl
 import json
 import math
 import os
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
@@ -28,6 +31,10 @@ from pathlib import Path
 
 # Hard ceiling on the total cap, matching CLAUDE.md rule 1. Raising it needs a code change.
 MAX_TOTAL_CAP_USD = 20.0
+# Cap on the summed Sandboxes cost in the ledger. An invalid SANDBOX_COST_CAP_USD falls back to this, never to no cap.
+DEFAULT_SANDBOX_COST_CAP_USD = 0.50
+# Cap on Token Factory spend counted from when it is set: $0.84 of trial credit left, minus a $0.10 floor.
+DEFAULT_TRIAL_CREDIT_CAP_USD = 0.74
 
 
 class BudgetExceeded(RuntimeError):
@@ -144,6 +151,28 @@ def _env_cap(name: str) -> float:
     return _positive(name, os.environ[name])
 
 
+def _sandbox_cost_cap_env() -> float:
+    # Missing, invalid or above the ceiling: the default. Any valid value is used, including a stricter one.
+    try:
+        value = _positive("SANDBOX_COST_CAP_USD", os.environ.get("SANDBOX_COST_CAP_USD", ""))
+    except BudgetExceeded:
+        return DEFAULT_SANDBOX_COST_CAP_USD
+    return value if value <= MAX_TOTAL_CAP_USD else DEFAULT_SANDBOX_COST_CAP_USD
+
+
+def _trial_cap_env() -> float:
+    # Unset means the default. Set but invalid raises: a bad trial cap never reads as unlimited.
+    if "TRIAL_CREDIT_CAP_USD" not in os.environ:
+        return DEFAULT_TRIAL_CREDIT_CAP_USD
+    raw = os.environ["TRIAL_CREDIT_CAP_USD"]
+    value = _positive("TRIAL_CREDIT_CAP_USD", raw)
+    if value > MAX_TOTAL_CAP_USD:
+        raise BudgetExceeded(
+            f"TRIAL_CREDIT_CAP_USD must be at most ${MAX_TOTAL_CAP_USD:g} (see .env.example), got {raw!r}"
+        )
+    return value
+
+
 def _env_prices() -> dict[str, Price]:
     raw = os.environ.get("MODEL_PRICES_JSON", "{}")
     try:
@@ -172,6 +201,8 @@ class Budget:
         default_price: Price = DEFAULT_PRICE,
         local_run_cap: int = 2000,
         tavily_call_cap: int = 200,
+        sandbox_cost_cap_usd: float = DEFAULT_SANDBOX_COST_CAP_USD,
+        trial_credit_cap_usd: float = DEFAULT_TRIAL_CREDIT_CAP_USD,
     ) -> None:
         # Every cap and price is checked here too, so a direct construction fails closed as well.
         self.ledger = Path(ledger)
@@ -183,20 +214,23 @@ class Budget:
                 f"the total cap (SPEND_CAP_USD) ${self.total_cap_usd:g}"
             )
         self.sandbox_run_cap = _count_cap("sandbox_run_cap (SANDBOX_RUN_CAP)", sandbox_run_cap)
-        # Parsed and checked so SANDBOX_RUN_USD fails closed. Never charged: Sandboxes beta runs are free.
+        # Parsed and checked so SANDBOX_RUN_USD fails closed. Never charged: no Token Factory money moves for a run.
         self.sandbox_run_usd = _positive("sandbox run price (SANDBOX_RUN_USD)", sandbox_run_usd)
         self.prices = {model: _checked_price(f"price for {model}", p) for model, p in (prices or {}).items()}
         self.default_price = _checked_price("default price", default_price)
-        # Count-only caps: Sandboxes, local Docker and Tavily book $0, so they never touch the money caps.
+        # Count-only caps: local Docker and Tavily book $0, so they never touch the money caps.
         self.local_run_cap = _count_cap("local_run_cap (LOCAL_RUN_CAP)", local_run_cap)
         self.tavily_call_cap = _count_cap("tavily_call_cap (TAVILY_CALL_CAP)", tavily_call_cap)
+        self.sandbox_cost_cap_usd = _positive("sandbox cost cap (SANDBOX_COST_CAP_USD)", sandbox_cost_cap_usd)
+        self.trial_credit_cap_usd = _positive("trial credit cap (TRIAL_CREDIT_CAP_USD)", trial_credit_cap_usd)
 
     @classmethod
     def from_env(cls) -> Budget:
-        # The ledger is checked first, then the two money caps, which have no defaults.
+        # The ledger is checked first, then the two money caps, which have no defaults, then the optional caps.
         ledger = _ledger_path()
         total_cap = _env_cap("SPEND_CAP_USD")
         daily_cap = _env_cap("DAILY_CAP_USD")
+        trial_cap = _trial_cap_env()
         run_cap = _count_env("SANDBOX_RUN_CAP", "250")
         local_cap = _count_env("LOCAL_RUN_CAP", "2000")
         tavily_cap = _count_env("TAVILY_CALL_CAP", "200")
@@ -209,6 +243,8 @@ class Budget:
             sandbox_run_usd=_positive("SANDBOX_RUN_USD", os.environ.get("SANDBOX_RUN_USD", "0.05")),
             local_run_cap=local_cap,
             tavily_call_cap=tavily_cap,
+            sandbox_cost_cap_usd=_sandbox_cost_cap_env(),
+            trial_credit_cap_usd=trial_cap,
         )
 
     def price(self, model: str) -> Price:
@@ -267,6 +303,15 @@ class Budget:
                         f"ledger {self.ledger} has {key} that is not a whole number, 0 or more; "
                         "fix it by hand"
                     )
+        # Optional, added with the Sandboxes cost log and the trial cap: a missing key reads as 0.
+        for key in ("sandbox_cost_usd", "trial_spend_usd"):
+            if key in state and not _is_spend(state[key]):
+                raise BudgetExceeded(f"ledger {self.ledger} has {key} that is not a finite number, 0 or more")
+        cost_days = state.get("sandbox_cost_days", {})
+        if not isinstance(cost_days, dict) or not all(_is_spend(amount) for amount in cost_days.values()):
+            raise BudgetExceeded(
+                f"ledger {self.ledger} has a sandbox_cost_days field that is not a map of amounts"
+            )
         # Stored as None (not halted), a bool, or a non-empty string. An empty string would read as not halted.
         halted = state.get("halted")
         if halted is not None and not isinstance(halted, bool) and not (isinstance(halted, str) and halted):
@@ -292,8 +337,15 @@ class Budget:
         today = s["days"].get(day, 0.0)
         if today + worst > self.daily_cap_usd:
             raise BudgetExceeded(f"daily cap ${self.daily_cap_usd:.2f} reached (today ${today:.4f})")
+        trial = s.get("trial_spend_usd", 0.0)
+        if trial + worst > self.trial_credit_cap_usd:
+            raise BudgetExceeded(
+                f"trial credit cap (TRIAL_CREDIT_CAP_USD) ${self.trial_credit_cap_usd:.2f} reached "
+                f"(${trial:.4f} counted since the cap was set)"
+            )
         s["total_usd"] += worst
         s["days"][day] = today + worst
+        s["trial_spend_usd"] = trial + worst
         return Hold(model, worst, day)
 
     def settle(self, hold: Hold, input_tokens: int, output_tokens: int) -> float:
@@ -306,11 +358,19 @@ class Budget:
             delta = max(actual - hold.usd, -hold.usd)
             s["total_usd"] = max(0.0, s["total_usd"] + delta)
             s["days"][hold.day] = max(0.0, s["days"].get(hold.day, 0.0) + delta)
+            s["trial_spend_usd"] = max(0.0, s.get("trial_spend_usd", 0.0) + delta)
         return actual
 
     def reserve_sandbox_run(self) -> None:
-        """Count one Sandboxes run against sandbox_run_cap. Beta runs are free: books no money."""
-        self._reserve_count("sandbox_runs", self.sandbox_run_cap, "sandbox run cap")
+        """Count one Sandboxes run against sandbox_run_cap. Refused while the logged Sandboxes cost is over its cap."""
+        self._reserve_count("sandbox_runs", self.sandbox_run_cap, "sandbox run cap", self._check_sandbox_cost)
+
+    def _check_sandbox_cost(self, s: dict) -> None:
+        logged = s.get("sandbox_cost_usd", 0.0)
+        if logged > self.sandbox_cost_cap_usd:
+            raise BudgetExceeded(
+                f"sandbox cost cap ${self.sandbox_cost_cap_usd:.2f} reached (logged ${logged:.4f})"
+            )
 
     def reserve_local_run(self) -> None:
         """Count one local Docker run against local_run_cap. Free: books no money."""
@@ -320,13 +380,17 @@ class Budget:
         """Count one Tavily search call against tavily_call_cap. Free credits: books no money."""
         self._reserve_count("tavily_calls", self.tavily_call_cap, "tavily call cap")
 
-    def _reserve_count(self, key: str, cap: int, label: str) -> None:
+    def _reserve_count(
+        self, key: str, cap: int, label: str, check: Callable[[dict], None] | None = None
+    ) -> None:
         # One lock for the halt flag, the cap check and the increment, so parallel callers cannot overshoot.
         # A missing key is an old ledger and counts as 0. A refused call writes nothing.
         with self._locked() as s:
             halted = s.get("halted")
             if halted:
                 raise BudgetExceeded(f"budget halted: {halted}")
+            if check is not None:
+                check(s)
             used = s.get(key, 0)
             if used >= cap:
                 raise BudgetExceeded(f"{label} {cap} reached")
@@ -338,6 +402,35 @@ class Budget:
         text = reason if isinstance(reason, str) and reason.strip() else "halted"
         with self._locked() as s:
             s["halted"] = text
+
+    def book_sandbox_cost(self, usd: object) -> None:
+        """Log one cost that a Sandboxes result reported, in the ledger's Sandboxes section (never the Token Factory
+        totals). The budget halts once the logged sum passes sandbox_cost_cap_usd. A malformed cost halts at once,
+        since it cannot be counted. A call that finds the budget already halted still raises, so it stops."""
+        if not _is_spend(usd):
+            self.halt("a Sandboxes result reported a cost that is not a finite number of 0 or more")
+            raise BudgetExceeded("a Sandboxes result reported a malformed cost; the budget is halted")
+        if usd == 0:
+            return  # a free result changes nothing, so nothing is written
+        day = date.today().isoformat()
+        with self._locked() as s:
+            was_halted = bool(s.get("halted"))
+            logged = s.get("sandbox_cost_usd", 0.0) + usd
+            s["sandbox_cost_usd"] = logged
+            cost_days = s.setdefault("sandbox_cost_days", {})
+            cost_days[day] = cost_days.get(day, 0.0) + usd
+            over = logged > self.sandbox_cost_cap_usd
+            if over and not was_halted:
+                s["halted"] = (
+                    f"Sandboxes cost ${logged:.4f} is above the ${self.sandbox_cost_cap_usd:.2f} cap"
+                )
+        # Raised after the block, so the ledger write above has already happened: the cost stays logged.
+        if over:
+            raise BudgetExceeded(
+                f"Sandboxes cost ${logged:.4f} is above the ${self.sandbox_cost_cap_usd:.2f} cap; the budget is halted"
+            )
+        if was_halted:
+            raise BudgetExceeded("a Sandboxes result reported a cost while the budget is halted")
 
     def snapshot(self) -> dict:
         """Read-only view of the ledger. It never writes, creates or resets a field.

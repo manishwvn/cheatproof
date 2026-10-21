@@ -4,7 +4,8 @@ Prints one line: ACCESS OK, NO ACCESS (<error class> [HTTP status]), ERROR <erro
 ERROR budget halted (402|cost).
 Exit 0 when the run prints ok, 2 when the API refuses access (401/403), 1 on any other failure
 after 5 tries (sleeps 2, 4, 8, 16 s between tries). Each invocation books one sandbox run in the budget.
-A 402, or a run reporting cost > 0, halts the budget and exits 1 without retry.
+A 402 halts the budget and exits 1 without retry. A reported run cost is logged in the ledger; a cost that takes
+the logged Sandboxes sum past SANDBOX_COST_CAP_USD halts the budget and exits 1, also without retry.
 Never prints the key, the project ID, IDs or raw error text: only exception class names and HTTP status codes.
 """
 
@@ -49,11 +50,6 @@ def _is_auth_error(exc: BaseException) -> bool:
     return type(exc).__name__ == "ForbiddenError" or _status_of(exc) in AUTH_STATUSES
 
 
-def _is_paid(cost: object) -> bool:
-    # A reported cost above 0 means the probe was billed. Non-numbers and bools are not a cost.
-    return isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost > 0
-
-
 def _halt(budget: Budget, label: str) -> int:
     # Stops every paid call until a person clears the halt in the ledger. Never retried.
     try:
@@ -79,9 +75,19 @@ def check_access(
     for attempt in range(TRIES):
         try:
             done = _probe(make_client())
-            # The SDK bills on ContreeResult.cost (done.result), not on the finished image itself.
-            if _is_paid(getattr(getattr(done, "result", None), "cost", None)):
-                return _halt(budget, "cost")
+            # The SDK reports the run's cost on ContreeResult.cost (done.result), not on the finished image itself.
+            cost = getattr(getattr(done, "result", None), "cost", None)
+            if cost is not None:
+                # Logged in the ledger. Raises (and the budget is halted) past the Sandboxes cost cap, or on a malformed
+                # cost. Kept out of the retry loop below: a billed probe is never run again.
+                try:
+                    budget.book_sandbox_cost(cost)
+                except BudgetExceeded:
+                    print("ERROR budget halted (cost)")
+                    return 1
+                except Exception as exc:  # noqa: BLE001 - the cost was not logged; only the class name is printed
+                    print(f"ERROR {type(exc).__name__}")
+                    return 1
             if "ok" in str(done.stdout or ""):
                 print("ACCESS OK")
                 return 0
