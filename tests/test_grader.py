@@ -10,6 +10,7 @@ import pytest
 from cheatproof.executor import Result, Session
 from cheatproof.grader import (
     LOG_TAIL_CHARS,
+    MAX_BATCH_NODES,
     GateReport,
     GradeResult,
     _base_conftests,
@@ -528,6 +529,49 @@ def test_timed_out_run_fails_and_says_so():
     assert result.passed is False
     assert result.applied is True
     assert result.error is not None and result.error.startswith("pytest timed out")
+
+
+CAP_RESET_ERROR = "pytest output was cut at the cap and the sandbox was reset; no verdict"
+
+
+def test_reset_during_a_cut_pytest_run_is_an_error_with_no_verdict():
+    # The executor killed pytest at its output cap and reset the sandbox: an error gate, never a test failure or a label.
+    cut = Result(137, "partial output", "", 1.0, truncated=True, reset=True)
+    result = grade(FakeSession([("pytest", cut)]), make_task(), GOLD)
+    assert result.passed is False and result.applied is True
+    assert result.error == CAP_RESET_ERROR
+    assert result.labels == ()
+
+
+def test_reset_during_one_pytest_batch_runs_no_later_batch():
+    # 202 node ids make two batches. A reset in the first ends the grade: the second would run in a fresh sandbox
+    # that lacks the candidate and the hidden tests.
+    nodes = tuple(f"tests/test_x.py::test_{n}" for n in range(MAX_BATCH_NODES + 1))
+    cut = Result(137, "partial output", "", 1.0, truncated=True, reset=True)
+    session = FakeSession([("pytest", cut)])
+    result = grade(session, make_task(pass_to_pass=nodes), GOLD)
+    assert len(session.cmds("pytest")) == 1
+    assert result.passed is False and result.error == CAP_RESET_ERROR
+
+
+def test_reset_during_the_candidate_apply_stops_the_grade_before_any_test():
+    session = FakeSession([("apply --", Result(0, "", "", 0.0, reset=True)), ("pytest", all_pass)])
+    result = grade(session, make_task(), GOLD)
+    assert result.applied is False and result.passed is False
+    assert "the sandbox was reset during this step" in result.error
+    assert session.cmds("pytest") == []
+
+
+def test_reset_during_the_gold_gate_is_an_error_gate_and_the_empty_gate_still_runs():
+    cut = Result(137, "partial output", "", 1.0, truncated=True, reset=True)
+
+    def gold_cut_and_reset(session, cmd):
+        return cut if candidate_written(session) else fixed_only(session, cmd)
+
+    report = run_gates(FakeSession([("pytest", gold_cut_and_reset)]), make_task())
+    assert report.gold.passed is False and report.gold.error == CAP_RESET_ERROR
+    assert report.reason == f"gold gate failed: {CAP_RESET_ERROR}"
+    assert report.empty.applied is True and report.empty.passed is False and report.empty.error is None
 
 
 def test_task_without_fail_to_pass_fails_closed_without_touching_the_session():

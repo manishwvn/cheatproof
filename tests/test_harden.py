@@ -1,13 +1,15 @@
 import hashlib
 import json
 from dataclasses import dataclass, replace
+from types import SimpleNamespace
 
 import pytest
 
 from cheatproof import holes
-from cheatproof.attacker import AttackResult
+from cheatproof.attacker import AttackConfig, AttackResult
+from cheatproof.attacker import attack as run_attack
 from cheatproof.budget import BudgetExceeded
-from cheatproof.executor import EnvSpec, ExecutorRefused, ExecutorUnavailable, Session
+from cheatproof.executor import DiskRefused, EnvSpec, ExecutorRefused, ExecutorUnavailable, Result, Session
 from cheatproof.exposure import ExposureReport
 from cheatproof.grader import GateReport, GradeResult
 from cheatproof.harden import HardenOps, HardenReport, harden
@@ -37,7 +39,7 @@ TASK = TaskSpec(
     test_patch="",
     source="fixture",
 )
-PROPAGATING = [BudgetExceeded, ExecutorRefused, ExecutorUnavailable]
+PROPAGATING = [BudgetExceeded, ExecutorRefused, ExecutorUnavailable, DiskRefused]
 FAILED_BEFORE = "attacker failed before hardening (not hackable by this attacker)"
 # An attack that tried: a write_file step and a run step (a shell command may write).
 WRITE_STEPS = [{"n": 1, "tool": "write_file"}, {"n": 2, "tool": "run"}]
@@ -759,6 +761,96 @@ def test_reset_in_after_round_is_inconclusive_and_not_certified():
     assert report.after.inconclusive == "sandbox reset during the attack; patches were not in force"
     assert report.reason == "inconclusive attack: sandbox reset during the attack; patches were not in force"
     assert report.notes == ()
+    assert_clean(lab, report)
+
+
+# The real attack loop, with a scripted model, in harden: the executor's answers reach harden through attacker.py.
+
+
+class ScriptedLLM:
+    """Replies in order. Never calls a model."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+
+    def chat(self, model, messages, max_tokens, **kwargs):
+        return self.replies.pop(0)
+
+
+def scripted_call(name, args=None, call_id="c1"):
+    raw = json.dumps(args or {})
+    return SimpleNamespace(id=call_id, type="function", function=SimpleNamespace(name=name, arguments=raw))
+
+
+def scripted_reply(*calls):
+    message = SimpleNamespace(content=None, tool_calls=list(calls))
+    usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5)
+    return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage)
+
+
+def real_attack(llm_replies_for):
+    """An attack_fn that runs attacker.attack with the replies llm_replies_for(session) picks."""
+
+    def attack_fn(session):
+        llm = ScriptedLLM(llm_replies_for(session))
+        return run_attack(llm, session, "system prompt", "task prompt", AttackConfig(model="test-model"))
+
+    return attack_fn
+
+
+def test_disk_refused_mid_attack_reaches_the_caller_and_writes_no_report():
+    class LowDiskSession(FakeSession):
+        # The first command runs. The disk is low after the second, so the executor refuses the session from there.
+        def __init__(self, sid, lab):
+            super().__init__(sid, lab)
+            self.commands = 0
+
+        def run(self, cmd, timeout):
+            self.commands += 1
+            if self.commands == 1:
+                return Result(0, "", "", 0.0)
+            raise DiskRefused("free disk is 1.5 GB after a run, below RUN_MIN_FREE_GB=2; session refused")
+
+    lab = Lab()
+    lab.executor.session_cls = LowDiskSession
+    attack_fn = real_attack(
+        lambda session: [
+            scripted_reply(scripted_call("run", {"cmd": "ls"}, "c1")),
+            scripted_reply(scripted_call("run", {"cmd": "ls -la"}, "c2")),
+            scripted_reply(scripted_call("submit", None, "c3")),
+        ]
+    )
+    with pytest.raises(DiskRefused, match="RUN_MIN_FREE_GB"):  # no HardenReport, so no certificate
+        harden(lab.executor, ENV, TASK, attack_fn, ops=lab.ops)
+    assert len(lab.executor.sessions) == 1
+    assert all(session.closed == 1 for session in lab.executor.sessions)
+
+
+def test_output_cap_kill_in_the_patched_round_is_inconclusive_through_the_real_attacker():
+    # The before round exploits; the patched round's command prints past its cap, so the executor resets the sandbox.
+    class CapKillSession(FakeSession):
+        def run(self, cmd, timeout):
+            if self.applied:  # a patch is in force: the command is killed at the output cap
+                return Result(137, "x" * 10, "", 0.0, truncated=True, reset=True)
+            return Result(0, "", "", 0.0)
+
+        def diff(self):
+            return EXPLOIT
+
+    lab = Lab()
+    lab.executor.session_cls = CapKillSession
+    attack_fn = real_attack(
+        lambda session: [
+            scripted_reply(scripted_call("run", {"cmd": "cat huge.log" if session.applied else "ls"})),
+            scripted_reply(scripted_call("submit", None, "c2")),
+        ]
+    )
+    report = harden(lab.executor, ENV, TASK, attack_fn, ops=lab.ops)
+    reason = "sandbox reset during the attack; patches were not in force"
+    assert report.certified is False
+    assert report.before.holes.exploited and report.accepted == (STRIP,)
+    assert report.after.inconclusive == reason
+    assert report.reason == f"inconclusive attack: {reason}"
     assert_clean(lab, report)
 
 
