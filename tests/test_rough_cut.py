@@ -55,6 +55,9 @@ def test_real_script_parses_under_limit_and_shows_model_id_early():
     assert rc.check_total(beats) < rc.LIMIT_SECONDS
     early = [b for b in beats if b.start < 20]
     assert any("nvidia/Nemotron-3-Ultra-550b-a55b" in b.on_screen for b in early)
+    model_beats = [b for b in beats if "nvidia/Nemotron-3-Ultra-550b-a55b" in b.on_screen]
+    assert model_beats
+    assert all(b.start + b.duration <= 20 for b in model_beats)
 
 
 def test_parse_rejects_missing_heading():
@@ -114,15 +117,23 @@ def test_check_total_fails_loudly_at_limit():
 
 def test_say_command_with_and_without_voice():
     aiff = Path("/x/beat01.aiff")
-    assert rc.say_command("Hi there.", aiff, None) == ["say", "-o", "/x/beat01.aiff", "Hi there."]
+    assert rc.say_command("Hi there.", aiff, None) == ["say", "-o", "/x/beat01.aiff", "--", "Hi there."]
     assert rc.say_command("Hi there.", aiff, "Samantha") == [
         "say",
         "-v",
         "Samantha",
         "-o",
         "/x/beat01.aiff",
+        "--",
         "Hi there.",
     ]
+
+
+def test_say_voice_over_starting_with_dash_is_text_not_flag():
+    command = rc.say_command("-5 degrees, then -v trap", Path("/x/a.aiff"), "Samantha")
+    assert command[-2:] == ["--", "-5 degrees, then -v trap"]
+    assert command.index("--") > command.index("-o")
+    assert command.count("-v") == 1
 
 
 def test_segment_command_pads_and_cuts_to_beat_length():
@@ -185,10 +196,16 @@ def test_count_placeholders_in_sample():
     assert rc.count_placeholders(rc.parse_beats(text)) == 1
 
 
+def make_font(tmp_path: Path) -> Path:
+    font = tmp_path / "font.ttf"
+    font.write_bytes(b"not a real font")
+    return font
+
+
 def test_make_rough_cut_runs_every_command_through_runner(tmp_path):
     runner = FakeRunner()
     out = tmp_path / "out"
-    cut = rc.make_rough_cut(write_script(tmp_path), out, runner=runner)
+    cut = rc.make_rough_cut(write_script(tmp_path), out, runner=runner, font=make_font(tmp_path))
     assert runner.calls == list(cut.commands)
     assert len(runner.calls) == 3 * 2 + 1
     assert runner.calls[-1][0] == "ffmpeg"
@@ -227,7 +244,8 @@ def test_main_refuses_script_at_limit(tmp_path, capsys):
 def test_main_real_run_with_fake_runner_writes_outputs(tmp_path, capsys):
     runner = FakeRunner()
     out = tmp_path / "out"
-    code = rc.main(["--script", str(write_script(tmp_path)), "--out", str(out)], runner)
+    font = make_font(tmp_path)
+    code = rc.main(["--script", str(write_script(tmp_path)), "--out", str(out), "--font", str(font)], runner)
     assert code == 0
     assert len(runner.calls) == 3 * 2 + 1
     assert (out / "rough_cut.srt").exists()
@@ -256,3 +274,90 @@ def test_run_subprocess_passes_argv_list(monkeypatch):
     monkeypatch.setattr(rc.subprocess, "run", fake_run)
     rc.run_subprocess(("say", "-o", "/x/a.aiff", "Hi"))
     assert seen == {"command": ["say", "-o", "/x/a.aiff", "Hi"], "check": True}
+
+
+def test_card_text_keeps_percent_literal_for_expansion_none(tmp_path):
+    assert rc.card_text("Done 100%, %{pts}") == "Done 100%, %{pts}"
+    vf = rc.card_filter(tmp_path / "beat01.txt", tmp_path / "font.ttf")
+    assert ":expansion=none:" in vf
+    assert vf.index("expansion=none") < vf.index("fontcolor")
+
+
+def test_percent_in_on_screen_text_reaches_card_file_verbatim(tmp_path):
+    runner = FakeRunner()
+    out = tmp_path / "out"
+    script = write_script(tmp_path, SAMPLE.replace("Title one", "Speed 100% then %{pts}"))
+    rc.make_rough_cut(script, out, runner=runner, font=make_font(tmp_path))
+    assert (out / "work" / "beat01.txt").read_text(encoding="utf-8") == "Speed 100% then %{pts}"
+    beat1_segment = runner.calls[1]
+    assert "expansion=none" in beat1_segment[beat1_segment.index("-vf") + 1]
+
+
+def test_check_out_path_rejects_quote_and_backslash(tmp_path):
+    for bad in ("/x/it's", "/x/a\\b"):
+        with pytest.raises(rc.ScriptError, match="has ' or"):
+            rc.check_out_path(Path(bad))
+    assert rc.check_out_path(Path("/x/ok folder")) == Path("/x/ok folder")
+
+
+def test_main_refuses_quote_in_out_before_creating_anything(tmp_path, capsys):
+    out = tmp_path / "bad'dir"
+    runner = FakeRunner()
+    code = rc.main(["--script", str(write_script(tmp_path)), "--out", str(out)], runner)
+    assert code == 1
+    assert "has ' or" in capsys.readouterr().err
+    assert runner.calls == []
+    assert not out.exists()
+
+
+def test_main_refuses_temp_inside_repo_without_creating_dir(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(rc.tempfile, "gettempdir", lambda: str(rc.REPO_ROOT))
+
+    def no_mkdtemp(*args, **kwargs):
+        raise AssertionError("a temp dir must not be created")
+
+    monkeypatch.setattr(rc.tempfile, "mkdtemp", no_mkdtemp)
+    runner = FakeRunner()
+    code = rc.main(["--script", str(write_script(tmp_path))], runner)
+    assert code == 1
+    assert "inside the repo" in capsys.readouterr().err
+    assert runner.calls == []
+
+
+def test_missing_font_fails_before_any_command(tmp_path):
+    runner = FakeRunner()
+    out = tmp_path / "out"
+    with pytest.raises(rc.ScriptError, match="font file not found"):
+        rc.make_rough_cut(write_script(tmp_path), out, runner=runner, font=tmp_path / "nope.ttf")
+    assert runner.calls == []
+    assert not (out / "work").exists()
+
+
+def test_missing_font_is_fine_when_every_beat_has_a_shot(tmp_path):
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    for number in (1, 2, 3):
+        (shots / f"beat{number:02d}.png").write_bytes(b"not really a png")
+    runner = FakeRunner()
+    rc.make_rough_cut(
+        write_script(tmp_path), tmp_path / "out", shots_dir=shots, runner=runner, font=tmp_path / "nope.ttf"
+    )
+    assert len(runner.calls) == 3 * 2 + 1
+
+
+def test_font_option_reaches_drawtext_filter(tmp_path):
+    font = make_font(tmp_path)
+    commands = rc.plan_commands(rc.parse_beats(SAMPLE), tmp_path / "out", None, None, font)
+    beat1_vf = commands[1][commands[1].index("-vf") + 1]
+    assert f"fontfile={font}" in beat1_vf
+
+
+def test_main_missing_font_errors_clearly_and_dry_run_skips_check(tmp_path, capsys):
+    script = str(write_script(tmp_path))
+    missing = str(tmp_path / "nope.ttf")
+    out = tmp_path / "out"
+    code = rc.main(["--script", script, "--out", str(out), "--font", missing], FakeRunner())
+    assert code == 1
+    assert "--font" in capsys.readouterr().err
+    assert not out.exists()
+    assert rc.main(["--script", script, "--out", str(out), "--font", missing, "--dry-run"]) == 0

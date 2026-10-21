@@ -5,7 +5,9 @@ the On-screen text as a drawtext title), and a timed segment. All segments join 
 file carries the Caption column. Subprocess calls go through one injectable runner; `--dry-run` prints them only.
 
 Output: rough_cut.mp4 and rough_cut.srt under the output dir. With no --out the dir is a fresh temp dir; a
-default temp dir inside this repo is refused. An explicit --out may be anywhere.
+default temp dir inside this repo is refused. An explicit --out may be anywhere, except that its path must
+not contain ' or \\ (ffmpeg parses the -vf string twice). Title cards need --font (default Helvetica) unless
+every beat has a screenshot; a missing font fails before any command runs.
 
     uv run python video/rough_cut.py --dry-run
     uv run python video/rough_cut.py --shots DIR --out DIR
@@ -176,11 +178,20 @@ def drawtext_escape(value: str) -> str:
     return value
 
 
+def check_out_path(out: Path) -> Path:
+    """Refuse a path with ' or \\: ffmpeg parses the -vf string twice, so those cannot be escaped reliably."""
+    text = str(out)
+    if "'" in text or "\\" in text:
+        raise ScriptError(f"output path {text!r} has ' or \\; pick a folder name without them")
+    return out
+
+
 def say_command(text: str, aiff: Path, voice: str | None) -> list[str]:
+    """`--` ends option parsing, so a voice-over that starts with '-' is spoken, not read as a flag."""
     command = ["say"]
     if voice:
         command += ["-v", voice]
-    return [*command, "-o", str(aiff), text]
+    return [*command, "-o", str(aiff), "--", text]
 
 
 def find_shot(shots_dir: Path | None, number: int) -> Path | None:
@@ -193,14 +204,15 @@ def find_shot(shots_dir: Path | None, number: int) -> Path | None:
 
 
 def card_text(on_screen: str) -> str:
-    """The On-screen text wrapped to lines. Written to a text file, so no ffmpeg text escaping is needed."""
+    """The On-screen text wrapped to lines, written to a text file that drawtext reads with expansion=none."""
     return "\n".join(textwrap.wrap(on_screen, 40) or [" "])
 
 
-def card_filter(text_file: Path) -> str:
-    """Title card: the text file, centred, white on the background colour."""
+def card_filter(text_file: Path, font: Path = Path(FONT)) -> str:
+    """Title card: the text file, centred, white on the background colour. expansion=none keeps % literal."""
     return (
-        f"drawtext=fontfile={FONT}:textfile={drawtext_escape(str(text_file))}:fontcolor=white:fontsize=44"
+        f"drawtext=fontfile={drawtext_escape(str(font))}:textfile={drawtext_escape(str(text_file))}"
+        ":expansion=none:fontcolor=white:fontsize=44"
         ":line_spacing=12:x=(w-text_w)/2:y=(h-text_h)/2,format=yuv420p"
     )
 
@@ -264,7 +276,11 @@ def card_file(work: Path, number: int) -> Path:
 
 
 def plan_commands(
-    beats: Sequence[Beat], out_dir: Path, shots_dir: Path | None, voice: str | None
+    beats: Sequence[Beat],
+    out_dir: Path,
+    shots_dir: Path | None,
+    voice: str | None,
+    font: Path = Path(FONT),
 ) -> list[tuple[str, ...]]:
     work = out_dir / "work"
     commands: list[tuple[str, ...]] = []
@@ -278,7 +294,7 @@ def plan_commands(
             visual, vf = ["-loop", "1", "-i", str(shot)], STILL_VF
         else:
             visual = ["-f", "lavfi", "-i", f"color=c={BACKGROUND}:s={WIDTH}x{HEIGHT}:r={FPS}"]
-            vf = card_filter(card_file(work, beat.number))
+            vf = card_filter(card_file(work, beat.number), font)
         commands.append(tuple(segment_command(visual, aiff, beat.duration, segment, vf)))
         segments.append(segment)
     commands.append(tuple(concat_command(segments, out_dir / "rough_cut.mp4")))
@@ -286,14 +302,17 @@ def plan_commands(
 
 
 def default_out_dir(dry_run: bool) -> Path:
-    """A temp dir outside the repo. Refuses a temp dir inside the repo (use --out for that)."""
+    """A temp dir outside the repo. Refuses a temp dir inside the repo (use --out for that).
+
+    The check runs on the temp base before any mkdtemp, so a refused run creates nothing.
+    """
+    base = Path(tempfile.gettempdir())
+    if base.resolve().is_relative_to(REPO_ROOT):
+        raise ScriptError(f"default output under {base} is inside the repo; pass --out to choose a folder")
+    check_out_path(base)
     if dry_run:
-        out = Path(tempfile.gettempdir()) / "cheatproof-rough-cut"
-    else:
-        out = Path(tempfile.mkdtemp(prefix="cheatproof-rough-cut-"))
-    if out.resolve().is_relative_to(REPO_ROOT):
-        raise ScriptError(f"default output {out} is inside the repo; pass --out to choose a folder")
-    return out
+        return base / "cheatproof-rough-cut"
+    return Path(tempfile.mkdtemp(prefix="cheatproof-rough-cut-", dir=base))
 
 
 def make_rough_cut(
@@ -304,11 +323,12 @@ def make_rough_cut(
     voice: str | None = None,
     dry_run: bool = False,
     runner: Runner | None = None,
+    font: Path = Path(FONT),
 ) -> RoughCut:
-    """Plan the cut; unless dry_run, write the SRT and run every command through `runner`."""
+    """Plan the cut; unless dry_run, check the font, write the SRT and run every command through `runner`."""
     beats = parse_beats(script_path.read_text(encoding="utf-8"))
     total = check_total(beats)
-    commands = plan_commands(beats, out_dir, shots_dir, voice)
+    commands = plan_commands(beats, out_dir, shots_dir, voice, font)
     cut = RoughCut(
         beats=tuple(beats),
         total_seconds=total,
@@ -321,6 +341,9 @@ def make_rough_cut(
         return cut
     if runner is None:
         raise ValueError("a runner is required unless dry_run is set")
+    needs_font = any(find_shot(shots_dir, beat.number) is None for beat in beats)
+    if needs_font and not font.is_file():
+        raise ScriptError(f"font file not found: {font}; pass --font with a .ttf/.ttc path")
     work = out_dir / "work"
     work.mkdir(parents=True, exist_ok=True)
     for beat in beats:
@@ -345,10 +368,15 @@ def main(argv: Sequence[str] | None = None, runner: Runner | None = None) -> int
     )
     parser.add_argument("--shots", type=Path, default=None, help="folder with beatNN.png/.jpg screenshots")
     parser.add_argument("--voice", default=None, help="macOS say voice (default: system voice)")
+    parser.add_argument(
+        "--font", type=Path, default=Path(FONT), help=f"font for title cards (default: {FONT})"
+    )
     parser.add_argument("--dry-run", action="store_true", help="print the commands; run and write nothing")
     args = parser.parse_args(argv)
     try:
-        out_dir = args.out.expanduser().resolve() if args.out else default_out_dir(args.dry_run)
+        out_dir = (
+            check_out_path(args.out.expanduser().resolve()) if args.out else default_out_dir(args.dry_run)
+        )
         if not args.dry_run and runner is None:
             missing = [tool for tool in ("say", "ffmpeg") if shutil.which(tool) is None]
             if missing:
@@ -360,6 +388,7 @@ def main(argv: Sequence[str] | None = None, runner: Runner | None = None) -> int
             voice=args.voice,
             dry_run=args.dry_run,
             runner=runner or run_subprocess,
+            font=args.font.expanduser(),
         )
     except (ScriptError, OSError) as error:
         print(f"rough_cut: {error}", file=sys.stderr)
