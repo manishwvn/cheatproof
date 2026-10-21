@@ -262,3 +262,10 @@ progress 68% (15/26 tasks done, 8 days to submit)
 - Spend: $0.034 (ledger $0.1214 to $0.1554). No Ultra, no Tavily, no sandbox runs.
 - Lessons: with colima, host free disk is the real limit (the VM file keeps freed blocks); a post-run reset must
   surface to the attacker and grader or it fakes an honest-looking result.
+
+## 2026-10-20 routine (cycle 2026-10-20T21:24:14-05:00)
+progress 68% (15/26 tasks done, 8 days to submit)
+- No task taken. W 5, F 37 (caps 95/95). T24 waits until PRs #25-#27 (U18-U20) are merged; T08 and T26 wait on
+  U17/U18/U20; T01, T23, T25, T11 open 2026-10-21 local.
+- Host free disk 877 MB (U17, alerted today; no second alert). `security` on main stays red until PR #26 (U19).
+- Hand-back not due: T24 and date-gated tasks are `todo`, not owner-blocked. Spend: $0.
