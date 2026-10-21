@@ -5,6 +5,13 @@ Format: `### <id> <title> — size S|M|L — <status> [— after <date>] [— ne
 Check: `python3 docs/autopilot/progress.py` counts the same tasks as
 `grep '^### .* — size [SML] — ' docs/autopilot/QUEUE.md | grep -vc superseded`.
 
+## State 2026-10-21 (owner)
+
+All local swebench Docker images were removed by the owner (`docker rmi` plus `fstrim`). Host has about 14 GB free;
+the colima VM has about 91 GB free. Sandboxes (`EXECUTOR=sandbox`) is the default backend. No task may assume a local
+swebench image. The local Docker fallback (`EXECUTOR=docker`) re-pulls each image (about 4.5 GB each; the disk guard
+applies). Other projects' images (`fde1-app`, `pgvector/pgvector:pg16`) must never be touched.
+
 ## Milestone: live access and executor
 
 ### T01 Smoke test, model IDs and prices — size S — todo — after 2026-10-21 [85%]
@@ -254,7 +261,11 @@ sanitized traces needed for replay. Committed certificates and replay traces go 
 git-ignored cache; `git add -f` is denied).
 Audit 2026-10-18: before the run, smoke one real image's gold gate. `grader.PYTEST_CMD` runs bare `python -m pytest`
 under `sh -lc`; SWE-bench images may need `conda activate testbed`. Check image HEAD equals `base_commit`
-(`strip-future-git` refuses otherwise). With 13 GB free and a 6-image cap, Docker runs go in owner-pruned batches.
+(`strip-future-git` refuses otherwise). Run on Sandboxes (`EXECUTOR=sandbox`), not local Docker.
+
+Planner note 2026-10-21 (supersedes the Docker, batch-pruning and disk notes below, which are history): the owner
+removed all local swebench images, so no step assumes one. Run every task on Sandboxes. The local Docker fallback
+re-pulls each image (about 4.5 GB) under the disk guard; never pull by hand, and never touch other projects' images.
 
 
 Planner note 2026-10-19: run on the Docker executor (`EXECUTOR=docker`; Sandboxes access is pending, so T01's
@@ -310,6 +321,18 @@ next `batch` (250k tokens, 40 steps) pulled a new image: colima's data disk file
 watchdog killed the run before any model call (U17, alerted). The PR #24 guard reads the VM (87 GB free) and missed
 it (see T25). Certificates still cannot be committed until PR #25 (leakcheck skips public `.env.example` values, U18)
 is merged. Next: rerun via `batch` with 250k tokens once the host has room, or on Sandboxes after T23.
+### T27 Budget hardening from PR #32 review — size S — todo — needs T08
+Review of PR #32 (`cheatproof/budget.py` and the Sandboxes cost path, planner-merge). Do all items, with fakes:
+1. `Budget.__init__` applies the `MAX_TOTAL_CAP_USD` ceiling, so no `.env` value can raise the total cap past it.
+2. Clamp `SANDBOX_COST_CAP_USD` to a ceiling, and count Sandboxes cost toward the trial cap (shared $0.84 trial credit).
+3. Write explicit zero cost fields on the first lock, then require them on every later read.
+4. `book_sandbox_cost` catches `OSError` and halts (no silent pass).
+5. Log cost in `scripts/smoke.py` `sandbox_hello` and in the executor `image.use` and `image.read` paths.
+6. Fix the `.env.example` note: removing `TRIAL_CREDIT_CAP_USD` restores 0.74; only a raise works.
+7. Document the in-flight overshoot bound (the most one in-flight call can add past the cap).
+8. ADR 0001 and ADR 0002 say sandbox runs book $0; fix both to match the logged-cost rule (U21).
+`budget.py` is a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
+
 ### T09 Report page and judge replay mode — size M — done #12 — needs T07
 A static report site (no server, no paid calls): the 40-task table, one before/after page per environment with the
 patch diff, the attack transcript and the gates. Judge mode replays recorded runs, labelled "recorded". Builds from

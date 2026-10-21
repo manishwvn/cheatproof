@@ -25,12 +25,14 @@ apart, so 30 minutes from both is impossible). Never read or touch the other pro
 - Keep the owner's personal details out of everything.
 - Containment: the attacker's tools run only inside the executor (Sandbox or Docker container), never on the host.
   Network stays off except in the network-fetch experiment. Never `docker rmi` or prune by hand; alert the owner when
-  free host disk or the Docker image store (colima `/var/lib/docker`) is under 10 GB. Disk guard (2026-10-19): the
-  executor refuses a pull that would leave less than `MIN_FREE_DISK_GB` free in the Docker image store (colima VM
-  `/var/lib/docker`; host disk when colima is absent) (estimate `PULL_ESTIMATE_GB`, 4.5) and the batch logs that task as
-  `disk`, never failed; it keeps at most `TASK_IMAGE_CAP` (2) `swebench/*` images; after each task the batch removes
-  that task's `swebench/*` image (`docker image rm`, never forced). No other image is ever removed. Prefer Sandboxes
-  once U3 is done.
+  free host disk or the Docker image store (colima `/var/lib/docker`) is under 10 GB. Images (2026-10-21): the owner
+  removed all local swebench images, and `EXECUTOR=sandbox` (Sandboxes) is the default, so no task assumes a local
+  image. The local Docker fallback re-pulls each image (about 4.5 GB). Disk guard (2026-10-19): the executor refuses a
+  pull that would leave less than `MIN_FREE_DISK_GB` free in the Docker image store (colima VM `/var/lib/docker`; host
+  disk when colima is absent) (estimate `PULL_ESTIMATE_GB`, 4.5) and the batch logs that task as `disk`, never failed;
+  it keeps at most `TASK_IMAGE_CAP` (2) `swebench/*` images; after each task the batch removes that task's
+  `swebench/*` image (`docker image rm`, never forced). No other image is ever removed (other projects' images, e.g.
+  `fde1-app`, `pgvector/pgvector:pg16`, are never touched).
 - Tests never call models or paid APIs.
 - Never use an extra-billed model. Effort `high` or `xhigh` only; never `max`, for any agent.
 - Never end the turn while a workflow or background agent runs; block on it.
