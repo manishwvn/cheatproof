@@ -45,6 +45,7 @@ DAEMON_WAIT_S = 120
 DAEMON_POLL_S = 5
 DAEMON_CHECK_TIMEOUT_S = 30
 IO_TIMEOUT_S = 120
+COLIMA_DF_TIMEOUT_S = 15  # one df on the colima VM is quick; a longer wait only delays the refusal
 RUN_TIMEOUT_S = 900  # docker run of an image that is already local (the pull has its own clock)
 PULL_TIMEOUT_S = 1800  # a task image is about 4 GB unpacked; a slow pull must not hit the run timeout
 DESTROY_TIMEOUT_S = 60
@@ -53,8 +54,6 @@ CONTAINER_FSIZE_GB = 4.0
 # Free GB after a run below which the session is poisoned (DiskRefused). Env RUN_MIN_FREE_GB overrides it. It is lower
 # than MIN_FREE_DISK_GB, the floor for starts and pulls, so a healthy run right after a pull does not trip it.
 RUN_MIN_FREE_GB = 2.0
-# The post-run free-disk check runs at most once per this many seconds in a session. The first run always checks.
-POST_RUN_CHECK_INTERVAL_S = 30
 GIB = 1024**3
 READ_CHUNK = 64 * 1024
 PIPE_POLL_S = 0.05
@@ -131,7 +130,11 @@ class ExecutorRefused(RuntimeError):
 
 class DiskRefused(ExecutorRefused):
     """The disk is too low for the next step: a pull would leave less than MIN_FREE_DISK_GB, or a run left less than
-    RUN_MIN_FREE_GB. After such a run the session is poisoned, and every later call on it raises this too."""
+    RUN_MIN_FREE_GB, or the image store cannot be read. After such a run the session is poisoned, and every later call
+    on it raises this too."""
+
+    # Set by run() when the refusal came after a command: that command's Result, with its reset note, is kept here.
+    result: Result | None = None
 
 
 # Task images this project pulls (SWE-bench eval images, about 4 GB each unpacked). Only these are ever removed.
@@ -310,6 +313,11 @@ def _root_free_gb() -> float:
     return shutil.disk_usage("/").free / GIB
 
 
+def _colima_installed() -> bool:
+    """colima is on PATH. Then pulls land in its VM, and only the VM's /var/lib/docker counts for them."""
+    return shutil.which("colima") is not None
+
+
 def _env_min_one[N: (int, float)](name: str, default: N, cast: Callable[[str], N]) -> N:
     """A number from the environment. Unparsable, non-finite or below 1 falls back to the default."""
     raw = os.environ.get(name)
@@ -335,8 +343,9 @@ class Session(ABC):
 
         The command gets exit 124 when the container timeout fires. If the host had to kill the client, at its
         timeout or at its output cap, the sandbox has been reset and the result has reset=True. Output is capped per
-        stream. After a run the free disk is checked (not on every run, see POST_RUN_CHECK_INTERVAL_S). Below
-        RUN_MIN_FREE_GB, DiskRefused is raised and the session is poisoned. Nothing is reset on that path.
+        stream. After every run, including one that ended in a reset, the free disk is checked at once. Below
+        RUN_MIN_FREE_GB, or when the image store cannot be read, DiskRefused is raised and the session is poisoned.
+        Nothing is reset on that path, and the DiskRefused carries the run's Result in its result attribute.
         """
 
     @abstractmethod
@@ -479,6 +488,16 @@ class DockerExecutor:
                 f"{self._pull_estimate_gb:g} GB would leave less than MIN_FREE_DISK_GB={self._min_free_gb:g}; "
                 "nothing pulled"
             )
+        if where != "host":
+            # colima: the pull grows the VM's disk file on the Mac, and freed blocks stay in that file, so the host
+            # disk keeps the floor too.
+            host = self._disk_free_gb()
+            if host - self._pull_estimate_gb < self._min_free_gb:
+                raise DiskRefused(
+                    f"{image} is not local: free host disk is {host:.1f} GB, and a pull of about "
+                    f"{self._pull_estimate_gb:g} GB would leave less than MIN_FREE_DISK_GB={self._min_free_gb:g}; "
+                    "nothing pulled"
+                )
         if is_task_image(image):
             tasks = self._task_image_count()
             if tasks >= self._task_image_cap:
@@ -495,27 +514,42 @@ class DockerExecutor:
             raise ExecutorUnavailable(f"docker pull failed ({res.exit_code}): {res.stderr.strip()[-500:]}")
 
     def _store_free(self) -> tuple[float, str]:
-        """Free GB where pulls and containers land: the colima VM's image store, or the host when there is none."""
+        """Free GB where pulls and containers land: the colima VM's image store, or the host when there is none.
+        The label is "host" for the host disk and "Docker image store" otherwise."""
         store = self._image_store_free_gb()
         if store is None:
             return self._disk_free_gb(), "host"
         return store, "Docker image store"
 
     def _colima_store_free_gb(self) -> float | None:
-        """Free GiB of /var/lib/docker inside the colima VM, or None when colima is not there (then the host counts)."""
-        # ExecutorUnavailable is subprocess_runner's answer when colima is missing from PATH.
+        """Free GiB of /var/lib/docker inside the colima VM. None when colima is not installed (the host disk counts).
+        When colima is installed its store must be readable: a failed, timed-out or truncated ssh, or no
+        /var/lib/docker row, raises DiskRefused. The pull is refused, never measured on the host instead.
+        By design, colima installed but stopped (or Docker Desktop active instead) refuses every pull."""
+        if not _colima_installed():
+            return None
         try:
-            res = self._runner(["colima", "ssh", "--", "df", "-Pk", "/var/lib/docker"], IO_TIMEOUT_S, None)
-        except (OSError, subprocess.SubprocessError, ExecutorUnavailable):
-            return None
-        if res.exit_code != 0:
-            return None
-        lines = [line.split() for line in res.stdout.splitlines() if line.strip()]
-        try:
-            available_kib = int(lines[-1][3])
-        except (IndexError, ValueError):
-            return None
-        return available_kib * 1024 / GIB
+            # VERIFY (live, owner approval): the row format below assumes /var/lib/docker is its own mount in the VM.
+            # That is unconfirmed until a real `colima ssh -- df -Pk /var/lib/docker` output is recorded here.
+            res = self._runner(
+                ["colima", "ssh", "--", "df", "-Pk", "/var/lib/docker"], COLIMA_DF_TIMEOUT_S, None
+            )
+        except (OSError, subprocess.SubprocessError, ExecutorUnavailable) as exc:
+            raise DiskRefused(f"image store unreadable: colima ssh failed ({exc})") from exc
+        if res.timed_out or res.truncated or res.exit_code != 0:
+            raise DiskRefused(
+                f"image store unreadable: colima ssh exit {res.exit_code}"
+                f"{', timed out' if res.timed_out else ''}{', output truncated' if res.truncated else ''}"
+            )
+        # df -Pk: Filesystem, 1024-blocks, Used, Available, Capacity, Mounted on. Match the row by its mount point.
+        for line in res.stdout.splitlines():
+            fields = line.split()
+            if len(fields) >= 4 and fields[-1] == "/var/lib/docker":
+                try:
+                    return int(fields[3]) * 1024 / GIB
+                except ValueError:
+                    break
+        raise DiskRefused("image store unreadable: no /var/lib/docker row in colima df output")
 
     def _task_image_count(self) -> int:
         filters: list[str] = []
@@ -691,7 +725,6 @@ class DockerSession(Session):
         self._closed = False
         # Set when the post-run disk check found the disk low. From then on every call but close raises it.
         self._poisoned: str | None = None
-        self._last_disk_check: float | None = None  # clock reading of the last post-run check
         self._launch()
 
     def _launch(self) -> None:
@@ -757,35 +790,50 @@ class DockerSession(Session):
             ["exec", cid, "sh", "-lc", script, "cheatproof", cmd], limit + EXEC_GRACE_S
         )
         killed = res.timed_out or (res.truncated and res.exit_code == OUTPUT_KILL_EXIT_CODE)
+        stdout, out_cut = _cap(res.stdout)
+        stderr, err_cut = _cap(res.stderr)
+        result = replace(
+            res, stdout=stdout, stderr=stderr, truncated=res.truncated or out_cut or err_cut, reset=killed
+        )
         if killed:
             # The host killed docker exec, at its timeout or at its output cap, so the command may still run in the
             # container. reset() removes that container and every process in it. Files written earlier in this
-            # session are lost, and the reset reserves one more sandbox run.
-            self.reset()
-        self._check_disk_after_run()
-        stdout, out_cut = _cap(res.stdout)
-        stderr, err_cut = _cap(res.stderr)
-        return replace(
-            res, stdout=stdout, stderr=stderr, truncated=res.truncated or out_cut or err_cut, reset=killed
-        )
+            # session are lost, and the reset reserves one more sandbox run. A reset refused by a disk guard keeps
+            # the killed run's Result on the exception, as the post-run refusal does.
+            try:
+                self.reset()
+            except DiskRefused as exc:
+                exc.result = result
+                raise
+        try:
+            self._check_disk_after_run(killed)
+        except DiskRefused as exc:
+            # The refusal replaces the return value, so the Result (reset note included) travels on the exception.
+            exc.result = result
+            raise
+        return result
 
-    def _check_disk_after_run(self) -> None:
-        """The free-space check after a run. A command can fill the Docker disk. Below RUN_MIN_FREE_GB the session
-        is poisoned and DiskRefused is raised. Nothing is reset on this path: the sandbox and what it wrote stay as
-        they are, and every later call except close is refused. The check runs at most once per
-        POST_RUN_CHECK_INTERVAL_S, and always on the first run of the session."""
+    def _check_disk_after_run(self, reset: bool) -> None:
+        """The free-space check after every run, so a command that fills the disk is caught on the run that filled it.
+        Below RUN_MIN_FREE_GB, or when the image store cannot be read, the session is poisoned and DiskRefused is
+        raised. Nothing is reset on this path: the sandbox and what it wrote stay as they are, and every later call
+        except close is refused. reset says the run was killed and the sandbox reset, and the message keeps that."""
         executor = self._executor
-        now = executor._clock()
-        if self._last_disk_check is not None and now - self._last_disk_check < POST_RUN_CHECK_INTERVAL_S:
-            return
-        self._last_disk_check = now
-        free, where = executor._store_free()
-        if free >= executor._run_min_free_gb:
-            return
-        self._poisoned = (
-            f"free {where} disk is {free:.1f} GB after a run, below RUN_MIN_FREE_GB="
-            f"{executor._run_min_free_gb:g}; this session is refused from here on (nothing was reset)"
-        )
+        try:
+            free, where = executor._store_free()
+        except Exception as exc:  # noqa: BLE001 - any read failure: the disk is not known to be fine, so refuse
+            if isinstance(exc, DiskRefused):
+                reason = str(exc)
+            else:
+                reason = f"free disk could not be read after a run ({type(exc).__name__}: {exc})"
+        else:
+            if free >= executor._run_min_free_gb:
+                return
+            floor = executor._run_min_free_gb
+            reason = f"free {where} disk is {free:.1f} GB after a run, below RUN_MIN_FREE_GB={floor:g}"
+        if reset:
+            reason += "; the command was killed and the sandbox was reset before this check"
+        self._poisoned = f"{reason}; this session is refused from here on (nothing was reset)"
         raise DiskRefused(self._poisoned)
 
     def write_file(self, path: str, data: bytes | str) -> None:

@@ -271,10 +271,14 @@ def _spent(snapshot: Mapping[str, Any]) -> float:
 
 
 def _ledger_total(budget: Any) -> float | None:
-    """The ledger total, or None when the snapshot holds no number (TypeError or ValueError from float)."""
+    """The ledger total, or None when it cannot be read or holds no number. Any read error (OSError, KeyError,
+    ValueError, TypeError, RuntimeError, ...) is an unknown cost, so the stop or the run is reported without a cost.
+    BudgetExceeded from the read is raised unchanged."""
     try:
         return _spent(budget.snapshot())
-    except (TypeError, ValueError):
+    except BudgetExceeded:
+        raise
+    except Exception:  # noqa: BLE001 - an unreadable ledger is an unknown cost, never an abort
         return None
 
 
@@ -283,7 +287,8 @@ def _spent_since(budget: Any, spent_before: float) -> float | None:
     delta is not a finite number of 0 or more. Used when harden stops a paid run, so the stop keeps its own reason."""
     try:
         spent_after = _ledger_total(budget)
-    except (BudgetExceeded, OSError):  # an unreadable or corrupt ledger: the stop is reported, without a cost
+    except Exception:  # noqa: BLE001 - any ledger read error (BudgetExceeded, OSError, ValueError, KeyError, ...): the
+        # stop is reported with its own reason, without a cost, and the batch writes its not_run row
         return None
     if spent_after is None:
         return None
