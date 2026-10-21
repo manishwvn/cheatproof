@@ -82,7 +82,7 @@ Docker image store. (4) Routine 2026-10-20: with colima the pull also grows the 
 keeps freed blocks, so the guard must also refuse when host free disk minus the pull estimate is under the floor. Units already match (`GIB = 1024**3`, used by `_root_free_gb` too). Tests for each case with a
 fake runner. `executor.py` is a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
 
-### T26 Executor and batch audit fixes before the 40-task run (audit 2026-10-20, planner-merge PR) — size M — in-progress (cycle 2026-10-20T19:24:11-05:00)
+### T26 Executor and batch audit fixes before the 40-task run (audit 2026-10-20, planner-merge PR) — size M — waiting: U20 (PR #27)
 Sonnet daily audit of `eafa80c..139e1e4` (verified in code, not run). In `cheatproof/executor.py`: (1, high) task
 images are matched by the `swebench/` prefix only, but `tasks.py` also accepts `swerebench/`; such images are never
 released or counted by `TASK_IMAGE_CAP`, so the batch fills `DOCKER_IMAGE_CAP` and later pulls are refused. Use a
@@ -99,6 +99,9 @@ leaves the process running in the container; treat `OUTPUT_KILL_EXIT_CODE` like 
 delta; say "single process assumed" in `cost_basis` or sum this process's holds. Tests with fakes for each item.
 `executor.py` is a planner-merge path: open the PR, Opus review, USER item for the planner to merge. Do items 1-4
 before T08 resumes.
+Routine 2026-10-20 19:24: PR #27 does all items except 7 (`COST_BASIS` is validated in `certify.py`; needs a
+schema/fixture change). Sonnet "fix first" (silent resets could fake "not hackable"), one Haiku fix round, Opus
+approve. CI `test` green; `dependencies` red until PR #26 (certifi) is merged.
 
 ### T24 Rename the product to RewardSeal — size M — todo
 "Cheatproof" is another company's product name (CheatProof.ai). Rename every user-facing and public mention to
@@ -235,7 +238,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — waiting: U17, U18 — needs T07, T16, T17, T18, T19, T20, T22
+### T08 Eval run and results with raw counts — size M — waiting: U17, U18, U20 — needs T07, T16, T17, T18, T19, T20, T22
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
@@ -342,6 +345,10 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
+- **U20 Review and merge PR #27 (T26 audit fixes)** (ready 2026-10-20; needed before T08 resumes): after U19, say
+  `review` in an interactive session to merge https://github.com/manishwvn/cheatproof/pull/27 (planner-merge path
+  `cheatproof/executor.py`; low-disk latch, `Result.reset`, swerebench image prefix, fsize ulimit, pull timeout).
+  Rerun its checks after #26. Then flip T26 to `done #27`.
 - **U19 Review and merge PR #26 first** (ready 2026-10-20; needed now: the `security` workflow fails on every
   branch): say `review` in an interactive session to merge https://github.com/manishwvn/cheatproof/pull/26 (certifi
   2026.7.22 to 2026.10.19 for PYSEC-2026-4320; only `uv.lock`, a planner-merge path). CI green. Then rerun PR #25's
@@ -350,7 +357,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
   to merge https://github.com/manishwvn/cheatproof/pull/25 (leakcheck skips values that equal a public value in
   `origin/main:.env.example`, so certificates that name the model can be committed; planner-merge path
   `docs/autopilot/`). Sonnet review fixed in one round; Opus final review done.
-- **U17 Mac free disk 2.8 GB blocks T08** (ready 2026-10-20; needed for the Oct 21 go/no-go): free at least 15 GB on
+- **U17 Mac free disk 0.8 GB blocks T08 (urgent)** (ready 2026-10-20; needed for the Oct 21 go/no-go): free at least 15 GB on
   the Mac. Optional: `docker image rm swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8595`, and return freed VM
   blocks with `colima ssh -- sudo fstrim -v /var/lib/docker`, then check `df -h /`. Or move T08 to Sandboxes (T23).
   Routines may not delete images or files.
