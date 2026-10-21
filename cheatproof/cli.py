@@ -271,10 +271,14 @@ def _spent(snapshot: Mapping[str, Any]) -> float:
 
 
 def _ledger_total(budget: Any) -> float | None:
-    """The ledger total, or None when the snapshot holds no number (TypeError or ValueError from float)."""
+    """The ledger total, or None when it cannot be read or holds no number. Any read error (OSError, KeyError,
+    ValueError, TypeError, RuntimeError, ...) is an unknown cost, so the stop or the run is reported without a cost.
+    BudgetExceeded from the read is raised unchanged."""
     try:
         return _spent(budget.snapshot())
-    except (TypeError, ValueError):
+    except BudgetExceeded:
+        raise
+    except Exception:  # noqa: BLE001 - an unreadable ledger is an unknown cost, never an abort
         return None
 
 

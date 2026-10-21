@@ -14,8 +14,10 @@ from cheatproof.executor import (
     _DIFF_SCRIPT,
     _LEAKED,
     _UNSTAGE_SCRIPT,
+    COLIMA_DF_TIMEOUT_S,
     EXEC_GRACE_S,
     GIB,
+    IO_TIMEOUT_S,
     MAX_BASELINE_BYTES,
     MAX_DIFF_BYTES,
     MAX_OUTPUT_BYTES,
@@ -1281,6 +1283,18 @@ def test_colima_store_free_reads_the_var_lib_docker_row(colima_present):
     assert round(DockerExecutor(runner=runner, platform="linux")._colima_store_free_gb(), 1) == 90.3
 
 
+def test_colima_df_has_its_own_short_timeout(colima_present):
+    timeouts = []
+
+    def runner(argv, timeout, stdin=None, max_bytes=None):
+        timeouts.append(timeout)
+        return Result(0, COLIMA_DF, "", 0.0)
+
+    DockerExecutor(runner=runner, platform="linux")._colima_store_free_gb()
+    assert timeouts == [COLIMA_DF_TIMEOUT_S]
+    assert COLIMA_DF_TIMEOUT_S < IO_TIMEOUT_S
+
+
 def test_colima_store_free_takes_the_docker_row_not_the_last_line(colima_present):
     # Another mount listed after /var/lib/docker: the last line is not the image store.
     df = COLIMA_DF + "tmpfs 1000 0 1000 0% /run\n"
@@ -1645,6 +1659,24 @@ def test_disk_refused_after_a_kill_and_reset_keeps_the_reset_note(tmp_path):
     s.close()
 
 
+def test_reset_refused_after_a_kill_keeps_the_killed_result(tmp_path):
+    # The reset's start needs a pull (the image is gone) and the image store is too low for it: the reset is refused.
+    free = [90.0]
+    fake = FakeDocker()
+    s = store_executor(fake, lambda: free[0]).start(ENV, make_budget(tmp_path))
+    fake.exec_result = Result(TIMEOUT_EXIT_CODE, "", "\n[timed out after 5s]", 0.0, timed_out=True)
+    fake.image_present = False
+    free[0] = 3.0
+    with pytest.raises(DiskRefused, match="nothing pulled") as info:
+        s.run("sleep 99", timeout=5)
+    res = info.value.result
+    assert res is not None and res.reset is True and res.timed_out is True
+    assert res.exit_code == TIMEOUT_EXIT_CODE and "[timed out after 5s]" in res.stderr
+    assert fake.argvs(["docker", "pull"]) == []
+    assert len(fake.runs()) == 1  # the refused reset started no container
+    s.close()
+
+
 def test_unreadable_image_store_after_a_run_refuses_and_poisons_the_session(tmp_path, colima_present):
     fake = FakeDocker()
     colima_down = [False]
@@ -1654,21 +1686,36 @@ def test_unreadable_image_store_after_a_run_refuses_and_poisons_the_session(tmp_
             return Result(1, "", "vm stopped", 0.0) if colima_down[0] else Result(0, COLIMA_DF, "", 0.0)
         return fake(argv, timeout, stdin, max_bytes=max_bytes)
 
-    clock = FakeClock()
-    executor = DockerExecutor(
-        runner=runner,
-        disk_free_gb=lambda: 100.0,
-        min_free_gb=10.0,
-        platform="linux",
-        sleep=clock.sleep,
-        clock=clock,
-    )
+    executor = DockerExecutor(runner=runner, disk_free_gb=lambda: 100.0, min_free_gb=10.0, platform="linux")
     s = executor.start(ENV, make_budget(tmp_path))
     colima_down[0] = True
     with pytest.raises(DiskRefused, match="image store unreadable"):
         s.run("true", timeout=5)
     with pytest.raises(DiskRefused, match="image store unreadable"):
         s.run("true", timeout=5)  # poisoned: refused before docker is asked anything
+    s.close()
+
+
+def test_post_run_check_that_cannot_read_the_disk_poisons_the_session(tmp_path):
+    # Any failure to read the free disk after a run refuses like a low disk: the result travels, the session is poisoned.
+    broken = [False]
+
+    def store():
+        if broken[0]:
+            raise OSError("df could not run")
+        return 90.0
+
+    fake = FakeDocker()
+    s = store_executor(fake, store).start(ENV, make_budget(tmp_path))
+    broken[0] = True
+    with pytest.raises(DiskRefused, match="df could not run") as info:
+        s.run("true", timeout=5)
+    assert info.value.result is not None and info.value.result.exit_code == 0
+    calls = len(fake.log)
+    with pytest.raises(DiskRefused, match="df could not run"):
+        s.run("true", timeout=5)  # poisoned: refused before docker is asked anything
+    assert len(fake.log) == calls
+    assert len(fake.runs()) == 1  # no reset: the sandbox stays as the run left it
     s.close()
 
 

@@ -45,6 +45,7 @@ DAEMON_WAIT_S = 120
 DAEMON_POLL_S = 5
 DAEMON_CHECK_TIMEOUT_S = 30
 IO_TIMEOUT_S = 120
+COLIMA_DF_TIMEOUT_S = 15  # one df on the colima VM is quick; a longer wait only delays the refusal
 RUN_TIMEOUT_S = 900  # docker run of an image that is already local (the pull has its own clock)
 PULL_TIMEOUT_S = 1800  # a task image is about 4 GB unpacked; a slow pull must not hit the run timeout
 DESTROY_TIMEOUT_S = 60
@@ -523,11 +524,16 @@ class DockerExecutor:
     def _colima_store_free_gb(self) -> float | None:
         """Free GiB of /var/lib/docker inside the colima VM. None when colima is not installed (the host disk counts).
         When colima is installed its store must be readable: a failed, timed-out or truncated ssh, or no
-        /var/lib/docker row, raises DiskRefused. The pull is refused, never measured on the host instead."""
+        /var/lib/docker row, raises DiskRefused. The pull is refused, never measured on the host instead.
+        By design, colima installed but stopped (or Docker Desktop active instead) refuses every pull."""
         if not _colima_installed():
             return None
         try:
-            res = self._runner(["colima", "ssh", "--", "df", "-Pk", "/var/lib/docker"], IO_TIMEOUT_S, None)
+            # VERIFY (live, owner approval): the row format below assumes /var/lib/docker is its own mount in the VM.
+            # That is unconfirmed until a real `colima ssh -- df -Pk /var/lib/docker` output is recorded here.
+            res = self._runner(
+                ["colima", "ssh", "--", "df", "-Pk", "/var/lib/docker"], COLIMA_DF_TIMEOUT_S, None
+            )
         except (OSError, subprocess.SubprocessError, ExecutorUnavailable) as exc:
             raise DiskRefused(f"image store unreadable: colima ssh failed ({exc})") from exc
         if res.timed_out or res.truncated or res.exit_code != 0:
@@ -784,16 +790,21 @@ class DockerSession(Session):
             ["exec", cid, "sh", "-lc", script, "cheatproof", cmd], limit + EXEC_GRACE_S
         )
         killed = res.timed_out or (res.truncated and res.exit_code == OUTPUT_KILL_EXIT_CODE)
-        if killed:
-            # The host killed docker exec, at its timeout or at its output cap, so the command may still run in the
-            # container. reset() removes that container and every process in it. Files written earlier in this
-            # session are lost, and the reset reserves one more sandbox run.
-            self.reset()
         stdout, out_cut = _cap(res.stdout)
         stderr, err_cut = _cap(res.stderr)
         result = replace(
             res, stdout=stdout, stderr=stderr, truncated=res.truncated or out_cut or err_cut, reset=killed
         )
+        if killed:
+            # The host killed docker exec, at its timeout or at its output cap, so the command may still run in the
+            # container. reset() removes that container and every process in it. Files written earlier in this
+            # session are lost, and the reset reserves one more sandbox run. A reset refused by a disk guard keeps
+            # the killed run's Result on the exception, as the post-run refusal does.
+            try:
+                self.reset()
+            except DiskRefused as exc:
+                exc.result = result
+                raise
         try:
             self._check_disk_after_run(killed)
         except DiskRefused as exc:
@@ -810,8 +821,11 @@ class DockerSession(Session):
         executor = self._executor
         try:
             free, where = executor._store_free()
-        except DiskRefused as exc:
-            reason = str(exc)  # the image store is unreadable, so the disk is not known to be fine
+        except Exception as exc:  # noqa: BLE001 - any read failure: the disk is not known to be fine, so refuse
+            if isinstance(exc, DiskRefused):
+                reason = str(exc)
+            else:
+                reason = f"free disk could not be read after a run ({type(exc).__name__}: {exc})"
         else:
             if free >= executor._run_min_free_gb:
                 return

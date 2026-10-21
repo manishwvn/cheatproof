@@ -1776,6 +1776,38 @@ def test_an_unreadable_ledger_after_a_paid_run_is_reported_by_harden_and_keeps_t
     assert (tmp_path / "reports" / f"{INSTANCE}.report.json").is_file()
 
 
+@pytest.mark.parametrize(
+    ("failing_read", "ran", "message"),
+    [(1, 0, "is not a number before the run"), (2, 1, "could not be read after the run")],
+    ids=["oserror-before", "oserror-after"],
+)
+def test_an_oserror_reading_the_ledger_around_a_paid_run_is_cost_check_failed_not_an_abort(
+    tmp_path, failing_read, ran, message
+):
+    class LedgerOSErrorOnOneRead:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def snapshot(self) -> dict:
+            self.reads += 1
+            if self.reads == failing_read:
+                raise OSError("ledger disk gone")
+            return {"total_usd": 0.10, "days": {}, "sandbox_runs": 0, "halted": None}
+
+    spy = Spy()
+    out = out_dir(tmp_path)
+    deps = batch_deps(spy, batch_tasks(ID_A, ID_B), make_budget=LedgerOSErrorOnOneRead)
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 1
+    assert len(spy.harden_calls) == ran
+    state = read_batch(out)
+    assert [(row["instance_id"], row["reason"]) for row in state["not_run"]] == [
+        (ID_A, "cost_check_failed"),
+        (ID_B, "stopped_after_cost_check"),
+    ]
+    assert message in state["not_run"][0]["error"]
+    assert state["run"] == 0
+
+
 def test_a_task_that_names_no_certificate_file_is_an_invalid_task_row(tmp_path):
     spy = Spy()
     out = out_dir(tmp_path)
