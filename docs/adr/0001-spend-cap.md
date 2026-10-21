@@ -38,3 +38,9 @@ during public judging (Dec 1–15) when anyone can trigger runs.
 **Consequences.** Spend estimates err high, so the app may stop early; that is intended. Prices must be recorded from
 the console (`MODEL_PRICES_JSON`) to avoid stopping far too early. Sandbox cost is capped by run count until a
 per-run price is known. A ledger that fails these checks stops all paid calls until a person fixes it by hand.
+
+## 2026-10-21 update
+Token Factory Sandboxes work, and they are the default executor (`EXECUTOR` unset means `sandbox`). Beta sandbox runs
+are count-only: `budget.reserve_sandbox_run()` books $0, so the money caps do not move, and each run counts against
+`SANDBOX_RUN_CAP`. `SANDBOX_RUN_USD` is still parsed and validated, but not charged. This amends the Decision and the
+Consequences above: sandbox cost is bounded by run count, and no per-run price is charged until one is documented.

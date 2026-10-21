@@ -1148,22 +1148,10 @@ def test_real_git_patch_leaves_start_files_out_and_applies_to_a_fresh_copy(tmp_p
 # --- executor choice and live test -------------------------------------------------------------------
 
 
-def test_sandbox_env_is_unavailable_and_spends_nothing(tmp_path, monkeypatch):
-    monkeypatch.setenv("EXECUTOR", "sandbox")
-    budget = make_budget(tmp_path)
-    with pytest.raises(ExecutorUnavailable, match="U3"):
-        start(ENV, budget)
-    assert budget.snapshot()["sandbox_runs"] == 0
-    assert local_runs(budget) == 0
-
-
-def test_sandbox_stub_refuses_directly(tmp_path):
-    with pytest.raises(ExecutorUnavailable, match="U3"):
-        SandboxExecutor().start(ENV, make_budget(tmp_path))
-
-
 def test_executor_choice_comes_from_env(monkeypatch):
     monkeypatch.delenv("EXECUTOR", raising=False)
+    assert isinstance(make_executor(), SandboxExecutor)  # the default; the docker cases are in the next lines
+    monkeypatch.setenv("EXECUTOR", " Docker ")
     assert isinstance(make_executor(), DockerExecutor)
     monkeypatch.setenv("EXECUTOR", " Sandbox ")
     assert isinstance(make_executor(), SandboxExecutor)

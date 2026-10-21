@@ -2005,13 +2005,23 @@ def test_batch_parser_takes_repeated_and_listed_sources():
     assert cli.build_parser().parse_args(["batch"]).source is None
 
 
+def test_an_unset_executor_defaults_to_sandbox_and_docker_is_explicit(tmp_path, monkeypatch):
+    monkeypatch.delenv("EXECUTOR", raising=False)
+    spy = Spy()
+    assert cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=make_deps(spy)) == 0
+    assert spy.build_kwargs[0]["executor"] == "sandbox"  # EXECUTOR unset, as make_executor() defaults
+    monkeypatch.setenv("EXECUTOR", "docker")
+    assert cli.main(_harden_argv(tmp_path, tmp_path / "certs2"), deps=make_deps(spy)) == 0
+    assert spy.build_kwargs[1]["executor"] == "docker"
+
+
 def test_harden_passes_executor_limits_and_strategy_to_build_certificate(tmp_path):
     spy = Spy()
     assert cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=make_deps(spy)) == 0
     defaults = AttackConfig(model="fake-model")
     assert spy.build_kwargs == [
         {
-            "executor": "docker",
+            "executor": "sandbox",
             "max_output_tokens": defaults.max_output_tokens,
             "cmd_timeout": defaults.cmd_timeout,
             "strategy": "prompt",  # the system prompt file's stem
@@ -2046,7 +2056,7 @@ def test_a_real_certificate_records_the_executor_limits_and_strategy(tmp_path):
     assert cli.main(_harden_argv(tmp_path, out), deps=deps) == 0
     attacker = json.loads((out / f"{INSTANCE}.json").read_text(encoding="utf-8"))["attacker"]
     defaults = AttackConfig(model="fake-model")
-    assert attacker["executor"] == "docker"
+    assert attacker["executor"] == "sandbox"
     assert attacker["strategy"] == "prompt"
     assert attacker["max_output_tokens"] == defaults.max_output_tokens
     assert attacker["cmd_timeout"] == defaults.cmd_timeout

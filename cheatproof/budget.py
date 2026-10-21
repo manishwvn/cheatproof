@@ -1,4 +1,4 @@
-"""Hard spend cap shared by every paid call (LLM tokens and sandbox runs).
+"""Hard spend cap shared by every paid call (LLM tokens).
 
 Token Factory has no documented hard spend limit and lets the balance go negative, so the cap
 lives here. Every call reserves its worst-case cost before it runs and settles the real cost
@@ -9,9 +9,10 @@ Fail closed. The total cap must be a finite number above 0 and at most MAX_TOTAL
 daily cap must be a finite number above 0 and at most the total cap. Every price must be a finite
 number above 0, and the sandbox, local and Tavily call caps whole numbers of 0 or more. A missing,
 empty, nan, inf, zero, negative or too-large money value, or a bad count cap, raises BudgetExceeded
-before anything is spent, because a bad value must never read as "unlimited". Local Docker runs and
-Tavily calls book no money; they only count against their caps. A ledger that does not match this
-shape is refused the same way, never repaired. snapshot() only reads the ledger and never writes it.
+before anything is spent, because a bad value must never read as "unlimited". Sandboxes beta runs,
+local Docker runs and Tavily calls book no money; they only count against their caps. A ledger that
+does not match this shape is refused the same way, never repaired. snapshot() only reads the ledger
+and never writes it.
 """
 
 from __future__ import annotations
@@ -182,11 +183,11 @@ class Budget:
                 f"the total cap (SPEND_CAP_USD) ${self.total_cap_usd:g}"
             )
         self.sandbox_run_cap = _count_cap("sandbox_run_cap (SANDBOX_RUN_CAP)", sandbox_run_cap)
-        # VERIFY: per-run sandbox price is not documented; this conservative guess counts toward the money caps.
+        # Parsed and checked so SANDBOX_RUN_USD fails closed. Never charged: Sandboxes beta runs are free.
         self.sandbox_run_usd = _positive("sandbox run price (SANDBOX_RUN_USD)", sandbox_run_usd)
         self.prices = {model: _checked_price(f"price for {model}", p) for model, p in (prices or {}).items()}
         self.default_price = _checked_price("default price", default_price)
-        # Count-only caps: local Docker runs and Tavily calls book $0, so they never touch the money caps.
+        # Count-only caps: Sandboxes, local Docker and Tavily book $0, so they never touch the money caps.
         self.local_run_cap = _count_cap("local_run_cap (LOCAL_RUN_CAP)", local_run_cap)
         self.tavily_call_cap = _count_cap("tavily_call_cap (TAVILY_CALL_CAP)", tavily_call_cap)
 
@@ -307,17 +308,9 @@ class Budget:
             s["days"][hold.day] = max(0.0, s["days"].get(hold.day, 0.0) + delta)
         return actual
 
-    def reserve_sandbox_run(self) -> Hold:
-        # One lock for the run cap, the money caps, the halt flag and both counters, so parallel
-        # processes cannot all pass the checks and then overshoot. The run's cost stays booked.
-        with self._locked() as s:
-            if s["halted"]:
-                raise BudgetExceeded(f"budget halted: {s['halted']}")
-            if s["sandbox_runs"] >= self.sandbox_run_cap:
-                raise BudgetExceeded(f"sandbox run cap {self.sandbox_run_cap} reached")
-            hold = self._charge(s, "sandbox-run", self.sandbox_run_usd)
-            s["sandbox_runs"] += 1
-        return hold
+    def reserve_sandbox_run(self) -> None:
+        """Count one Sandboxes run against sandbox_run_cap. Beta runs are free: books no money."""
+        self._reserve_count("sandbox_runs", self.sandbox_run_cap, "sandbox run cap")
 
     def reserve_local_run(self) -> None:
         """Count one local Docker run against local_run_cap. Free: books no money."""

@@ -82,10 +82,11 @@ def test_unknown_model_uses_conservative_default_price(tmp_path):
 
 def test_sandbox_run_cap(tmp_path):
     b = make_budget(tmp_path, runs=2)
+    assert b.reserve_sandbox_run() is None
     b.reserve_sandbox_run()
-    b.reserve_sandbox_run()
-    with pytest.raises(BudgetExceeded, match="sandbox run cap"):
+    with pytest.raises(BudgetExceeded, match="sandbox run cap 2 reached"):
         b.reserve_sandbox_run()
+    assert b.snapshot()["sandbox_runs"] == 2
 
 
 def test_guarded_chat_records_real_usage(tmp_path):
@@ -131,12 +132,25 @@ def test_unbounded_output_is_rejected(tmp_path):
         llm.chat("m", [], max_tokens=10**6)
 
 
-def test_sandbox_runs_count_toward_money_cap(tmp_path):
+def test_sandbox_runs_book_no_money(tmp_path):
+    # Sandboxes beta runs are free: a run leaves total_usd and the daily ledger untouched.
     b = make_budget(tmp_path, total=0.15, runs=100, run_usd=0.1)
     b.reserve_sandbox_run()
+    b.reserve_sandbox_run()
+    s = b.snapshot()
+    assert s["sandbox_runs"] == 2
+    assert s["total_usd"] == 0.0
+    assert s["days"] == {}
+
+
+def test_sandbox_runs_pass_even_when_money_caps_are_spent(tmp_path):
+    write_ledger(tmp_path, total_usd=1.0, days={TODAY: 1.0})
+    b = make_budget(tmp_path, total=1.0, daily=1.0, runs=3)
+    b.reserve_sandbox_run()
     with pytest.raises(BudgetExceeded, match="total cap"):
-        b.reserve_sandbox_run()
+        b.reserve("m", 1, 1)
     assert b.snapshot()["sandbox_runs"] == 1
+    assert b.snapshot()["total_usd"] == pytest.approx(1.0)
 
 
 def test_stream_and_multiple_choices_are_rejected(tmp_path):
@@ -187,16 +201,26 @@ def test_parallel_sandbox_reservations_never_pass_the_run_cap(tmp_path):
         results = list(pool.map(try_run, range(40)))
     assert sum(results) == 5
     assert b.snapshot()["sandbox_runs"] == 5
-    assert b.snapshot()["total_usd"] == pytest.approx(0.05)
+    assert b.snapshot()["total_usd"] == 0.0
 
 
-def test_sandbox_run_returns_hold_and_halt_wins_over_run_cap(tmp_path):
+def test_halt_wins_over_sandbox_run_cap_and_books_nothing(tmp_path):
     b = make_budget(tmp_path, runs=0, run_usd=0.01)
     b.halt("test")
     with pytest.raises(BudgetExceeded, match="halted"):
         b.reserve_sandbox_run()
+    assert b.snapshot().get("sandbox_runs", 0) == 0
     ok = make_budget(tmp_path / "other", runs=1, run_usd=0.01)
-    assert ok.reserve_sandbox_run().usd == pytest.approx(0.01)
+    assert ok.reserve_sandbox_run() is None
+    assert ok.snapshot()["total_usd"] == 0.0
+
+
+def test_halt_blocks_sandbox_runs_without_counting(tmp_path):
+    b = make_budget(tmp_path, runs=5)
+    b.halt("HTTP 402 from Token Factory")
+    with pytest.raises(BudgetExceeded, match="budget halted: HTTP 402"):
+        b.reserve_sandbox_run()
+    assert b.snapshot()["sandbox_runs"] == 0
 
 
 # --- settle: token counts and refunds -------------------------------------------------------------
@@ -519,6 +543,7 @@ def test_zero_run_cap_means_no_sandbox_runs(tmp_path):
     b = make_budget(tmp_path, runs=0)
     with pytest.raises(BudgetExceeded, match="sandbox run cap 0"):
         b.reserve_sandbox_run()
+    assert b.snapshot().get("sandbox_runs", 0) == 0
     assert b.snapshot()["total_usd"] == 0.0
 
 
@@ -616,7 +641,7 @@ def test_local_runs_and_sandbox_runs_have_separate_caps(tmp_path):
         b.reserve_local_run()
     b.reserve_sandbox_run()  # the sandbox cap is untouched by local runs
     assert b.snapshot()["sandbox_runs"] == 1
-    assert b.snapshot()["total_usd"] == pytest.approx(0.05)
+    assert b.snapshot()["total_usd"] == 0.0
 
 
 def test_halt_blocks_local_runs_and_tavily_calls_without_counting(tmp_path):
