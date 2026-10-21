@@ -54,7 +54,7 @@ USER item for the planner to merge. Do T02 first if both are runnable.
 Done 2026-10-18 (routine): PR #10 open, CI green, Sonnet review fixed (one round), Opus final review: ready. Items 10
 and 11 are below (T08, T12 text). Planner merges #10 (U10), then installs `docs/autopilot/pre-push`.
 
-### T23 Sandbox executor and the eval on Sandboxes (TOP PRIORITY, planner-merge PR) — size L — todo
+### T23 Sandbox executor and the eval on Sandboxes (TOP PRIORITY, planner-merge PR) — size L — in-progress (cycle 2026-10-21T00:24:11-05:00)
 Planner note 2026-10-21: Sandboxes work (owner-side live run 05:08Z: `python:3.12-slim` printed stdout; the HTTP 500s
 are gone). The Mac has about 3 GB free, so **no local swebench pulls**: `.env` now has `EXECUTOR=sandbox` (the
 planner set it); never switch it back to docker for task images. Steps, in order:
@@ -331,7 +331,7 @@ Nemotron, Sandboxes and Tavily are used and where, what is real and what is repl
 `docs/feedback.md`: specific, actionable feedback on Token Factory, Sandboxes and NVIDIA models (Most Valuable
 Feedback prize).
 
-### T11 Video script and automated rough cut — size M — todo — after 2026-10-21
+### T11 Video script and automated rough cut — size M — in-progress (cycle 2026-10-21T00:24:11-05:00) — after 2026-10-21
 Script by Oct 21 per `docs/pitches.md` demo beats (model ID in the first 20 seconds, under 2:50). Rough cut by Oct 24:
 scripted browser recording of the report page and terminal, text-to-speech, captions, ffmpeg. No third-party marks
 or music. The owner records the final voice (U6).
