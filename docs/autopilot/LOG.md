@@ -1,5 +1,12 @@
 # Autopilot log
 
+## 2026-10-21 summary
+progress 70% (17/26 tasks done, 7 days to submit)
+T11 done (PR #29): video script and rough-cut tool; dry-run tested only.
+T23 built (PR #30, planner merge via U22). Sandboxes gold gate passes; the hardened re-run halted the budget.
+Budget halted on a reported Sandboxes cost (U21). Check Nebius billing before resuming.
+T08 waits on U21 and U22. T25 next (executor.py, after #30).
+
 ## 2026-10-16 (interactive)
 - Setup: repo skeleton, docs, queue, guards, CI, spend cap moved from the earlier scaffold (11 tests pass).
 - Routine not created (usage pause until 2026-10-20).
@@ -269,3 +276,16 @@ progress 68% (15/26 tasks done, 8 days to submit)
   U17/U18/U20; T01, T23, T25, T11 open 2026-10-21 local.
 - Host free disk 877 MB (U17, alerted today; no second alert). `security` on main stays red until PR #26 (U19).
 - Hand-back not due: T24 and date-gated tasks are `todo`, not owner-blocked. Spend: $0.
+
+## 2026-10-21 routine (cycle 2026-10-21T00:24:11-05:00)
+progress 70% (17/26 tasks done, 7 days to submit)
+- Tasks: T23 and T11.
+- T11 (#29): PR #29 merged. Haiku build, Sonnet fix-first 1 high (honest numbers), one Haiku fix round, Opus approve.
+- T23 (#30): PR #30 open for planner merge (U22). Sonnet core plus 3 Haiku builders. Sonnet fix-first incl. 1 critical: write_file and diff ran with network on. One Sonnet+Haiku fix round, Opus approve.
+- Live before hardening: access OK; gold passes, empty fails on psf__requests-1142; unshare -n, images.oci and image persistence confirmed.
+- The hardened re-run halted the budget: a result carried `resources.cost != 0`. Halt kept; alert sent (U21).
+- Left after U21: live-verify `-rn`, nsenter refusal, `image.read`, integrity pin; record the real-run fixture.
+- Spend: $0 model, 6 sandbox runs. Ledger total $0.1554, unchanged.
+- T25 skipped (shares executor.py with T23).
+- Learning notes for #22-#29 added.
+- Lessons: an SDK cost field must be checked on the very first live run, before relying on "beta is free". zsh does not word-split unquoted `$F`; pipe file lists through xargs.

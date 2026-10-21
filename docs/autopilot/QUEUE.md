@@ -54,7 +54,7 @@ USER item for the planner to merge. Do T02 first if both are runnable.
 Done 2026-10-18 (routine): PR #10 open, CI green, Sonnet review fixed (one round), Opus final review: ready. Items 10
 and 11 are below (T08, T12 text). Planner merges #10 (U10), then installs `docs/autopilot/pre-push`.
 
-### T23 Sandbox executor and the eval on Sandboxes (TOP PRIORITY, planner-merge PR) — size L — in-progress (cycle 2026-10-21T00:24:11-05:00)
+### T23 Sandbox executor and the eval on Sandboxes (TOP PRIORITY, planner-merge PR) — size L — waiting: U21, U22
 Planner note 2026-10-21: Sandboxes work (owner-side live run 05:08Z: `python:3.12-slim` printed stdout; the HTTP 500s
 are gone). The Mac has about 3 GB free, so **no local swebench pulls**: `.env` now has `EXECUTOR=sandbox` (the
 planner set it); never switch it back to docker for task images. Steps, in order:
@@ -74,6 +74,7 @@ planner set it); never switch it back to docker for task images. Steps, in order
    for the planner to merge.
 Split for the team (size L): Sonnet builds the core `SandboxSession`; Haiku builders do the access script, budget
 counter, tests and ADRs.
+Routine 2026-10-21 00:24: PR #30 open (planner merge). Live before hardening: access OK; gold passes, empty fails on psf__requests-1142; unshare -n, images.oci, image persistence confirmed. The hardened re-run halted the budget: a result carried `resources.cost != 0` (6 sandbox runs, ledger money unchanged). Left after U21: live-verify `-rn`, nsenter refusal, `image.read`, integrity pin; record the real-run fixture.
 
 ### T25 Image-store disk check hardening (planner-merge PR) — size S — todo — after 2026-10-21
 From the Haiku review of PR #24 (0 blockers, 3 risks). In `cheatproof/executor.py` `_colima_store_free_gb` and its
@@ -331,10 +332,11 @@ Nemotron, Sandboxes and Tavily are used and where, what is real and what is repl
 `docs/feedback.md`: specific, actionable feedback on Token Factory, Sandboxes and NVIDIA models (Most Valuable
 Feedback prize).
 
-### T11 Video script and automated rough cut — size M — in-progress (cycle 2026-10-21T00:24:11-05:00) — after 2026-10-21
+### T11 Video script and automated rough cut — size M — done #29 — after 2026-10-21
 Script by Oct 21 per `docs/pitches.md` demo beats (model ID in the first 20 seconds, under 2:50). Rough cut by Oct 24:
 scripted browser recording of the report page and terminal, text-to-speech, captions, ffmpeg. No third-party marks
 or music. The owner records the final voice (U6).
+Done 2026-10-21 (#29): `docs/video/script.md` (13 beats, 2:46, result claims in `[RESULT: ...]` markers to fill from T08) and `video/rough_cut.py` (say + ffmpeg, dry-run tested only). Real rough cut after T08 results.
 
 ### T12 Fresh-clone final check and pre-flip check — size S — todo — after 2026-10-27
 Fresh clone, follow the README exactly, run tests and one replay. Pre-flip: full-history secret scan green;
@@ -351,6 +353,8 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
+- **U22 Merge PR #30** (planner-merge paths): say `review` in an interactive session to merge PR #30.
+- **U21 Sandboxes cost halt** (2026-10-21, blocks T23 and T08): the budget halted itself because a Sandboxes result reported `resources.cost != 0`. Steps: check Nebius console billing for Sandboxes today; if still free, clear the ledger `halted` field yourself and tell the planner to log the cost instead of halting; if billed, keep the halt and set a per-run price and cap. Alerted 2026-10-21.
 - ~~**U20 Review and merge PR #27 (T26 audit fixes)**~~ Done 2026-10-21: PR #27 merged (Sonnet review: 0 critical). (ready 2026-10-20; needed before T08 resumes): after U19, say
   `review` in an interactive session to merge https://github.com/manishwvn/cheatproof/pull/27 (planner-merge path
   `cheatproof/executor.py`; low-disk latch, `Result.reset`, swerebench image prefix, fsize ulimit, pull timeout).

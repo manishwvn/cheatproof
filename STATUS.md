@@ -21,11 +21,7 @@
   1332 tests.
   Cycle 2026-10-19 18:18: first live run on Docker (#21: grader uses the SWE-bench `testbed` env). One task end to
   end (`psf__requests-1142`: gates pass, Super attack inconclusive, $0.0146); batch stopped at 5.9 GB free disk (U14).
-- **Next for the routine:** 2026-10-20 19:24 cycle: T08 reran `sphinx-doc__sphinx-8595` (inconclusive at the token
-  limit, $0.034, n = 1, kept uncommitted in `../cheatproof-wt/t08-eval/results/`), then a pull grew colima's data disk
-  on the Mac and host free disk fell to 2 GB (later 0.8 GB); the run was killed (U17, alerted). T08 waits on U17,
-  U18 (PR #25 leakcheck skips public `.env.example` values) and U20 (PR #27, T26 audit fixes). PR #26 (U19) bumps
-  certifi for a new pip-audit advisory that turns the `security` check red on every branch. T11 opens 2026-10-21.
+- **Next for the routine:** 2026-10-21: T11 done (#29); T23 built (PR #30, planner merge U22), Sandboxes gold gate passes; budget halted on a reported Sandboxes cost (U21), so T08 waits on U21/U22; T25 next (executor.py, after #30).
 - **Certificates:** schema 2 since #15; schema 1 files are refused (none are committed).
 - **Planner:** T22 (U11): Docker runs are booked at $0.05 each in `budget.py`, so the $4 daily cap would halt the
   40-task Docker run near task 16; plus `llm.py` timeout, workflow pins and git-ignoring `results/traces/`.
