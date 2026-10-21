@@ -19,7 +19,9 @@ run), diffs/<stem>.<before|after>.diff with its sidecar diffs/<stem>.<before|aft
 through sanitize, one line at a time, written only when the raw sha256 matches the report's final_diff_sha256; the
 sidecar holds raw_sha256, chars and redacted_lines), and reports/<stem>.report.json (the digest-only report through
 sanitize, written only when no certificate was, and removed once a certificate is written). A symbolic link at
-traces/ or at a trace file is refused before the paid run.
+traces/ or at a trace file is refused before the paid run. When harden stops a paid run (a budget, executor or disk
+refusal), the trace stays, no certificate is written, and harden prints the spent amount as cost: $X.XXXX on stderr
+when the ledger could be read.
 batch hardens the cached selection one task at a time, with the same steps and files as harden. The selection is the
 rule tasks fetch uses (per source, the n lowest by score, deny-listed repos left out), read from the cache only:
 batch never fetches. An instance id that more than one source selects is kept once, from the first source, and each
@@ -29,7 +31,11 @@ not-run row {instance_id, reason, error} and the batch goes on. reason is execut
 (free space on --out's file system is below MIN_FREE_DISK_GB, default 10, checked before each task after the
 leftover sweep), budget, certificate_write_failed, invalid_task (the instance id cannot name a certificate, or traces/
 or the trace file is a symbolic link) or cost_check_failed (the ledger total could not be read or is not a finite
-number before the run, or after it the measured spend is not a finite number or went down).
+number before the run, or after it the measured spend is not a finite number or went down). A paid run that spent
+before it ended also gets an optional cost_usd key in its not-run row: the ledger delta of that run, measured as a
+certificate's cost is. The key is absent when no spend could be measured, so schema_version 1 readers that ignore it
+keep working. A paid run that harden stops (DiskRefused, ExecutorRefused, ExecutorUnavailable or BudgetExceeded) is
+such a run: its trace stays under traces/.
 A BudgetExceeded (a cap, a halt, or HTTP 402) or a cost_check_failed stops the batch after the current task, and
 exits 1. The current task gets that reason. Each remaining task that does not already have a certificate is marked
 not run with reason budget after a budget stop, or stopped_after_cost_check after a cost check failure. Nothing is
@@ -271,6 +277,19 @@ def _ledger_total(budget: Any) -> float | None:
         return None
 
 
+def _spent_since(budget: Any, spent_before: float) -> float | None:
+    """The ledger delta since spent_before, or None when it cannot be measured: the ledger cannot be read, or the
+    delta is not a finite number of 0 or more. Used when harden stops a paid run, so the stop keeps its own reason."""
+    try:
+        spent_after = _ledger_total(budget)
+    except (BudgetExceeded, OSError):  # an unreadable or corrupt ledger: the stop is reported, without a cost
+        return None
+    if spent_after is None:
+        return None
+    cost = spent_after - spent_before
+    return cost if math.isfinite(cost) and cost >= 0 else None
+
+
 def _usage_error(message: str) -> int:
     print(f"error: {message}", file=sys.stderr)
     return 2
@@ -469,7 +488,8 @@ class _Unwritten(Exception):
 
     stage: "start" (a setup or harden stop, or the trace could not be set aside), "cost" (the ledger could not be read
     or the spend could not be checked; after a paid run the report and diffs are kept) or "certificate" (the report and
-    diffs were kept). reason: the batch label. cost: the measured spend when the run finished, else None.
+    diffs were kept). reason: the batch label. cost: the measured spend when the paid run finished or harden stopped it
+    and the ledger could be read, else None.
     """
 
     def __init__(self, stage: str, reason: str, exc: BaseException, cost: float | None = None) -> None:
@@ -619,7 +639,9 @@ def _harden_one(
     try:
         report = deps.harden(executor, plan.env, plan.task, attack_fn, budget=budget, **settings.timeout_kw)
     except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
-        raise _Unwritten("start", _stop_reason(exc), exc) from None
+        # The attack may have spent before harden stopped (a reset after it, say): the ledger delta is kept, and the
+        # trace the attack wrote stays where it is.
+        raise _Unwritten("start", _stop_reason(exc), exc, _spent_since(budget, spent_before)) from None
     spent_after = _ledger_total(budget)
     cost = None if spent_after is None else spent_after - spent_before
     if cost is None or not (math.isfinite(cost) and cost >= 0):
@@ -696,7 +718,10 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
         done = _harden_one(plan, settings, deps, executor, budget, llm)
     except _Unwritten as exc:
         if exc.stage == "start":
-            return _failure(exc.exc)
+            code = _failure(exc.exc)
+            if exc.cost is not None:
+                print(f"cost: ${exc.cost:.4f}", file=sys.stderr)
+            return code
         if exc.stage == "cost":
             print(f"error: {exc.exc}", file=sys.stderr)
             return 1
@@ -765,9 +790,12 @@ class _Batch:
         self.save()
         print(f"{instance_id}: already has a certificate")
 
-    def not_run(self, instance_id: str, reason: str, error: str) -> None:
+    def not_run(self, instance_id: str, reason: str, error: str, cost: float | None = None) -> None:
         text = sanitize(error)[:ERROR_CHARS]
-        self.state["not_run"].append({"instance_id": instance_id, "reason": reason, "error": text})
+        row: dict[str, Any] = {"instance_id": instance_id, "reason": reason, "error": text}
+        if cost is not None:  # optional: only a paid run whose spend was measured has it
+            row["cost_usd"] = cost
+        self.state["not_run"].append(row)
         self.save()
         print(f"{instance_id}: not run ({reason}): {text}")
 
@@ -839,7 +867,7 @@ def _run_tasks(tasks: list[TaskSpec], settings: _Settings, deps: Deps, batch: _B
                 stop = ("budget", str(outcome.exc))
             elif outcome.reason == "cost_check_failed":
                 stop = ("stopped_after_cost_check", f"batch stopped after the cost check failed on {iid}")
-            batch.not_run(iid, outcome.reason, str(outcome.exc))
+            batch.not_run(iid, outcome.reason, str(outcome.exc), outcome.cost)
             continue
         batch.done(f"{iid}: run  {_harden_line(outcome.report, outcome.cost)}")
     return 1 if stop is not None else 0

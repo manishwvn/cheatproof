@@ -374,7 +374,7 @@ def test_harden_stop_errors_exit_1_without_traceback(tmp_path, capsys, error):
         raise error
 
     out = tmp_path / "certs"
-    deps = make_deps(spy, harden=failing_harden, make_budget=lambda: FakeBudget(0.0))
+    deps = make_deps(spy, harden=failing_harden, make_budget=lambda: FakeBudget(0.0, 0.0))
     rc = cli.main(
         [
             "harden",
@@ -394,6 +394,66 @@ def test_harden_stop_errors_exit_1_without_traceback(tmp_path, capsys, error):
     assert "Traceback" not in captured.err and "Traceback" not in captured.out
     assert spy.certs == []
     assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        DiskRefused("free disk is 2.0 GB, below MIN_FREE_DISK_GB=10; no container started"),
+        ExecutorRefused("reset refused"),
+        ExecutorUnavailable("docker down"),
+        BudgetExceeded("total cap $20.00 reached"),
+    ],
+    ids=["disk", "executor-refused", "executor-unavailable", "budget"],
+)
+def test_a_harden_stop_after_the_attack_prints_the_spend_and_keeps_the_trace(tmp_path, capsys, error):
+    spy = Spy()
+    out = tmp_path / "certs"
+    traces = tmp_path / "traces"
+
+    def attack(llm, session, system_prompt, task_prompt, config, trace_path=None):
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        trace_path.write_text("ATTACK-TRACE\n", encoding="utf-8")
+        return "attack-result"
+
+    def harden(executor, env, task, attack_fn, *, budget, **kwargs):
+        spy.harden_calls.append({"task": task, **kwargs})
+        attack_fn("session")  # the attack ran and wrote its trace; the reset after it is then refused
+        raise error
+
+    deps = make_deps(spy, attack=attack, harden=harden)  # FakeBudget(0.10, 0.25): the run spent 0.15
+    rc = cli.main(_harden_argv(tmp_path, out), deps=deps)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.err.splitlines() == [f"error: {type(error).__name__}: {error}", "cost: $0.1500"]
+    assert captured.out == ""
+    assert spy.certs == [] and not out.exists()
+    assert (traces / f"{INSTANCE}.jsonl").read_text(encoding="utf-8") == "ATTACK-TRACE\n"  # kept, not renamed
+    assert list(traces.glob(f"{INSTANCE}.*.jsonl.old")) == []
+
+
+def test_a_harden_stop_with_an_unreadable_ledger_keeps_its_reason_and_prints_no_cost(tmp_path, capsys):
+    class LedgerBreaksAfterTheRun:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def snapshot(self) -> dict:
+            self.reads += 1
+            if self.reads > 1:
+                raise BudgetExceeded("ledger is not valid JSON; fix it by hand")
+            return {"total_usd": 0.10, "days": {}, "sandbox_runs": 0, "halted": None}
+
+    spy = Spy()
+
+    def failing_harden(*args, **kwargs):
+        raise ExecutorRefused("reset refused")
+
+    deps = make_deps(spy, harden=failing_harden, make_budget=LedgerBreaksAfterTheRun)
+    rc = cli.main(_harden_argv(tmp_path, tmp_path / "certs"), deps=deps)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.err.splitlines() == ["error: ExecutorRefused: reset refused"]
+    assert "Traceback" not in captured.err
 
 
 def test_report_text_shows_each_rate_with_n_counts_and_upper_bound(tmp_path, capsys):
@@ -675,7 +735,7 @@ def test_error_text_is_sanitized_not_traced(tmp_path, capsys):
         deps=deps,
     )
     assert rc == 1
-    assert capsys.readouterr().err.strip() == "error: BudgetExceeded: halted"
+    assert capsys.readouterr().err.splitlines() == ["error: BudgetExceeded: halted", "cost: $0.1500"]
 
 
 def test_argparse_usage_error_returns_2(tmp_path):
@@ -1540,25 +1600,82 @@ def test_batch_skips_a_certified_task_and_runs_the_rest(tmp_path, capsys):
 
 
 @pytest.mark.parametrize(
-    ("field", "exc", "reason"),
+    ("field", "exc", "reason", "measured"),
     [
-        ("make_executor", ExecutorUnavailable("docker down"), "executor_unavailable"),
-        ("harden", ExecutorRefused("no docker"), "executor_refused"),
-        ("harden", DiskRefused("no room to pull"), "disk"),
-        ("write_certificate", OSError("disk full"), "certificate_write_failed"),
-        ("build_certificate", ValueError("bad certificate"), "certificate_write_failed"),
+        # make_executor raises before any run, so no spend is measured
+        ("make_executor", ExecutorUnavailable("docker down"), "executor_unavailable", False),
+        ("harden", ExecutorRefused("no docker"), "executor_refused", True),
+        ("harden", DiskRefused("no room to pull"), "disk", True),
+        ("write_certificate", OSError("disk full"), "certificate_write_failed", True),
+        ("build_certificate", ValueError("bad certificate"), "certificate_write_failed", True),
     ],
 )
-def test_a_task_that_cannot_run_is_a_not_run_row_and_the_batch_goes_on(tmp_path, field, exc, reason):
+def test_a_task_that_cannot_run_is_a_not_run_row_and_the_batch_goes_on(
+    tmp_path, field, exc, reason, measured
+):
     spy = Spy()
     out = out_dir(tmp_path)
     deps = batch_deps(spy, batch_tasks(ID_A, ID_B))
     deps = dataclasses.replace(deps, **{field: raise_first(exc, getattr(deps, field))})
     assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0
     state = read_batch(out)
-    assert state["not_run"] == [{"instance_id": ID_A, "reason": reason, "error": str(exc)}]
+    row = {"instance_id": ID_A, "reason": reason, "error": str(exc)}
+    if measured:  # the fake ledger went from 0.10 to 0.25 during the run, so the row carries that delta
+        row["cost_usd"] = pytest.approx(0.15)
+    assert state["not_run"] == [row]
     assert (state["run"], state["already_certified"]) == (1, 0)
     assert (out / certify.certificate_filename(ID_B)).is_file()
+
+
+def test_a_batch_task_stopped_after_its_attack_keeps_its_cost_and_its_trace(tmp_path):
+    spy = Spy()
+    out = out_dir(tmp_path)
+    traces = out.parent / "traces"
+    stem = Path(certify.certificate_filename(ID_A)).stem
+    exc = DiskRefused("no room to reset")
+
+    def attack(llm, session, system_prompt, task_prompt, config, trace_path=None):
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        trace_path.write_text(f"TRACE {trace_path.name}\n", encoding="utf-8")
+        return "attack-result"
+
+    def harden(executor, env, task, attack_fn, *, budget, **kwargs):
+        spy.harden_calls.append({"task": task, **kwargs})
+        attack_fn("session")  # the attack ran; the reset after it is refused for ID_A only
+        if task.instance_id == ID_A:
+            raise exc
+        return dataclasses.replace(make_report(), instance_id=task.instance_id)
+
+    deps = batch_deps(spy, batch_tasks(ID_A, ID_B), attack=attack, harden=harden)
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0
+    state = read_batch(out)
+    assert state["not_run"] == [
+        {"instance_id": ID_A, "reason": "disk", "error": str(exc), "cost_usd": pytest.approx(0.15)}
+    ]
+    assert (state["run"], state["already_certified"]) == (1, 0)
+    assert (traces / f"{stem}.jsonl").read_text(encoding="utf-8") == f"TRACE {stem}.jsonl\n"  # not renamed
+    assert list(traces.glob(f"{stem}.*.jsonl.old")) == []
+    assert (out / certify.certificate_filename(ID_B)).is_file()
+
+
+def test_a_batch_stop_with_an_unreadable_ledger_is_a_row_without_a_cost(tmp_path):
+    class LedgerBreaksAfterTheRun:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def snapshot(self) -> dict:
+            self.reads += 1
+            if self.reads > 1:
+                raise BudgetExceeded("ledger is not valid JSON; fix it by hand")
+            return {"total_usd": 0.10, "days": {}, "sandbox_runs": 0, "halted": None}
+
+    spy = Spy()
+    out = out_dir(tmp_path)
+    deps = batch_deps(spy, batch_tasks(ID_A), make_budget=LedgerBreaksAfterTheRun)
+    deps = dataclasses.replace(deps, harden=harden_stopping_at(spy, ID_A, ExecutorRefused("reset refused")))
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0
+    (row,) = read_batch(out)["not_run"]
+    assert row == {"instance_id": ID_A, "reason": "executor_refused", "error": "reset refused"}
 
 
 @pytest.mark.parametrize(

@@ -3,8 +3,9 @@
 Local Docker runs each session in a container with no network (unless EnvSpec asks), CPU, memory
 and PID limits, and no host mounts. Files reach the container over stdin. Token Factory Sandboxes
 is a stub until access is granted (U3). Every Docker session start, including a reset, counts one
-local run in cheatproof/budget.py before the container exists. Local runs are free and count only
-toward LOCAL_RUN_CAP. A paid Sandboxes session must reserve a sandbox run instead.
+local run in cheatproof/budget.py after any pull and before the container exists, so a failed pull counts
+none. Local runs are free and count only toward LOCAL_RUN_CAP. A paid Sandboxes session must reserve a
+sandbox run instead.
 """
 
 from __future__ import annotations
@@ -43,8 +44,11 @@ DAEMON_WAIT_S = 120
 DAEMON_POLL_S = 5
 DAEMON_CHECK_TIMEOUT_S = 30
 IO_TIMEOUT_S = 120
-RUN_TIMEOUT_S = 900  # docker run may pull an image first
+RUN_TIMEOUT_S = 900  # docker run of an image that is already local (the pull has its own clock)
+PULL_TIMEOUT_S = 1800  # a task image is about 4 GB unpacked; a slow pull must not hit the run timeout
 DESTROY_TIMEOUT_S = 60
+# Largest single file a container process may write (RLIMIT_FSIZE), in GiB. Env CONTAINER_FSIZE_GB overrides it.
+CONTAINER_FSIZE_GB = 4.0
 GIB = 1024**3
 READ_CHUNK = 64 * 1024
 PIPE_POLL_S = 0.05
@@ -114,13 +118,16 @@ class DiskRefused(ExecutorRefused):
 
 
 # Task images this project pulls (SWE-bench eval images, about 4 GB each unpacked). Only these are ever removed.
-TASK_IMAGE_PREFIX = "swebench/"
+# Same namespaces as cheatproof.tasks.ALLOWED_IMAGE_PREFIXES; tasks imports this module, so it is repeated here.
+TASK_IMAGE_PREFIXES = ("swebench/", "swerebench/")
 
 
 def is_task_image(image: str) -> bool:
-    # One name segment after the prefix, the same set `docker images --filter reference=swebench/*` counts.
-    rest = image[len(TASK_IMAGE_PREFIX) :]
-    return image.startswith(TASK_IMAGE_PREFIX) and bool(rest) and "/" not in rest
+    # One name segment after a prefix, the same set the `docker images --filter reference=<prefix>*` calls count.
+    return any(
+        image.startswith(prefix) and len(image) > len(prefix) and "/" not in image[len(prefix) :]
+        for prefix in TASK_IMAGE_PREFIXES
+    )
 
 
 class ExecutorUnavailable(RuntimeError):
@@ -303,8 +310,10 @@ class Session(ABC):
     def run(self, cmd: str, timeout: float) -> Result:
         """Run cmd with `sh -lc` in the workdir. timeout must be > 0 and is capped at MAX_RUN_TIMEOUT_S.
 
-        The command gets exit 124 when the container timeout fires. If the host had to kill the client,
-        the result has timed_out=True and the sandbox has been reset. Output is capped per stream.
+        The command gets exit 124 when the container timeout fires. If the host had to kill the client, at its
+        timeout or at its output cap, the sandbox has been reset. Output is capped per stream. After each run
+        the free disk is checked: below MIN_FREE_DISK_GB the sandbox is reset, and if the disk is still low,
+        DiskRefused is raised.
         """
 
     @abstractmethod
@@ -334,6 +343,13 @@ class Session(ABC):
 
 class Executor(Protocol):
     def start(self, env: EnvSpec, budget: Budget | None = None) -> Session: ...
+
+
+# Names of containers this process started and could not remove: a close that failed, or a cleanup after a failed
+# start. Their sessions have given up on them. The next task-start sweep and every image release remove them by
+# name, and a close retry that finds one already gone counts as closed. Module-level on purpose: each task opens
+# its own executor, and the sweep at the next task start has to see what an earlier one left behind.
+_LEAKED: set[str] = set()
 
 
 class DockerExecutor:
@@ -373,6 +389,7 @@ class DockerExecutor:
         )
         # Clamped, not refused: a larger tmpfs would take more of the container memory limit.
         self._tmpfs_mb = min(_env_min_one("DOCKER_TMPFS_MB", 512, int), TMPFS_MAX_MB)
+        self._fsize_bytes = int(_env_min_one("CONTAINER_FSIZE_GB", CONTAINER_FSIZE_GB, float) * GIB)
         self._pid = pid if pid is not None else os.getpid  # owner of the containers this process starts
         self._platform = platform
         self._sleep = sleep
@@ -413,7 +430,9 @@ class DockerExecutor:
                 "no container started"
             )
 
-    def _preflight(self, image: str) -> None:
+    def _ensure_image(self, image: str) -> None:
+        """Make the image local. A local image needs nothing. Otherwise the guards run first, so a refusal pulls
+        nothing, then docker pull on its own clock. A failed pull is ExecutorUnavailable."""
         # Only a pull needs the image-count guard. A local image starts with no image-count check.
         if self._docker(["image", "inspect", "--", image], IO_TIMEOUT_S).exit_code == 0:
             return
@@ -423,8 +442,7 @@ class DockerExecutor:
                 f"{image} is not local and {count} images are present, at DOCKER_IMAGE_CAP="
                 f"{self._image_cap}; nothing pulled, nothing deleted"
             )
-        store = self._image_store_free_gb()
-        free, where = (self._disk_free_gb(), "host") if store is None else (store, "Docker image store")
+        free, where = self._store_free()
         if free - self._pull_estimate_gb < self._min_free_gb:
             raise DiskRefused(
                 f"{image} is not local: free {where} disk is {free:.1f} GB, and a pull of about "
@@ -438,12 +456,23 @@ class DockerExecutor:
                     f"{image} is not local and {tasks} task images are present, at TASK_IMAGE_CAP="
                     f"{self._task_image_cap}; release finished task images first; nothing pulled"
                 )
+        res = self._docker(["pull", "--", image], PULL_TIMEOUT_S)
+        if res.exit_code != 0:
+            raise ExecutorUnavailable(f"docker pull failed ({res.exit_code}): {res.stderr.strip()[-500:]}")
+
+    def _store_free(self) -> tuple[float, str]:
+        """Free GB where pulls and containers land: the colima VM's image store, or the host when there is none."""
+        store = self._image_store_free_gb()
+        if store is None:
+            return self._disk_free_gb(), "host"
+        return store, "Docker image store"
 
     def _colima_store_free_gb(self) -> float | None:
         """Free GiB of /var/lib/docker inside the colima VM, or None when colima is not there (then the host counts)."""
+        # ExecutorUnavailable is subprocess_runner's answer when colima is missing from PATH.
         try:
             res = self._runner(["colima", "ssh", "--", "df", "-Pk", "/var/lib/docker"], IO_TIMEOUT_S, None)
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError, ExecutorUnavailable):
             return None
         if res.exit_code != 0:
             return None
@@ -455,16 +484,22 @@ class DockerExecutor:
         return available_kib * 1024 / GIB
 
     def _task_image_count(self) -> int:
-        res = self._docker(["images", "-q", "--filter", f"reference={TASK_IMAGE_PREFIX}*"], IO_TIMEOUT_S)
+        filters: list[str] = []
+        for prefix in TASK_IMAGE_PREFIXES:
+            filters += ["--filter", f"reference={prefix}*"]
+        res = self._docker(["images", "-q", *filters], IO_TIMEOUT_S)
         if res.exit_code != 0:
             raise ExecutorUnavailable(f"docker images failed: {res.stderr.strip()[-300:]}")
         return len({line.strip() for line in res.stdout.splitlines() if line.strip()})
 
     def release_image(self, image: str) -> bool:
-        """Remove a finished task image to free disk. Only task images (TASK_IMAGE_PREFIX); never another project's
-        image, never forced (an image a container still uses stays). True when it was removed."""
+        """Remove a finished task image to free disk. Only task images (TASK_IMAGE_PREFIXES); never another project's
+        image. The image removal is never forced: a container that still uses the image keeps it. Containers this
+        process could not remove are removed first (see _LEAKED), since they would keep it in use. True when the
+        image was removed."""
         if not is_task_image(image):
             return False
+        self._remove_leaked()
         return self._docker(["image", "rm", "--", image], DESTROY_TIMEOUT_S).exit_code == 0
 
     def _local_image_count(self) -> int:
@@ -509,6 +544,9 @@ class DockerExecutor:
             "no-new-privileges",
             "--ulimit",
             "nofile=1024:1024",
+            # One file may not grow past this. The free-space check after each run() bounds the total.
+            "--ulimit",
+            f"fsize={self._fsize_bytes}",
             "--workdir",
             env.workdir,
             "--",  # docker's flag parser (pflag) stops at --, so the image is always positional
@@ -529,9 +567,26 @@ class DockerExecutor:
 
     def _remove_quietly(self, name: str) -> None:
         """docker rm -f after a failed start. Errors are dropped so the original error reaches the caller.
-        A leftover is still findable by its cheatproof=1 label."""
+        A container that is still there is recorded in _LEAKED, so a later sweep or image release removes it."""
+        gone = False
         with contextlib.suppress(Exception):
-            self._docker(["rm", "-f", name], DESTROY_TIMEOUT_S)
+            res = self._docker(["rm", "-f", name], DESTROY_TIMEOUT_S)
+            gone = res.exit_code == 0 or "No such container" in res.stderr
+        if not gone:
+            _LEAKED.add(name)
+
+    def _remove_leaked(self) -> int:
+        """docker rm -f for each name in _LEAKED. A name that docker reports gone leaves _LEAKED; one that still
+        fails stays for the next try. Returns how many docker rm removed. Containers only, never images."""
+        removed = 0
+        for name in sorted(_LEAKED):
+            with contextlib.suppress(Exception):  # the name stays in _LEAKED for the next try
+                res = self._docker(["rm", "-f", name], DESTROY_TIMEOUT_S)
+                if res.exit_code == 0:
+                    removed += 1
+                if res.exit_code == 0 or "No such container" in res.stderr:
+                    _LEAKED.discard(name)
+        return removed
 
     def _owner_alive(self, owner: str) -> bool:
         """True only for a pid this host has alive. A missing or garbage label is not alive."""
@@ -552,10 +607,11 @@ class DockerExecutor:
 
     def sweep_leftovers(self) -> int:
         """Stop and remove cheatproof=1 containers whose cheatproof.owner pid is dead on this host, or whose
-        owner label is missing or garbage. A live owner's container is kept, so a concurrent harden is not
-        killed. Returns how many docker rm reported removed. Containers only: never images, volumes or the
-        build cache. Best-effort: a docker error returns 0 and leaves the containers for the next sweep."""
-        removed = 0
+        owner label is missing or garbage, and the containers this process could not remove (_LEAKED), by name.
+        A live owner's container is kept, so a concurrent harden is not killed. Returns how many docker rm reported
+        removed. Containers only: never images, volumes or the build cache. Best-effort: a docker error returns 0
+        and leaves the containers for the next sweep."""
+        removed = self._remove_leaked()
         with contextlib.suppress(Exception):
             listed = self._docker(
                 ["ps", "-a", "--filter", "label=cheatproof=1", "--format", SWEEP_FORMAT], IO_TIMEOUT_S
@@ -567,7 +623,7 @@ class DockerExecutor:
                     if fields and not self._owner_alive(fields[1] if len(fields) > 1 else ""):
                         dead.append(fields[0])
             if dead:
-                removed = len(self._docker(["rm", "-f", *dead], DESTROY_TIMEOUT_S).stdout.split())
+                removed += len(self._docker(["rm", "-f", *dead], DESTROY_TIMEOUT_S).stdout.split())
         return removed
 
     def _base_commit(self, cid: str, workdir: str) -> str:
@@ -604,9 +660,9 @@ class DockerSession(Session):
     def _launch(self) -> None:
         self._executor._check_free_disk()  # first: a refusal never opens Docker Desktop
         self._executor._ensure_daemon()
-        self._executor._preflight(self._env.image)
+        self._executor._ensure_image(self._env.image)  # guards, then pull: a failed pull counts no run
         # Local Docker is free: books $0 and counts only toward LOCAL_RUN_CAP, not the money caps.
-        self._budget.reserve_local_run()  # before the container exists; BudgetExceeded propagates
+        self._budget.reserve_local_run()  # after any pull, before the container exists; BudgetExceeded propagates
         self._name, self._cid = self._executor._create(self._env)
         self._base = ""
         self._untracked = None
@@ -629,11 +685,18 @@ class DockerSession(Session):
         if self._name is None:
             return
         # docker rm -f kills the container. "No such container" means --rm already removed it.
-        res = self._executor._docker(["rm", "-f", self._name], DESTROY_TIMEOUT_S)
+        try:
+            res = self._executor._docker(["rm", "-f", self._name], DESTROY_TIMEOUT_S)
+        except BaseException:
+            # Not confirmed removed: a later sweep or image release removes it by name.
+            _LEAKED.add(self._name)
+            raise
         if res.exit_code != 0 and "No such container" not in res.stderr:
+            _LEAKED.add(self._name)
             raise RuntimeError(
                 f"docker rm -f {self._name} failed ({res.exit_code}): {res.stderr.strip()[-300:]}"
             )
+        _LEAKED.discard(self._name)
         self._name = None
         self._cid = None
 
@@ -648,14 +711,31 @@ class DockerSession(Session):
         res = self._executor._docker(
             ["exec", cid, "sh", "-lc", script, "cheatproof", cmd], limit + EXEC_GRACE_S
         )
-        if res.timed_out:
-            # The host killed docker exec, so the command may still run in the container. reset() removes
-            # that container and every process in it. Files written earlier in this session are lost,
-            # and the reset reserves one more sandbox run.
+        if res.timed_out or (res.truncated and res.exit_code == OUTPUT_KILL_EXIT_CODE):
+            # The host killed docker exec, at its timeout or at its output cap, so the command may still run in the
+            # container. reset() removes that container and every process in it. Files written earlier in this
+            # session are lost, and the reset reserves one more sandbox run.
             self.reset()
+        self._check_disk_after_run()
         stdout, out_cut = _cap(res.stdout)
         stderr, err_cut = _cap(res.stderr)
         return replace(res, stdout=stdout, stderr=stderr, truncated=res.truncated or out_cut or err_cut)
+
+    def _check_disk_after_run(self) -> None:
+        """One free-space check per run(). A command can fill the Docker disk, so below MIN_FREE_DISK_GB the
+        sandbox is reset, which removes its writable layer and whatever it wrote. Still low after the reset:
+        DiskRefused. The check after the reset is the second and last one for this run()."""
+        executor = self._executor
+        free, _ = executor._store_free()
+        if free >= executor._min_free_gb:
+            return
+        self.reset()
+        free, where = executor._store_free()
+        if free < executor._min_free_gb:
+            raise DiskRefused(
+                f"free {where} disk is {free:.1f} GB after a reset, below MIN_FREE_DISK_GB="
+                f"{executor._min_free_gb:g}; this task stops here"
+            )
 
     def write_file(self, path: str, data: bytes | str) -> None:
         payload = data.encode("utf-8") if isinstance(data, str) else data
