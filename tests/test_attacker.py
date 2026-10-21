@@ -8,9 +8,9 @@ from types import SimpleNamespace
 import pytest
 
 from cheatproof import attacker
-from cheatproof.attacker import NUDGE, AttackConfig, attack, build_tools
+from cheatproof.attacker import CAP_RESET_NOTE, NUDGE, AttackConfig, attack, build_tools
 from cheatproof.budget import Budget, BudgetExceeded
-from cheatproof.executor import Result, Session
+from cheatproof.executor import DiskRefused, ExecutorRefused, ExecutorUnavailable, Result, Session
 from cheatproof.llm import MAX_OUTPUT_TOKENS, GuardedLLM, estimate_tokens
 
 SYSTEM = "SYSTEM-PROMPT-FROM-CALLER"
@@ -216,6 +216,62 @@ def test_host_timeout_tells_the_model_the_sandbox_was_reset(name, args, tmp_path
     assert second.startswith("exit_code: 0") and "sandbox was reset" not in second
     assert [s["reset"] for s in result.steps] == [True, False, False]
     assert [line["reset"] for line in read_trace(trace) if line["type"] == "step"] == [True, False, False]
+
+
+@pytest.mark.parametrize(
+    ("name", "args"), [("run", {"cmd": "cat huge.log"}), ("read_file", {"path": "huge.log"})]
+)
+def test_output_cap_reset_tells_the_model_and_marks_the_step(name, args, tmp_path):
+    # The executor kills a command that prints past its cap and resets the sandbox, as it does on a timeout.
+    outcomes = [Result(137, "partial", "", 0.0, truncated=True, reset=True), Result(0, "ok", "", 0.0)]
+    trace = tmp_path / "trace.jsonl"
+    session = FakeSession(run_handler=lambda cmd, timeout: outcomes.pop(0))
+    result, llm, _ = go(
+        [reply(call(name, args, "c1")), reply(call("run", {"cmd": "ls"}, "c2")), reply(call("submit"))],
+        session=session,
+        trace_path=trace,
+    )
+    first, second = tool_texts(llm, 1)[0], tool_texts(llm, 2)[1]
+    assert first.startswith(CAP_RESET_NOTE)
+    assert "Files written earlier in this attempt are lost" in first
+    assert "exit_code: 137 (output truncated)" in first and "timed out" not in first
+    assert second.startswith("exit_code: 0") and "sandbox was reset" not in second
+    assert [s["reset"] for s in result.steps] == [True, False, False]
+    assert [line["reset"] for line in read_trace(trace) if line["type"] == "step"] == [True, False, False]
+
+
+@pytest.mark.parametrize(
+    ("exc", "code"),
+    [
+        (DiskRefused("free disk is 1.5 GB after a run, below RUN_MIN_FREE_GB=2"), "executor_refused"),
+        (ExecutorRefused("free disk is 5.0 GB, below MIN_FREE_DISK_GB=10"), "executor_refused"),
+        (ExecutorUnavailable("docker daemon is down"), "executor_unavailable"),
+    ],
+    ids=["disk-refused", "executor-refused", "executor-unavailable"],
+)
+def test_executor_stop_from_a_tool_is_reraised_and_traced_not_turned_into_a_tool_error(exc, code, tmp_path):
+    def stop(cmd, timeout):
+        raise exc
+
+    trace = tmp_path / "trace.jsonl"
+    llm = FakeLLM([reply(call("run", {"cmd": "ls"})), reply(call("submit"))])
+    with pytest.raises(type(exc)):
+        attack(llm, FakeSession(run_handler=stop), SYSTEM, TASK, CFG, trace_path=trace)
+    lines = read_trace(trace)
+    assert lines[-2]["tool"] == "run" and lines[-2]["error"] == code
+    assert lines[-1]["type"] == "end" and lines[-1]["stop_reason"] == "error"
+    assert len(llm.calls) == 1  # no model call after the stop
+
+
+def test_disk_refused_from_write_file_is_reraised(tmp_path):
+    class FullDisk(FakeSession):
+        def write_file(self, path, data):
+            raise DiskRefused("free disk is 1.5 GB after a run, below RUN_MIN_FREE_GB=2")
+
+    llm = FakeLLM([reply(call("write_file", {"path": "a.py", "content": "x"})), reply(call("submit"))])
+    with pytest.raises(DiskRefused):
+        attack(llm, FullDisk(), SYSTEM, TASK, CFG)
+    assert len(llm.calls) == 1
 
 
 def test_write_file_allows_empty_content():
@@ -622,6 +678,15 @@ def test_budget_exceeded_from_the_diff_still_propagates(tmp_path):
     with pytest.raises(BudgetExceeded, match="total cap"):
         go([reply(call("submit"))], session=session, trace_path=trace)
     assert read_trace(trace)[-1]["stop_reason"] == "budget"
+
+
+def test_disk_refused_from_the_diff_is_reraised_and_traced(tmp_path):
+    trace = tmp_path / "trace.jsonl"
+    session = FakeSession(diff_error=DiskRefused("free disk is 1.5 GB after a run, below RUN_MIN_FREE_GB=2"))
+    with pytest.raises(DiskRefused):
+        go([reply(call("submit"))], session=session, trace_path=trace)
+    end = read_trace(trace)[-1]
+    assert end["type"] == "end" and end["stop_reason"] == "error" and "DiskRefused" in end["error"]
 
 
 # --- trace ---

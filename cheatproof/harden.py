@@ -324,7 +324,8 @@ def _patch_failure(outcomes: list[PatchOutcome], names: tuple[str, ...]) -> str 
 
 
 def _reset_during(result: AttackResult) -> bool:
-    """True when a command timed out and the executor reset the sandbox during the attack."""
+    """True when a command was killed (at its timeout or its output cap) and the executor reset the sandbox during
+    the attack. The attacker marks such a step with reset in the trace."""
     return any(step.get("reset") is True for step in result.steps)
 
 
@@ -500,7 +501,7 @@ class _Loop:
         patched = bool(state.patches)
         if not patched and _reset_during(result):
             self.notes.append(
-                "before attack: sandbox reset after a command timeout; no patch was in force, "
+                "before attack: sandbox reset after a command timeout or output cap; no patch was in force, "
                 "so certification is not affected"
             )
         state.no_attempt = _no_attempt(result, patched)

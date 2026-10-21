@@ -3,9 +3,9 @@
 Local Docker runs each session in a container with no network (unless EnvSpec asks), CPU, memory
 and PID limits, and no host mounts. Files reach the container over stdin. Token Factory Sandboxes
 is a stub until access is granted (U3). Every Docker session start, including a reset, counts one
-local run in cheatproof/budget.py after any pull and before the container exists, so a failed pull counts
-none. Local runs are free and count only toward LOCAL_RUN_CAP. A paid Sandboxes session must reserve a
-sandbox run instead.
+local run in cheatproof/budget.py before any pull and before the container exists. So a spent LOCAL_RUN_CAP
+never pulls an image, and a failed pull still counts its run. Local runs are free and count only toward
+LOCAL_RUN_CAP. A paid Sandboxes session must reserve a sandbox run instead.
 """
 
 from __future__ import annotations
@@ -49,6 +49,11 @@ PULL_TIMEOUT_S = 1800  # a task image is about 4 GB unpacked; a slow pull must n
 DESTROY_TIMEOUT_S = 60
 # Largest single file a container process may write (RLIMIT_FSIZE), in GiB. Env CONTAINER_FSIZE_GB overrides it.
 CONTAINER_FSIZE_GB = 4.0
+# Free GB after a run below which the session is poisoned (DiskRefused). Env RUN_MIN_FREE_GB overrides it. It is lower
+# than MIN_FREE_DISK_GB, the floor for starts and pulls, so a healthy run right after a pull does not trip it.
+RUN_MIN_FREE_GB = 2.0
+# The post-run free-disk check runs at most once per this many seconds in a session. The first run always checks.
+POST_RUN_CHECK_INTERVAL_S = 30
 GIB = 1024**3
 READ_CHUNK = 64 * 1024
 PIPE_POLL_S = 0.05
@@ -114,7 +119,8 @@ class ExecutorRefused(RuntimeError):
 
 
 class DiskRefused(ExecutorRefused):
-    """A pull was refused because the free disk left after it would fall under MIN_FREE_DISK_GB. Skip the task."""
+    """The disk is too low for the next step: a pull would leave less than MIN_FREE_DISK_GB, or a run left less than
+    RUN_MIN_FREE_GB. After such a run the session is poisoned, and every later call on it raises this too."""
 
 
 # Task images this project pulls (SWE-bench eval images, about 4 GB each unpacked). Only these are ever removed.
@@ -157,6 +163,8 @@ class Result:
     duration: float
     timed_out: bool = False  # the host killed the client at its timeout
     truncated: bool = False  # output was cut at a cap; diff() raises instead of setting this
+    # The host killed the client, at its timeout or at its output cap, and run() reset the sandbox. Set by run() only.
+    reset: bool = False
 
 
 # argv (no shell), timeout in seconds, stdin -> Result. The runner enforces the timeout.
@@ -304,16 +312,20 @@ def _env_min_one[N: (int, float)](name: str, default: N, cast: Callable[[str], N
 
 
 class Session(ABC):
-    """One running sandbox. Use as a context manager so it is always closed."""
+    """One running sandbox. Use as a context manager so it is always closed.
+
+    A session whose post-run disk check failed is poisoned: run, write_file, diff and reset raise DiskRefused from then
+    on. close still removes the sandbox.
+    """
 
     @abstractmethod
     def run(self, cmd: str, timeout: float) -> Result:
         """Run cmd with `sh -lc` in the workdir. timeout must be > 0 and is capped at MAX_RUN_TIMEOUT_S.
 
         The command gets exit 124 when the container timeout fires. If the host had to kill the client, at its
-        timeout or at its output cap, the sandbox has been reset. Output is capped per stream. After each run
-        the free disk is checked: below MIN_FREE_DISK_GB the sandbox is reset, and if the disk is still low,
-        DiskRefused is raised.
+        timeout or at its output cap, the sandbox has been reset and the result has reset=True. Output is capped per
+        stream. After a run the free disk is checked (not on every run, see POST_RUN_CHECK_INTERVAL_S). Below
+        RUN_MIN_FREE_GB, DiskRefused is raised and the session is poisoned. Nothing is reset on that path.
         """
 
     @abstractmethod
@@ -328,7 +340,8 @@ class Session(ABC):
 
     @abstractmethod
     def reset(self) -> None:
-        """Destroy the sandbox and start a fresh one from the same image. Reserves one sandbox run."""
+        """Destroy the sandbox and start a fresh one from the same image. Reserves one sandbox run. A poisoned session
+        raises DiskRefused instead."""
 
     @abstractmethod
     def close(self) -> None:
@@ -361,6 +374,7 @@ class DockerExecutor:
         runner: Runner = subprocess_runner,
         disk_free_gb: Callable[[], float] = _root_free_gb,
         min_free_gb: float | None = None,
+        run_min_free_gb: float | None = None,
         image_cap: int | None = None,
         task_image_cap: int | None = None,
         pull_estimate_gb: float | None = None,
@@ -374,6 +388,11 @@ class DockerExecutor:
         self._disk_free_gb = disk_free_gb
         self._min_free_gb = (
             min_free_gb if min_free_gb is not None else _env_min_one("MIN_FREE_DISK_GB", 10.0, float)
+        )
+        self._run_min_free_gb = (
+            run_min_free_gb
+            if run_min_free_gb is not None
+            else _env_min_one("RUN_MIN_FREE_GB", RUN_MIN_FREE_GB, float)
         )
         self._image_cap = image_cap if image_cap is not None else _env_min_one("DOCKER_IMAGE_CAP", 6, int)
         # At most this many task images on disk at once, and the disk an unknown pull is assumed to take.
@@ -430,12 +449,12 @@ class DockerExecutor:
                 "no container started"
             )
 
-    def _ensure_image(self, image: str) -> None:
-        """Make the image local. A local image needs nothing. Otherwise the guards run first, so a refusal pulls
-        nothing, then docker pull on its own clock. A failed pull is ExecutorUnavailable."""
+    def _preflight(self, image: str) -> bool:
+        """The guards for a start, before any pull. True when the image is not local and must be pulled. A local
+        image needs nothing and gets no guard. A refusal raises here, so it pulls nothing."""
         # Only a pull needs the image-count guard. A local image starts with no image-count check.
         if self._docker(["image", "inspect", "--", image], IO_TIMEOUT_S).exit_code == 0:
-            return
+            return False
         count = self._local_image_count()
         if count >= self._image_cap:
             raise ExecutorRefused(
@@ -456,6 +475,10 @@ class DockerExecutor:
                     f"{image} is not local and {tasks} task images are present, at TASK_IMAGE_CAP="
                     f"{self._task_image_cap}; release finished task images first; nothing pulled"
                 )
+        return True
+
+    def _pull(self, image: str) -> None:
+        """docker pull on its own clock (PULL_TIMEOUT_S). A failed pull is ExecutorUnavailable."""
         res = self._docker(["pull", "--", image], PULL_TIMEOUT_S)
         if res.exit_code != 0:
             raise ExecutorUnavailable(f"docker pull failed ({res.exit_code}): {res.stderr.strip()[-500:]}")
@@ -655,14 +678,20 @@ class DockerSession(Session):
         # Start list of untracked paths, NUL-terminated. Held here on the host, never read back from the container.
         self._untracked: bytes | None = None
         self._closed = False
+        # Set when the post-run disk check found the disk low. From then on every call but close raises it.
+        self._poisoned: str | None = None
+        self._last_disk_check: float | None = None  # clock reading of the last post-run check
         self._launch()
 
     def _launch(self) -> None:
         self._executor._check_free_disk()  # first: a refusal never opens Docker Desktop
         self._executor._ensure_daemon()
-        self._executor._ensure_image(self._env.image)  # guards, then pull: a failed pull counts no run
+        # The guards come first: a refusal pulls nothing and counts no run. pull says whether the image must be pulled.
+        pull = self._executor._preflight(self._env.image)
         # Local Docker is free: books $0 and counts only toward LOCAL_RUN_CAP, not the money caps.
-        self._budget.reserve_local_run()  # after any pull, before the container exists; BudgetExceeded propagates
+        self._budget.reserve_local_run()  # before any pull and the container; BudgetExceeded propagates
+        if pull:
+            self._executor._pull(self._env.image)  # its own clock; a failed pull is ExecutorUnavailable
         self._name, self._cid = self._executor._create(self._env)
         self._base = ""
         self._untracked = None
@@ -674,7 +703,12 @@ class DockerSession(Session):
             self._name = self._cid = None
             raise
 
+    def _check_poisoned(self) -> None:
+        if self._poisoned is not None:
+            raise DiskRefused(self._poisoned)
+
     def _live(self) -> str:
+        self._check_poisoned()
         if self._closed:
             raise RuntimeError("session is closed")
         if self._cid is None:
@@ -711,7 +745,8 @@ class DockerSession(Session):
         res = self._executor._docker(
             ["exec", cid, "sh", "-lc", script, "cheatproof", cmd], limit + EXEC_GRACE_S
         )
-        if res.timed_out or (res.truncated and res.exit_code == OUTPUT_KILL_EXIT_CODE):
+        killed = res.timed_out or (res.truncated and res.exit_code == OUTPUT_KILL_EXIT_CODE)
+        if killed:
             # The host killed docker exec, at its timeout or at its output cap, so the command may still run in the
             # container. reset() removes that container and every process in it. Files written earlier in this
             # session are lost, and the reset reserves one more sandbox run.
@@ -719,23 +754,28 @@ class DockerSession(Session):
         self._check_disk_after_run()
         stdout, out_cut = _cap(res.stdout)
         stderr, err_cut = _cap(res.stderr)
-        return replace(res, stdout=stdout, stderr=stderr, truncated=res.truncated or out_cut or err_cut)
+        return replace(
+            res, stdout=stdout, stderr=stderr, truncated=res.truncated or out_cut or err_cut, reset=killed
+        )
 
     def _check_disk_after_run(self) -> None:
-        """One free-space check per run(). A command can fill the Docker disk, so below MIN_FREE_DISK_GB the
-        sandbox is reset, which removes its writable layer and whatever it wrote. Still low after the reset:
-        DiskRefused. The check after the reset is the second and last one for this run()."""
+        """The free-space check after a run. A command can fill the Docker disk. Below RUN_MIN_FREE_GB the session
+        is poisoned and DiskRefused is raised. Nothing is reset on this path: the sandbox and what it wrote stay as
+        they are, and every later call except close is refused. The check runs at most once per
+        POST_RUN_CHECK_INTERVAL_S, and always on the first run of the session."""
         executor = self._executor
-        free, _ = executor._store_free()
-        if free >= executor._min_free_gb:
+        now = executor._clock()
+        if self._last_disk_check is not None and now - self._last_disk_check < POST_RUN_CHECK_INTERVAL_S:
             return
-        self.reset()
+        self._last_disk_check = now
         free, where = executor._store_free()
-        if free < executor._min_free_gb:
-            raise DiskRefused(
-                f"free {where} disk is {free:.1f} GB after a reset, below MIN_FREE_DISK_GB="
-                f"{executor._min_free_gb:g}; this task stops here"
-            )
+        if free >= executor._run_min_free_gb:
+            return
+        self._poisoned = (
+            f"free {where} disk is {free:.1f} GB after a run, below RUN_MIN_FREE_GB="
+            f"{executor._run_min_free_gb:g}; this session is refused from here on (nothing was reset)"
+        )
+        raise DiskRefused(self._poisoned)
 
     def write_file(self, path: str, data: bytes | str) -> None:
         payload = data.encode("utf-8") if isinstance(data, str) else data
@@ -781,6 +821,7 @@ class DockerSession(Session):
         return res.stdout
 
     def reset(self) -> None:
+        self._check_poisoned()
         if self._closed:
             raise RuntimeError("session is closed")
         self._destroy()

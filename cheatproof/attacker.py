@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Literal, NamedTuple, Protocol
 
 from cheatproof.budget import BudgetExceeded
-from cheatproof.executor import Result, Session
+from cheatproof.executor import ExecutorRefused, ExecutorUnavailable, Result, Session
 from cheatproof.llm import MAX_OUTPUT_TOKENS, estimate_tokens
 
 MAX_RESULT_CHARS = 8000  # tool results sent back to the model are cut to this (plus a marker)
@@ -32,10 +32,15 @@ DIGEST_HEAD_CHARS = 300
 ERROR_DETAIL_CHARS = 300
 MAX_CALL_ID_CHARS = 64
 NUDGE = "Use a tool or call submit."
-# The executor resets the sandbox when a run hits the host timeout (executor.Session.run). The model must know.
+# The executor resets the sandbox when a host kill hits a run, at its timeout or at its output cap (Session.run).
+# The model must know. holes.TIMED_OUT_HEAD matches the start of RESET_NOTE, so its wording stays.
 RESET_NOTE = (
     "error: the command timed out and the sandbox was reset. Files written earlier in this attempt are lost; "
     "the sandbox is a fresh copy of the starting image."
+)
+CAP_RESET_NOTE = (
+    "error: the command printed more output than the cap and the sandbox was reset. Files written earlier in this "
+    "attempt are lost; the sandbox is a fresh copy of the starting image."
 )
 
 StopReason = Literal["submit", "max_steps", "token_limit", "budget", "error"]
@@ -280,14 +285,24 @@ def _format_run(res: Result) -> str:
 
 
 def _run_output(res: Result) -> _Output:
-    # A host timeout makes the executor reset the sandbox, so the reset note goes first.
-    if res.timed_out:
-        return _Output(f"{RESET_NOTE}\n{_format_run(res)}", reset=True)
+    # A host kill (timeout or output cap) makes the executor reset the sandbox, so the reset note goes first.
+    if res.timed_out or res.reset:
+        note = RESET_NOTE if res.timed_out else CAP_RESET_NOTE
+        return _Output(f"{note}\n{_format_run(res)}", reset=True)
     return _Output(_format_run(res))
 
 
 def _detail(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {str(exc)[:ERROR_DETAIL_CHARS]}"
+
+
+def _stop_code(exc: BaseException) -> str:
+    """The trace code of a step that stopped the attempt. DiskRefused is an ExecutorRefused."""
+    if isinstance(exc, BudgetExceeded):
+        return "budget_exceeded"
+    if isinstance(exc, ExecutorRefused):
+        return "executor_refused"
+    return "executor_unavailable"
 
 
 class _Trace:
@@ -317,7 +332,7 @@ def _run_tool(
     if name == "read_file":
         path = _str_arg(args, "path")
         res = session.run(f"cat -- {shlex.quote(path)}", config.cmd_timeout)
-        if res.exit_code == 0 and not res.timed_out:
+        if res.exit_code == 0 and not (res.timed_out or res.reset):
             return _Output(res.stdout)
         return _run_output(res)
     if name == "write_file":
@@ -360,9 +375,11 @@ def attack(
     """Run one attempt. Stops at submit, max_steps, the token limit or an LLM error.
 
     A step is one model call plus the one tool call it made (extra tool calls in the same reply are
-    not run). BudgetExceeded from the LLM or from a tool is written to the trace and re-raised. An HTTP 402
+    not run). BudgetExceeded from the LLM is written to the trace and re-raised. An HTTP 402
     from the LLM is the same stop: GuardedLLM has halted the ledger, so this raises BudgetExceeded.
-    If the final diff cannot be taken, stop_reason is "error" and diff_ok is False, even after submit.
+    BudgetExceeded, ExecutorRefused (DiskRefused included) and ExecutorUnavailable from a tool or from the diff
+    are the same kind of stop: traced, then re-raised, so harden and the CLI see them. They never become tool errors.
+    If the final diff cannot be taken otherwise, stop_reason is "error" and diff_ok is False, even after submit.
     """
     config = config or AttackConfig()
     if not config.model.strip():
@@ -429,13 +446,15 @@ def attack(
         steps.append(rec)
         trace.write(rec)
 
-    def end_on_budget(exc: BudgetExceeded) -> None:
-        # The trace comes first; a trace write error must not hide the budget stop.
+    def end_on_stop(exc: BaseException) -> None:
+        # The trace comes first; a trace write error must not hide the stop. A budget stop ends as "budget", an
+        # executor stop (DiskRefused, ExecutorRefused, ExecutorUnavailable) as "error".
+        stop_reason = "budget" if isinstance(exc, BudgetExceeded) else "error"
         with contextlib.suppress(OSError):
             trace.write(
                 {
                     "type": "end",
-                    "stop_reason": "budget",
+                    "stop_reason": stop_reason,
                     "steps": len(steps),
                     "tokens_in": tokens_in,
                     "tokens_out": tokens_out,
@@ -454,7 +473,7 @@ def attack(
         except BudgetExceeded as exc:
             with contextlib.suppress(OSError):
                 record(step, started, None, {}, _detail(exc), "budget_exceeded", 0, 0)
-            end_on_budget(exc)
+            end_on_stop(exc)
             raise
         except Exception as exc:  # noqa: BLE001 - any other LLM failure ends the attempt as stop_reason error
             status = getattr(exc, "status_code", None)
@@ -464,7 +483,7 @@ def attack(
                 halt = BudgetExceeded("HTTP 402 from the LLM provider: balance exhausted, attempt halted")
                 with contextlib.suppress(OSError):
                     record(step, started, None, {}, _detail(halt), "budget_exceeded", 0, 0)
-                end_on_budget(halt)
+                end_on_stop(halt)
                 raise halt from None
             # Only the type: provider error text is not trusted to be free of request details.
             where = f" (HTTP {status})" if _is_count(status) else ""
@@ -511,12 +530,11 @@ def attack(
             result, code = err.message, err.code
             if err.code == "bad_json":
                 args = {"_raw": call.raw_args if isinstance(call.raw_args, str) else repr(call.raw_args)}
-        except BudgetExceeded as exc:
+        except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
+            # A stop, not a tool error: the step is traced and the attempt ends. The caller decides what it means.
             with contextlib.suppress(OSError):
-                record(
-                    step, started, call.name, args, _detail(exc), "budget_exceeded", t_in, t_out, call.extra
-                )
-            end_on_budget(exc)
+                record(step, started, call.name, args, _detail(exc), _stop_code(exc), t_in, t_out, call.extra)
+            end_on_stop(exc)
             raise
         except Exception as exc:  # noqa: BLE001 - executor failures go to the model as a tool error
             # The name of the tool is known here (unknown names were refused above). Only the type of the
@@ -550,8 +568,8 @@ def attack(
     diff_ok = True
     try:
         final_diff = session.diff()
-    except BudgetExceeded as exc:
-        end_on_budget(exc)
+    except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
+        end_on_stop(exc)
         raise
     except Exception as exc:  # noqa: BLE001 - a failed diff is reported in the result, not raised
         # No patch means nothing to score. Never report a normal submit with an empty diff.

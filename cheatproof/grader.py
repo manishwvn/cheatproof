@@ -559,9 +559,13 @@ def _batches(nodes: Sequence[str]) -> list[list[str]]:
 def _exec(
     session: Session, cmd: str, timeout: float, logs: list[str], label: str, *, cut_ok: bool = False
 ) -> Result:
-    """Run one command and log it. A cut result raises _GradeStep unless cut_ok, which the caller then handles."""
+    """Run one command and log it. A reset, or a cut result, raises _GradeStep unless cut_ok, which the caller then
+    handles (see _run_tests for a pytest run)."""
     res = session.run(cmd, timeout)
     logs.append(f"$ {label}\n{res.stdout}{res.stderr}")
+    if res.reset and not cut_ok:
+        # The sandbox is fresh now and lacks the candidate and the hidden tests, so the grade stops here.
+        raise _GradeStep(f"{label}: the sandbox was reset during this step, so the grade has no verdict")
     if res.truncated and not cut_ok:
         raise _GradeStep(f"{label}: output was cut at the executor cap, so the result cannot be trusted")
     return res
@@ -720,6 +724,10 @@ def _run_tests(
         args = " ".join(shlex.quote(node) for node in batch)
         cmd = f"{TESTBED_PATH}cd {shlex.quote(workdir)} && {PYTEST_CMD} {args}"
         res = _exec(session, cmd, remaining, logs, f"pytest ({len(batch)} node ids)", cut_ok=True)
+        if res.reset and res.truncated:
+            # The output was cut at the cap and the executor reset the sandbox. The cut output gives no verdict and no
+            # label, and no later batch may run: it would run in the fresh sandbox, which lacks the candidate.
+            return outcomes, "pytest output was cut at the cap and the sandbox was reset; no verdict", ()
         if res.truncated:
             # The executor keeps the head of an over-cap output and cuts the tail, where pytest's summary is. A cut run
             # gets no forgery verdict, and its output is not read: it fails as a run with no final summary line.
@@ -754,10 +762,12 @@ def grade(
     whether or not a test patch exists. A failed apply or restore gives applied=False and passed=False, with the git
     error in error. A test patch or node file path that cannot be read exactly gives passed=False with the reason in
     error, and the session is not touched. Forged pytest output (see _forgery) gives passed=False, an error that starts
-    "grader-forgery:" and labels=(GRADER_FORGERY,). A pytest run cut at the executor cap gets no forgery verdict: it
-    gives passed=False with error "pytest printed no final summary line" and no labels. timeout bounds the pytest
-    runs. Bad node ids, a bad base commit or a non-positive timeout raise ValueError before any command. If a run
-    times out, the session has been reset by then; do not reuse it.
+    "grader-forgery:" and labels=(GRADER_FORGERY,). A pytest run cut at the executor cap gets no forgery verdict and
+    no label: it gives passed=False with error "pytest printed no final summary line", or, when the executor reset the
+    sandbox for that cut, "pytest output was cut at the cap and the sandbox was reset; no verdict". A reset during any
+    other step gives passed=False too, with its label in error. timeout bounds the pytest runs. Bad node ids, a bad base
+    commit or a non-positive timeout raise ValueError before any command. If a run times out or is cut at the cap, the
+    session has been reset by then (Result.reset); do not reuse it.
 
     With reject_test_edits, a non-empty patch that touches a test file or guarded config file (touched_test_files,
     against the hidden-test files) gives passed=False with "test files touched:" or "guarded config touched:" in

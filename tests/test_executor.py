@@ -22,6 +22,7 @@ from cheatproof.executor import (
     MAX_RUN_TIMEOUT_S,
     OUTPUT_KILL_EXIT_CODE,
     OUTPUT_MARGIN_BYTES,
+    POST_RUN_CHECK_INTERVAL_S,
     PULL_TIMEOUT_S,
     RUN_TIMEOUT_S,
     TASK_IMAGE_PREFIXES,
@@ -804,6 +805,7 @@ def test_host_timeout_kills_client_and_resets_the_sandbox(tmp_path):
         res = s.run("sleep 99", timeout=5)
         fake.exec_result = Result(0, "", "", 0.0)
     assert res.timed_out and res.exit_code == TIMEOUT_EXIT_CODE
+    assert res.reset is True
     assert len(fake.runs()) == 2  # a fresh container replaced the old one
     assert fake.names_removed() == [run_name(fake, 0), run_name(fake, 1)]
     assert local_runs(budget) == 2
@@ -1404,13 +1406,37 @@ def test_guard_refusal_pulls_nothing(tmp_path):
     ],
     ids=["pull-fails", "pull-times-out"],
 )
-def test_failed_pull_is_unavailable_starts_nothing_and_counts_no_run(tmp_path, answer):
+def test_failed_pull_is_unavailable_starts_nothing_but_counts_its_run(tmp_path, answer):
+    # The run is reserved before the pull, so a failed pull still counts one local run (see test below).
     fake = FakeDocker(image_present=False, pull_result=answer)
     budget = make_budget(tmp_path)
     with pytest.raises(ExecutorUnavailable, match="docker pull failed"):
         make_docker(fake).start(TASK_ENV, budget)
     assert fake.runs() == []
-    assert local_runs(budget) == 0
+    assert local_runs(budget) == 1
+
+
+def test_local_run_is_counted_before_the_pull_starts(tmp_path):
+    budget = make_budget(tmp_path)
+    fake = FakeDocker(image_present=False)
+    counted_at_pull = []
+
+    def runner(argv, timeout, stdin=None, max_bytes=None):
+        if argv[:2] == ["docker", "pull"]:
+            counted_at_pull.append(local_runs(budget))
+        return fake(argv, timeout, stdin, max_bytes=max_bytes)
+
+    with make_docker(runner).start(TASK_ENV, budget):
+        pass
+    assert counted_at_pull == [1]
+
+
+def test_spent_local_run_cap_refuses_before_any_pull(tmp_path):
+    fake = FakeDocker(image_present=False)
+    with pytest.raises(BudgetExceeded, match="local run cap 0 reached"):
+        make_docker(fake).start(TASK_ENV, make_budget(tmp_path, runs=0))
+    assert fake.argvs(["docker", "pull"]) == []
+    assert fake.runs() == []
 
 
 # --- disk containment (item 2): per-file size limit, free space after each run ------------------------
@@ -1440,59 +1466,135 @@ def test_container_file_size_limit_comes_from_env_when_usable(monkeypatch, tmp_p
     assert f"fsize={int(gb * GIB)}" in ulimits
 
 
-def store_executor(fake, store, *, min_free_gb=10.0):
+def store_executor(fake, store, *, min_free_gb=10.0, run_min_free_gb=2.0, clock=None):
     """Host disk is always fine here, so only the image store decides the post-run check."""
+    clock = clock or FakeClock()
     return DockerExecutor(
         runner=fake,
         disk_free_gb=lambda: 100.0,
         min_free_gb=min_free_gb,
+        run_min_free_gb=run_min_free_gb,
         image_store_free_gb=store,
         platform="linux",
+        sleep=clock.sleep,
+        clock=clock,
     )
 
 
-def test_healthy_image_store_is_checked_once_per_run(tmp_path):
-    checks = []
+def test_post_run_check_runs_on_the_first_run_then_once_per_interval(tmp_path):
+    clock = FakeClock()
+    checked_at = []
 
     def store():
-        checks.append(True)
+        checked_at.append(clock.now)
         return 90.0
 
     fake = FakeDocker()
-    with store_executor(fake, store).start(ENV, make_budget(tmp_path)) as s:
-        s.run("true", timeout=5)
-        s.run("true", timeout=5)
-    assert len(checks) == 2
-    assert len(fake.runs()) == 1  # no reset
+    with store_executor(fake, store, clock=clock).start(ENV, make_budget(tmp_path)) as s:
+        s.run("true", timeout=5)  # the first run always checks
+        s.run("true", timeout=5)  # inside the interval: no check
+        clock.now = POST_RUN_CHECK_INTERVAL_S - 1
+        s.run("true", timeout=5)  # still inside the interval: no check
+        clock.now = POST_RUN_CHECK_INTERVAL_S
+        s.run("true", timeout=5)  # the interval has passed: checked again
+    assert checked_at == [0.0, float(POST_RUN_CHECK_INTERVAL_S)]
+    assert len(fake.runs()) == 1  # no reset on a healthy run
 
 
-def test_low_image_store_after_a_run_resets_the_sandbox(tmp_path):
+def test_healthy_run_right_after_a_pull_does_not_trip_the_post_run_check(tmp_path):
+    # The pull takes the free disk from 15 GB to 6 GB: under MIN_FREE_DISK_GB=10, over RUN_MIN_FREE_GB=2.
+    free = [15.0]
+    fake = FakeDocker(image_present=False)
+
+    def runner(argv, timeout, stdin=None, max_bytes=None):
+        if argv[:2] == ["docker", "pull"]:
+            free[0] = 6.0
+        return fake(argv, timeout, stdin, max_bytes=max_bytes)
+
+    clock = FakeClock()
+    executor = DockerExecutor(
+        runner=runner,
+        disk_free_gb=lambda: free[0],
+        min_free_gb=10.0,
+        platform="linux",
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    with executor.start(TASK_ENV, make_budget(tmp_path)) as s:
+        assert s.run("true", timeout=5).exit_code == 0
+    assert len(fake.runs()) == 1
+
+
+@pytest.mark.parametrize(("free", "refused"), [(1.5, True), (2.5, False)], ids=["below-floor", "above-floor"])
+def test_post_run_floor_is_run_min_free_gb(tmp_path, free, refused):
+    disk = [100.0]
+    fake = FakeDocker()
+    clock = FakeClock()
+    executor = DockerExecutor(
+        runner=fake,
+        disk_free_gb=lambda: disk[0],
+        min_free_gb=10.0,
+        platform="linux",
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    with executor.start(ENV, make_budget(tmp_path)) as s:
+        disk[0] = free  # the disk drops during the run; the start floor (10 GB) does not apply to a run
+        if refused:
+            with pytest.raises(DiskRefused, match="RUN_MIN_FREE_GB=2"):
+                s.run("true", timeout=5)
+        else:
+            assert s.run("true", timeout=5).exit_code == 0
+
+
+@pytest.mark.parametrize(("raw", "floor"), [("3", 3.0), ("abc", 2.0), ("0.5", 2.0), ("nan", 2.0), ("", 2.0)])
+def test_run_min_free_comes_from_env_when_usable(monkeypatch, raw, floor):
+    monkeypatch.setenv("RUN_MIN_FREE_GB", raw)
+    assert DockerExecutor(runner=FakeDocker(), platform="linux")._run_min_free_gb == floor
+
+
+def test_low_disk_after_a_run_poisons_the_session_and_resets_nothing(tmp_path):
     fake = FakeDocker()
     checks = []
 
     def store():
         checks.append(True)
-        # Low while the first container runs, fine once the reset has replaced it.
-        return 5.0 if len(fake.runs()) == 1 else 90.0
+        return 1.5  # below RUN_MIN_FREE_GB=2
 
     budget = make_budget(tmp_path)
-    with store_executor(fake, store).start(ENV, budget) as s:
-        res = s.run("dd if=/dev/zero of=/x bs=1M count=9999", timeout=5)
-    assert res.exit_code == 0
-    assert len(checks) == 2  # one check after the run, one after the reset
-    assert len(fake.runs()) == 2
-    assert fake.names_removed()[0] == run_name(fake, 0)
-    assert local_runs(budget) == 2
-
-
-def test_image_store_still_low_after_the_reset_raises_disk_refused(tmp_path):
-    fake = FakeDocker()
-    s = store_executor(fake, lambda: 5.0).start(ENV, make_budget(tmp_path))
+    s = store_executor(fake, store).start(ENV, budget)
     with pytest.raises(DiskRefused, match="Docker image store"):
         s.run("dd if=/dev/zero of=/x bs=1M count=9999", timeout=5)
-    assert fake.names_removed() == [run_name(fake, 0)]  # the sandbox was reset before the refusal
-    assert len(fake.runs()) == 2
+    assert len(checks) == 1
+    assert len(fake.runs()) == 1  # no reset: the sandbox stays as the run left it
+    assert fake.names_removed() == []
     s.close()
+    assert fake.names_removed() == [run_name(fake, 0)]
+    assert local_runs(budget) == 1
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda s: s.run("true", timeout=5),
+        lambda s: s.write_file("notes.txt", b"x"),
+        lambda s: s.diff(),
+        lambda s: s.reset(),
+    ],
+    ids=["run", "write_file", "diff", "reset"],
+)
+def test_poisoned_session_refuses_every_call_but_close(tmp_path, call):
+    fake = FakeDocker()
+    s = store_executor(fake, lambda: 1.5).start(ENV, make_budget(tmp_path))
+    with pytest.raises(DiskRefused):
+        s.run("dd if=/dev/zero of=/x bs=1M count=9999", timeout=5)
+    calls = len(fake.log)
+    with pytest.raises(DiskRefused, match="RUN_MIN_FREE_GB"):
+        call(s)
+    assert len(fake.log) == calls  # nothing reached docker: no exec, no reset, no daemon check
+    assert len(fake.runs()) == 1
+    s.close()  # close still removes the sandbox
+    assert fake.names_removed() == [run_name(fake, 0)]
 
 
 def test_colima_missing_from_path_falls_back_to_the_host_for_pulls_and_runs(tmp_path):
@@ -1523,7 +1625,7 @@ def test_colima_missing_from_path_falls_back_to_the_host_for_pulls_and_runs(tmp_
     ],
     ids=["host-killed-at-output-cap", "command-exits-137-by-itself"],
 )
-def test_output_cap_kill_resets_the_sandbox_like_a_timeout(tmp_path, answer, resets):
+def test_output_cap_kill_resets_the_sandbox_and_marks_the_result(tmp_path, answer, resets):
     fake = FakeDocker()
     budget = make_budget(tmp_path)
     with make_docker(fake).start(ENV, budget) as s:
@@ -1532,6 +1634,9 @@ def test_output_cap_kill_resets_the_sandbox_like_a_timeout(tmp_path, answer, res
         fake.exec_result = Result(0, "", "", 0.0)
     assert res.exit_code == OUTPUT_KILL_EXIT_CODE
     assert res.truncated is answer.truncated
+    # The same reset signal a host timeout carries. timed_out stays for the host timeout alone.
+    assert res.reset is resets
+    assert res.timed_out is False
     assert len(fake.runs()) == (2 if resets else 1)
     assert local_runs(budget) == (2 if resets else 1)
 

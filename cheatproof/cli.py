@@ -32,10 +32,11 @@ not-run row {instance_id, reason, error} and the batch goes on. reason is execut
 leftover sweep), budget, certificate_write_failed, invalid_task (the instance id cannot name a certificate, or traces/
 or the trace file is a symbolic link) or cost_check_failed (the ledger total could not be read or is not a finite
 number before the run, or after it the measured spend is not a finite number or went down). A paid run that spent
-before it ended also gets an optional cost_usd key in its not-run row: the ledger delta of that run, measured as a
-certificate's cost is. The key is absent when no spend could be measured, so schema_version 1 readers that ignore it
-keep working. A paid run that harden stops (DiskRefused, ExecutorRefused, ExecutorUnavailable or BudgetExceeded) is
-such a run: its trace stays under traces/.
+money before it ended also gets an optional cost_usd key in its not-run row, when its spend was measured: the ledger
+delta of that run, measured as a certificate's cost is. The delta is 0 when the run spent nothing (a local Docker run
+is free), so 0 is a valid value. The key is absent when no spend could be measured, so schema_version 1 readers that
+ignore it keep working. A paid run that harden stops (DiskRefused, ExecutorRefused, ExecutorUnavailable or
+BudgetExceeded) is such a run: its trace stays under traces/.
 A BudgetExceeded (a cap, a halt, or HTTP 402) or a cost_check_failed stops the batch after the current task, and
 exits 1. The current task gets that reason. Each remaining task that does not already have a certificate is marked
 not run with reason budget after a budget stop, or stopped_after_cost_check after a cost check failure. Nothing is
