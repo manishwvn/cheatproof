@@ -71,3 +71,11 @@ commit made in the sandbox cannot hide a change. It raises above 8 MiB instead o
 at 1800 s and wraps the command in `timeout -s KILL` when the image has it. If the host must kill `docker exec` (10 s
 after that timeout), the result is `timed_out` and the sandbox is reset: the container and every process in it are
 removed, and files written earlier in the session are lost. Sandbox VERIFY items stay open until U3.
+
+## 2026-10-21 update
+- Go/no-go: Token Factory Sandboxes work. `sandbox` is the default `EXECUTOR`; `EXECUTOR=docker` stays the explicit
+  local fallback.
+- Sandbox runs are count-only at $0 (ADR 0001, 2026-10-21 update).
+- Network is off with `unshare -n`. A probe runs at session start and fails closed if it cannot confirm that.
+- swebench images come from `images.oci`. No swebench images are pulled locally, to protect disk.
+- Sandboxes cannot delete images server-side, so image cleanup is not available through the executor.

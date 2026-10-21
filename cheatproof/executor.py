@@ -2,10 +2,10 @@
 
 Local Docker runs each session in a container with no network (unless EnvSpec asks), CPU, memory
 and PID limits, and no host mounts. Files reach the container over stdin. Token Factory Sandboxes
-is a stub until access is granted (U3). Every Docker session start, including a reset, counts one
-local run in cheatproof/budget.py before any pull and before the container exists. So a spent LOCAL_RUN_CAP
+(contree_sdk) is the default backend: SandboxSession mirrors DockerSession on a chain of SDK images. Every Docker
+session start, including a reset, counts one local run in cheatproof/budget.py before any pull and before the container exists. So a spent LOCAL_RUN_CAP
 never pulls an image, and a failed pull still counts its run. Local runs are free and count only toward
-LOCAL_RUN_CAP. A paid Sandboxes session must reserve a sandbox run instead.
+LOCAL_RUN_CAP. A Sandboxes session reserves one sandbox run per start and per reset instead.
 """
 
 from __future__ import annotations
@@ -833,20 +833,291 @@ class DockerSession(Session):
             self._closed = True
 
 
-class SandboxExecutor:
-    """Token Factory Sandboxes backend (ADR 0002). Stub: access is gated (U3), so start() refuses.
+# Token Factory Sandboxes (contree_sdk). The SDK has no network switch, so network-off is enforced inside the sandbox:
+# every attacker command runs under `unshare -n` (a new, empty network namespace). A start probes that this works and
+# refuses to start when it does not (fail closed), unless SANDBOX_NETWORK_TRUSTED=1 says the owner confirmed the
+# platform itself has no egress. A network-fetch EnvSpec (network=True) runs commands as they are.
+SANDBOX_TRUSTED_ENV = "SANDBOX_NETWORK_TRUSTED"
+# Tried in order. `-r` maps the caller to root in a new user namespace, for a sandbox user without CAP_SYS_ADMIN.
+_NETNS_PREFIXES = (["unshare", "-n"], ["unshare", "-rn"])
 
-    contree_sdk is imported only once access exists, so this module imports without it.
+
+class _SandboxTimeout(RuntimeError):
+    """The Sandboxes operation did not finish in time (the SDK cancelled it) or the server flagged a timeout."""
+
+
+def _sdk_exceptions():
+    """contree_sdk.sdk.exceptions, or None when contree_sdk is not installed."""
+    try:
+        from contree_sdk.sdk import exceptions
+    except ImportError:
+        return None
+    return exceptions
+
+
+def _default_client():
+    """A contree_sdk.ContreeSync client. Credentials come from the SDK's own environment lookup (NEBIUS_API_KEY and
+    NEBIUS_PROJECT_ID, or the SDK's auth.ini); this module never reads them."""
+    try:
+        from contree_sdk import ContreeSync
+    except ImportError as exc:
+        raise ExecutorUnavailable(
+            "contree_sdk is not installed; run uv sync (or set EXECUTOR=docker)"
+        ) from exc
+    return ContreeSync()
+
+
+class SandboxExecutor:
+    """Token Factory Sandboxes backend (ADR 0002), on contree_sdk. The SDK is imported lazily, so this module
+    imports without it.
+
+    client_factory builds the SDK client on the first start (tests inject a fake). A ConTree sandbox is a chain of
+    images: each state-changing call runs on the current image and yields the next one, so a reset is a return to
+    the base image. The SDK has no image delete, so a session leaves its image chain in the account.
     """
 
+    def __init__(
+        self,
+        *,
+        client_factory: Callable[[], object] | None = None,
+        trust_no_network: bool | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._client_factory = _default_client if client_factory is None else client_factory
+        self._client: object | None = None
+        self._lock = threading.Lock()
+        self._trust_no_network = (
+            os.environ.get(SANDBOX_TRUSTED_ENV) == "1" if trust_no_network is None else trust_no_network
+        )
+        self._clock = clock
+
     def start(self, env: EnvSpec, budget: Budget | None = None) -> Session:
-        # When access lands, this paid session must call reserve_sandbox_run(), not reserve_local_run().
-        raise ExecutorUnavailable("Sandboxes access pending (U3)")
+        return SandboxSession(self, env, Budget.from_env() if budget is None else budget)
+
+    def _get_client(self):
+        with self._lock:
+            if self._client is None:
+                try:
+                    self._client = self._client_factory()
+                except ExecutorUnavailable:
+                    raise
+                except Exception as exc:
+                    raise ExecutorUnavailable(
+                        f"Sandboxes client could not be built: {type(exc).__name__}"
+                    ) from exc
+            return self._client
+
+    def _resolve_image(self, image: str):
+        """The SDK image object for a name. Task images (swebench/*) are imported from the registry on first use and
+        found by tag after that; any other name is looked up by tag with no import."""
+        client = self._get_client()
+        try:
+            return client.images.oci(image) if is_task_image(image) else client.images.use(image)
+        except Exception as exc:
+            raise ExecutorUnavailable(
+                f"image {image} could not be resolved: {type(exc).__name__}: {exc}"
+            ) from exc
+
+
+class SandboxSession(Session):
+    """One Sandboxes session: the current image, advanced by write_file and run, and the base image for reset."""
+
+    def __init__(self, executor: SandboxExecutor, env: EnvSpec, budget: Budget) -> None:
+        self._executor = executor
+        self._env = env
+        self._budget = budget
+        self._client = executor._get_client()  # before the reservation: a missing SDK or key counts no run
+        self._closed = False
+        self._base_image = None
+        self._cur = None
+        self._base = ""
+        self._untracked: bytes | None = None
+        self._netns: list[
+            str
+        ] = []  # argv prefix that cuts the network; empty when the network is on or trusted off
+        self._launch()
+
+    def _launch(self) -> None:
+        # A paid session books one sandbox run before any import or exec. BudgetExceeded propagates.
+        self._budget.reserve_sandbox_run()
+        if self._base_image is None:
+            image = self._executor._resolve_image(self._env.image)
+            self._base_image = image
+            self._cur = image
+            self._probe_network()
+            self._base = self._base_commit()
+            self._untracked = self._untracked_paths()
+        self._cur = self._base_image
+
+    def _live(self) -> None:
+        if self._closed:
+            raise RuntimeError("session is closed")
+
+    def _call(
+        self,
+        argv: list[str],
+        *,
+        timeout: float,
+        stdin: bytes | None = None,
+        disposable: bool,
+        cap: int = MAX_OUTPUT_BYTES,
+    ) -> tuple[Result, bool]:
+        """One exec on the current image. Returns (result with raw decoded streams, server_cut). A non-disposable call
+        advances the current image. Raises _SandboxTimeout on an operation timeout, RuntimeError on an SDK error."""
+        started = self._executor._clock()
+        try:
+            done = self._cur.run(
+                argv[0],
+                args=argv[1:],
+                cwd=self._env.workdir,
+                stdin=stdin,
+                stdout=bytes,
+                stderr=bytes,
+                timeout=math.ceil(timeout) + EXEC_GRACE_S,
+                disposable=disposable,
+                truncate_output_at=cap,
+            ).wait()
+        except Exception as exc:
+            sdk = _sdk_exceptions()
+            if sdk is not None and isinstance(exc, sdk.OperationTimedOutError):
+                raise _SandboxTimeout(f"sandbox operation timed out after {timeout:g}s") from exc
+            if sdk is not None and isinstance(exc, sdk.ContreeError):
+                raise RuntimeError(f"sandbox call failed: {type(exc).__name__}: {exc}") from exc
+            raise
+        res = done.result
+        if not disposable and getattr(done, "uuid", None) is not None:
+            self._cur = done
+        raw = getattr(res, "_raw", None)  # private in the SDK: the server's own timed_out flag
+        state = getattr(getattr(raw, "result", None), "state", None)
+        if getattr(state, "timed_out", False) is True:
+            raise _SandboxTimeout(f"sandbox flagged a timeout after {timeout:g}s")
+        out, err = (_as_bytes(res.stdout), _as_bytes(res.stderr))
+        elapsed = self._executor._clock() - started
+        cut = bool(res.truncated)
+        return Result(
+            res.exit_code, out.decode("utf-8", "replace"), err.decode("utf-8", "replace"), elapsed
+        ), cut
+
+    def _probe_network(self) -> None:
+        if self._env.network or self._executor._trust_no_network:
+            return
+        for prefix in _NETNS_PREFIXES:
+            try:
+                res, _ = self._call([*prefix, "true"], timeout=IO_TIMEOUT_S, disposable=True)
+            except RuntimeError:
+                continue
+            if res.exit_code == 0:
+                self._netns = list(prefix)
+                return
+        raise ExecutorUnavailable(
+            "cannot cut the network in this sandbox (unshare -n failed); nothing was run. "
+            f"Set {SANDBOX_TRUSTED_ENV}=1 only if the platform has no egress"
+        )
+
+    def _base_commit(self) -> str:
+        script = f"cd {shlex.quote(self._env.workdir)} && git rev-parse HEAD"
+        res, _ = self._call(["sh", "-c", script], timeout=IO_TIMEOUT_S, disposable=True)
+        return res.stdout.strip() if res.exit_code == 0 else ""
+
+    def _untracked_paths(self) -> bytes:
+        script = _BASELINE_SCRIPT.format(workdir=shlex.quote(self._env.workdir))
+        try:
+            res, cut = self._call(
+                ["sh", "-c", script], timeout=IO_TIMEOUT_S, disposable=True, cap=MAX_BASELINE_BYTES
+            )
+        except _SandboxTimeout as exc:
+            raise RuntimeError(f"untracked-file baseline was not recorded: {exc}") from exc
+        if res.exit_code != 0 or cut:
+            raise RuntimeError(
+                f"untracked-file baseline was not recorded (exit {res.exit_code}, truncated={cut}): "
+                f"{res.stderr.strip()[-300:]}"
+            )
+        return normalise_untracked(res.stdout.encode("utf-8"))
+
+    def run(self, cmd: str, timeout: float) -> Result:
+        if not timeout > 0:  # also refuses NaN
+            raise ValueError(f"run timeout must be greater than 0 seconds, got {timeout!r}")
+        limit = min(float(timeout), MAX_RUN_TIMEOUT_S)
+        self._live()
+        script = _IN_CONTAINER_TIMEOUT.format(seconds=max(1, math.ceil(limit)))
+        argv = [*self._netns, "sh", "-lc", script, "cheatproof", cmd]
+        try:
+            res, cut = self._call(argv, timeout=limit, disposable=False)
+        except _SandboxTimeout:
+            # The operation was cancelled, so the command may still run in the sandbox. Like DockerSession, go back to
+            # the base image: files written earlier in this session are lost, and the reset books one more run.
+            self.reset()
+            return Result(
+                TIMEOUT_EXIT_CODE, "", f"[timed out after {limit:g}s]", limit, timed_out=True, reset=True
+            )
+        stdout, out_cut = _cap_stream(res.stdout, cut)
+        stderr, err_cut = _cap_stream(res.stderr, cut)
+        return replace(res, stdout=stdout, stderr=stderr, truncated=out_cut or err_cut)
+
+    def write_file(self, path: str, data: bytes | str) -> None:
+        self._live()
+        payload = data.encode("utf-8") if isinstance(data, str) else data
+        script = f"cat > {shlex.quote(path)}"
+        parent = posixpath.dirname(path)
+        if parent:
+            script = f"mkdir -p -- {shlex.quote(parent)} && {script}"
+        res, _ = self._call(["sh", "-c", script], timeout=IO_TIMEOUT_S, stdin=payload, disposable=False)
+        if res.exit_code != 0:
+            raise RuntimeError(f"write_file {path!r} failed ({res.exit_code}): {res.stderr.strip()[-300:]}")
+
+    def diff(self) -> str:
+        """Same patch as DockerSession.diff, built by the same script on the current image (see there)."""
+        self._live()
+        if not self._base:
+            raise RuntimeError("base commit was not recorded at start; refusing to build a diff")
+        if self._untracked is None:
+            raise RuntimeError("untracked-file baseline was not recorded at start; refusing to build a diff")
+        unstage = _UNSTAGE_SCRIPT.format(workdir=shlex.quote(self._env.workdir)) if self._untracked else ""
+        script = _DIFF_SCRIPT.format(
+            workdir=shlex.quote(self._env.workdir), base=shlex.quote(self._base), unstage=unstage
+        )
+        try:
+            res, cut = self._call(
+                ["sh", "-c", script],
+                timeout=IO_TIMEOUT_S,
+                stdin=self._untracked,
+                disposable=True,
+                cap=MAX_DIFF_BYTES,
+            )
+        except _SandboxTimeout as exc:
+            raise RuntimeError(f"diff timed out after {IO_TIMEOUT_S}s") from exc
+        if cut:
+            raise RuntimeError(f"diff is over MAX_DIFF_BYTES={MAX_DIFF_BYTES}; refusing to truncate it")
+        if res.exit_code != 0:
+            raise RuntimeError(f"diff failed ({res.exit_code}): {res.stderr.strip()[-300:]}")
+        return res.stdout
+
+    def reset(self) -> None:
+        self._live()
+        self._launch()
+
+    def close(self) -> None:
+        # Nothing to destroy: the SDK has no image delete and an exec leaves no process behind.
+        self._closed = True
+
+
+def _as_bytes(value: object) -> bytes:
+    if value is None:
+        return b""
+    return value if isinstance(value, bytes) else str(value).encode("utf-8")
+
+
+def _cap_stream(text: str, server_cut: bool) -> tuple[str, bool]:
+    """_cap, plus the same marker when the server already cut the stream at MAX_OUTPUT_BYTES."""
+    out, cut = _cap(text)
+    if not cut and server_cut and len(text.encode("utf-8")) >= MAX_OUTPUT_BYTES:
+        return f"{out}\n[truncated: over {MAX_OUTPUT_BYTES} bytes, first {MAX_OUTPUT_BYTES} kept]", True
+    return out, cut
 
 
 def make_executor(name: str | None = None) -> Executor:
-    """Backend named by EXECUTOR (default docker)."""
-    choice = (name or os.environ.get("EXECUTOR") or "docker").strip().lower()
+    """Backend named by EXECUTOR (default sandbox: Token Factory Sandboxes). EXECUTOR=docker uses local Docker."""
+    choice = (name or os.environ.get("EXECUTOR") or "sandbox").strip().lower()
     if choice == "docker":
         return DockerExecutor()
     if choice == "sandbox":

@@ -10,7 +10,7 @@
 harden finds the task in the local cache only (never the network), runs harden() with one attacker bound to the
 given system prompt, writes one certificate and prints its path and a summary line. The attacker's task prompt is
 a description of the task (repo, instance id, problem statement, failing tests). The gold and test patches
-never reach it. The certificate's attacker block records the executor backend (EXECUTOR, default docker),
+never reach it. The certificate's attacker block records the executor backend (EXECUTOR, default sandbox),
 max_output_tokens, cmd_timeout (the attacker's command timeout, not --timeout) and strategy: the --strategy label,
 or the system prompt file's stem.
 Beside the certificates directory, harden keeps what its paid run produced, each file named by the certificate's
@@ -577,7 +577,7 @@ def _harden_settings(args: argparse.Namespace) -> _Settings:
         config=config,
         timeout_kw=timeout_kw,
         strategy=strategy,
-        executor_name=(os.environ.get("EXECUTOR") or "docker").strip().lower(),
+        executor_name=(os.environ.get("EXECUTOR") or "sandbox").strip().lower(),
         out=args.out,
     )
 
