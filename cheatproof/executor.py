@@ -11,6 +11,7 @@ LOCAL_RUN_CAP. A Sandboxes session reserves one sandbox run per start and per re
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import math
 import os
 import posixpath
@@ -28,7 +29,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Protocol, Self
 
-from cheatproof.budget import Budget
+from cheatproof.budget import Budget, BudgetExceeded
 
 MAX_OUTPUT_BYTES = 64 * 1024  # kept per stream, per run() call
 OUTPUT_MARGIN_BYTES = 4 * 1024  # the host reads this far past the cap, then kills the client
@@ -73,6 +74,17 @@ _IN_CONTAINER_TIMEOUT = (
     'else exec sh -lc "$1"; fi'
 )
 
+# Git options for every script below. The repo, its config and its attributes are attacker-writable, so the
+# keys that run a command by themselves are pinned on the command line (which beats every config file):
+# core.fsmonitor and core.hooksPath. A filter driver named in .gitattributes and defined in .git/config cannot be
+# switched off from here, since its name is not known; the sandbox cuts the network for these scripts too
+# (SandboxSession wraps every call), and a Docker container has none. That bounds a filter, it does not stop it.
+_GIT_ENV = "export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null; "
+_GIT_OPTS = (
+    "-c core.excludesFile=/dev/null -c core.attributesFile=/dev/null -c core.hooksPath=/dev/null "
+    "-c core.fsmonitor=false -c diff.external="
+)
+
 # Runs in the container. A fresh index file, read from the start commit, means a replace ref, an
 # assume-unchanged bit or a skip-worktree bit in the sandbox cannot hide a change. The index path must not
 # exist yet (git rejects an empty index file), so it lives in a new temp directory. Repo-level git config
@@ -82,28 +94,26 @@ _IN_CONTAINER_TIMEOUT = (
 # Files untracked at start are not part of the patch. The start list arrives on stdin, and _UNSTAGE_SCRIPT
 # drops those paths from the temp index after the add. update-index takes literal paths.
 _DIFF_SCRIPT = (
-    'set -e; export GIT_CONFIG_NOSYSTEM=1; tmp=$(mktemp -d); export GIT_INDEX_FILE="$tmp/index"; '
+    "set -e; " + _GIT_ENV + 'tmp=$(mktemp -d); export GIT_INDEX_FILE="$tmp/index"; '
     "trap 'rm -rf \"$tmp\"' EXIT; "
-    "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null read-tree {base}; "
-    "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null add -A -f -- . "
+    "git --no-replace-objects -C {workdir} " + _GIT_OPTS + " read-tree {base}; "
+    "git --no-replace-objects -C {workdir} " + _GIT_OPTS + " add -A -f -- . "
     "':(exclude,glob)**/__pycache__/**' ':(exclude,glob)**/.pytest_cache/**' ':(exclude,glob)**/*.egg-info/**'; "
     "{unstage}"
-    "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null "
+    "git --no-replace-objects -C {workdir} " + _GIT_OPTS + " "
     "diff --cached --binary --no-color --no-ext-diff --no-textconv {base}"
 )
 
 # Only when the start list is not empty; with an empty list the diff script has no unstage step.
 _UNSTAGE_SCRIPT = (
-    "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null "
-    "update-index --force-remove -z --stdin; "
+    "git --no-replace-objects -C {workdir} " + _GIT_OPTS + " update-index --force-remove -z --stdin; "
 )
 
 # Runs in the container at start and at reset, before any attacker command. Lists every untracked path, ignored
 # ones included, NUL-separated and relative to the workdir. The host keeps the list (DockerSession._untracked),
 # so nothing in the container is trusted to hold it.
 _BASELINE_SCRIPT = (
-    "set -e; export GIT_CONFIG_NOSYSTEM=1; "
-    "git --no-replace-objects -C {workdir} -c core.excludesFile=/dev/null ls-files --others -z"
+    "set -e; " + _GIT_ENV + "git --no-replace-objects -C {workdir} " + _GIT_OPTS + " ls-files --others -z"
 )
 
 
@@ -115,7 +125,8 @@ def normalise_untracked(raw: bytes) -> bytes:
 
 
 class ExecutorRefused(RuntimeError):
-    """A guard stopped a session start or reset (low disk, too many local images). No image was deleted."""
+    """A guard stopped a session start, reset or call (low disk, too many local images, a tampered network wrapper).
+    No image was deleted."""
 
 
 class DiskRefused(ExecutorRefused):
@@ -834,12 +845,79 @@ class DockerSession(Session):
 
 
 # Token Factory Sandboxes (contree_sdk). The SDK has no network switch, so network-off is enforced inside the sandbox:
-# every attacker command runs under `unshare -n` (a new, empty network namespace). A start probes that this works and
-# refuses to start when it does not (fail closed), unless SANDBOX_NETWORK_TRUSTED=1 says the owner confirmed the
-# platform itself has no egress. A network-fetch EnvSpec (network=True) runs commands as they are.
+# every call after the start probe, attacker command or not, runs under `<unshare> -rn` (a new, empty network namespace
+# inside a new user namespace). A start probes that this cuts the network and refuses to start when it does not (fail
+# closed), unless SANDBOX_NETWORK_TRUSTED=1 says the owner confirmed the platform itself has no egress. A network-fetch
+# EnvSpec (network=True) runs commands as they are.
+#
+# Containment: best effort. What holds:
+# - The wrapper is called by absolute path, resolved in the base image, and wraps run, write_file, diff and the
+#   baseline calls alike. The probe runs under it and proves the cut: /proc/net/dev lists only lo, and a connect
+#   attempt fails.
+# - -rn first. In a user namespace the attacker holds no capability over the host network namespace, so setns()
+#   into it (nsenter -t 1 -n) fails. Plain -n is the fallback for a platform without user namespaces.
+# - The attacker can replace the wrapper binary or its loader, libc or preload list in the image chain. Before a call
+#   on an image that an attacker command produced, the host reads those files from that image over the SDK, not
+#   through the image's own tools (which the attacker may have replaced too), and compares their sha256 with the
+#   values pinned from the base image. A difference refuses the call: ExecutorRefused("network wrapper tampered").
+#   Images are immutable and the call runs on the image that was read, so there is no gap between check and use.
+# Residual risk:
+# - With the -n fallback a root attacker can setns() back out. The cut then stops accidental egress only.
+# - Not covered by the check: the kernel, locale and gconv data and NSS modules libc may load, glibc-hwcaps library
+#   directories, and any platform path that leaves the sandbox's own network namespace (a host-side proxy, a shared
+#   unix socket). The probe sees interfaces and one connect, not every route out.
+# - diff() and the baseline run the image's own git and sh. Filter drivers named in .gitattributes and defined in
+#   .git/config still run code there. Without network they cannot fetch or leak; they can still change the patch text.
+# - A busybox unshare is not supported (its applet name is lost when run by its real path): the start refuses.
+# VERIFY (live, owner approval): `unshare -rn` works in Sandboxes; `nsenter -t 1 -n` fails under it; the SDK reads
+# files over image.read() and reports a missing file as NotFoundError.
 SANDBOX_TRUSTED_ENV = "SANDBOX_NETWORK_TRUSTED"
-# Tried in order. `-r` maps the caller to root in a new user namespace, for a sandbox user without CAP_SYS_ADMIN.
-_NETNS_PREFIXES = (["unshare", "-n"], ["unshare", "-rn"])
+# Tried in order. -r maps the caller to root in a new user namespace. Plain -n needs CAP_SYS_ADMIN in the host user
+# namespace, and a process that has it can setns() back out, so it is the weaker cut and only the fallback.
+_UNSHARE_FLAGS = ("-rn", "-n")
+_LD_SO_PRELOAD = (
+    "/etc/ld.so.preload"  # a library listed here loads into every dynamic program, unshare included
+)
+_LD_SO_CACHE = "/etc/ld.so.cache"  # decides which libc the loader picks
+MAX_PINNED_FILES = 16
+
+# Runs in the base image before any attacker command. Prints the resolved path of unshare, then the resolved path of
+# each file ldd says it loads (the loader and libc). One path per line.
+_LOCATE_UNSHARE = (
+    'u=$(command -v unshare) || exit 1; u=$(readlink -f -- "$u") || exit 1; echo "$u"; '
+    'ldd "$u" 2>/dev/null | while read -r line; do '
+    'for w in $line; do case "$w" in /*) readlink -f -- "$w";; esac; done; done; exit 0'
+)
+
+# Runs under the wrapper. Exit 0 only when /proc/net/dev lists nothing but lo and a connect attempt fails.
+# Exit 3: another interface. 4: the connect attempt worked or could not be made. 5: /proc/net/dev unreadable.
+# Without a python in the image there is no connect client, and the interface check stands alone.
+_NETCUT_PROBE = """set -f
+[ -r /proc/net/dev ] || { echo "cannot read /proc/net/dev" >&2; exit 5; }
+bad=; lo=
+while IFS=: read -r name rest; do
+  case "$name" in "Inter-|"*|" face |"*) continue ;; esac
+  set -- $name
+  [ $# -eq 0 ] && continue
+  if [ "$1" = lo ]; then lo=1; else bad="$bad $1"; fi
+done < /proc/net/dev
+if [ -n "$bad" ]; then echo "non-loopback interfaces:$bad" >&2; exit 3; fi
+[ -n "$lo" ] || { echo "no loopback in /proc/net/dev" >&2; exit 5; }
+py=$(command -v python3 || command -v python || true)
+if [ -n "$py" ]; then
+  "$py" -c 'import socket, sys
+s = socket.socket()
+s.settimeout(3)
+try:
+    s.connect(("1.1.1.1", 443))
+except OSError:
+    sys.exit(0)
+sys.exit(1)' && exit 0
+  echo "connect attempt did not fail" >&2
+  exit 4
+fi
+exit 0
+"""
 
 
 class _SandboxTimeout(RuntimeError):
@@ -853,6 +931,38 @@ def _sdk_exceptions():
     except ImportError:
         return None
     return exceptions
+
+
+def _http_status(exc: BaseException) -> int | None:
+    for name in ("status", "status_code"):
+        value = getattr(exc, name, None)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
+
+
+def _describe_error(exc: BaseException) -> str:
+    """Class name and HTTP status, nothing else: an SDK error's repr carries the URL, headers and server text."""
+    status = _http_status(exc)
+    return type(exc).__name__ if status is None else f"{type(exc).__name__} (HTTP {status})"
+
+
+def _halt_for_payment(exc: BaseException, budget: Budget) -> BudgetExceeded | None:
+    """HTTP 402 halts every paid call (CLAUDE.md rule 1). Returns the error to raise, or None for any other status."""
+    if _http_status(exc) != 402:
+        return None
+    budget.halt("HTTP 402 from Sandboxes: payment required")
+    return BudgetExceeded("HTTP 402 from Sandboxes; the budget is halted")
+
+
+def _server_timed_out(res: object) -> bool:
+    """The server's own timed_out flag, read from private SDK fields. Missing means unknown, and unknown raises."""
+    raw = getattr(res, "_raw", None)  # private in the SDK
+    state = getattr(getattr(raw, "result", None), "state", None)
+    flag = getattr(state, "timed_out", None)
+    if flag is True or flag is False:
+        return flag
+    raise RuntimeError("sandbox result did not say whether it timed out; refusing to guess")
 
 
 def _default_client():
@@ -907,16 +1017,19 @@ class SandboxExecutor:
                     ) from exc
             return self._client
 
-    def _resolve_image(self, image: str):
+    def _resolve_image(self, image: str, budget: Budget | None = None):
         """The SDK image object for a name. Task images (swebench/*) are imported from the registry on first use and
         found by tag after that; any other name is looked up by tag with no import."""
         client = self._get_client()
         try:
             return client.images.oci(image) if is_task_image(image) else client.images.use(image)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - only the class name and status leave this function
+            paid = None if budget is None else _halt_for_payment(exc, budget)
+            if paid is not None:
+                raise paid from None
             raise ExecutorUnavailable(
-                f"image {image} could not be resolved: {type(exc).__name__}: {exc}"
-            ) from exc
+                f"image {image} could not be resolved: {_describe_error(exc)}"
+            ) from None
 
 
 class SandboxSession(Session):
@@ -929,19 +1042,24 @@ class SandboxSession(Session):
         self._client = executor._get_client()  # before the reservation: a missing SDK or key counts no run
         self._closed = False
         self._base_image = None
-        self._cur = None
+        self._cur = None  # None: no live sandbox (a reset was refused, or a call lost its image)
         self._base = ""
         self._untracked: bytes | None = None
-        self._netns: list[
-            str
-        ] = []  # argv prefix that cuts the network; empty when the network is on or trusted off
+        # argv prefix that cuts the network: [unshare path, flag]. Empty when the network is on or trusted off.
+        self._netns: list[str] = []
+        # sha256 of each file the wrapper depends on, pinned from the base image. None: the file is absent.
+        self._pinned: dict[str, str | None] = {}
+        self._verified: object = None  # uuid of the last image whose pinned files matched
         self._launch()
 
     def _launch(self) -> None:
-        # A paid session books one sandbox run before any import or exec. BudgetExceeded propagates.
-        self._budget.reserve_sandbox_run()
+        # Dead until the new run is booked: a reset the budget refuses leaves no live sandbox, as DockerSession's
+        # container is already gone at that point. Only a successful reset revives the session.
+        self._cur = None
+        self._verified = None
+        self._budget.reserve_sandbox_run()  # a paid session books one run before any import or exec
         if self._base_image is None:
-            image = self._executor._resolve_image(self._env.image)
+            image = self._executor._resolve_image(self._env.image, self._budget)
             self._base_image = image
             self._cur = image
             self._probe_network()
@@ -949,9 +1067,63 @@ class SandboxSession(Session):
             self._untracked = self._untracked_paths()
         self._cur = self._base_image
 
-    def _live(self) -> None:
+    def _open(self) -> None:
         if self._closed:
             raise RuntimeError("session is closed")
+
+    def _live(self) -> None:
+        self._open()
+        if self._cur is None:
+            raise RuntimeError("no live sandbox: the last reset() or call failed; call reset() again")
+
+    def _translate(self, exc: Exception, timeout: float | None = None) -> Exception | None:
+        """The error to raise for an SDK error, or None for any other exception (the caller re-raises that one).
+        Never carries the SDK error's text: its repr holds the URL and headers. HTTP 402 halts the budget."""
+        sdk = _sdk_exceptions()
+        if sdk is None or not isinstance(exc, sdk.ContreeError):
+            return None
+        if timeout is not None and isinstance(exc, sdk.OperationTimedOutError):
+            return _SandboxTimeout(f"sandbox operation timed out after {timeout:g}s")
+        paid = _halt_for_payment(exc, self._budget)
+        if paid is not None:
+            return paid
+        return RuntimeError(f"sandbox call failed: {_describe_error(exc)}")
+
+    def _check_cost(self, res: object) -> None:
+        """Sandboxes beta runs are free. A result that reports any cost means billing started: halt, then stop."""
+        cost = getattr(res, "cost", None)
+        if cost is None:
+            return
+        if isinstance(cost, bool) or not isinstance(cost, (int, float)) or cost != 0:  # nan counts as a cost
+            self._budget.halt("a Sandboxes result reported a cost above 0: billing has started")
+            raise BudgetExceeded("a Sandboxes result reported a cost; the budget is halted")
+
+    def _digest(self, image, path: str) -> str | None:
+        """sha256 of a file in an image, read by the host over the SDK. None when the file is absent."""
+        try:
+            data = image.read(path)
+        except Exception as exc:
+            sdk = _sdk_exceptions()
+            if sdk is not None and isinstance(exc, sdk.NotFoundError):
+                return None
+            err = self._translate(exc)
+            if err is None:
+                raise
+            raise err from None
+        return hashlib.sha256(_as_bytes(data)).hexdigest()
+
+    def _verify_wrapper(self, image) -> None:
+        """Refuse when a file the network wrapper depends on differs from the base image. The base image is trusted
+        by construction, and an image that already passed is not read again."""
+        if image is self._base_image:
+            return
+        key = getattr(image, "uuid", None)
+        if key is not None and key == self._verified:
+            return
+        for path, expected in self._pinned.items():
+            if self._digest(image, path) != expected:
+                raise ExecutorRefused("network wrapper tampered")
+        self._verified = key
 
     def _call(
         self,
@@ -961,12 +1133,21 @@ class SandboxSession(Session):
         stdin: bytes | None = None,
         disposable: bool,
         cap: int = MAX_OUTPUT_BYTES,
+        wrap: bool = True,
     ) -> tuple[Result, bool]:
-        """One exec on the current image. Returns (result with raw decoded streams, server_cut). A non-disposable call
-        advances the current image. Raises _SandboxTimeout on an operation timeout, RuntimeError on an SDK error."""
+        """One exec on the current image, under the network wrapper unless wrap=False (only the start probe, which
+        runs the wrapper itself). Returns (result with raw decoded streams, server_cut). A non-disposable call
+        advances the current image. Raises _SandboxTimeout on an operation timeout, RuntimeError on an SDK error,
+        BudgetExceeded on HTTP 402 or a reported cost, ExecutorRefused when the wrapper was tampered with."""
+        image = self._cur
+        if image is None:
+            raise RuntimeError("no live sandbox: the last reset() or call failed; call reset() again")
+        if wrap and self._netns:
+            self._verify_wrapper(image)
+            argv = [*self._netns, *argv]
         started = self._executor._clock()
         try:
-            done = self._cur.run(
+            done = image.run(
                 argv[0],
                 args=argv[1:],
                 cwd=self._env.workdir,
@@ -978,41 +1159,62 @@ class SandboxSession(Session):
                 truncate_output_at=cap,
             ).wait()
         except Exception as exc:
-            sdk = _sdk_exceptions()
-            if sdk is not None and isinstance(exc, sdk.OperationTimedOutError):
-                raise _SandboxTimeout(f"sandbox operation timed out after {timeout:g}s") from exc
-            if sdk is not None and isinstance(exc, sdk.ContreeError):
-                raise RuntimeError(f"sandbox call failed: {type(exc).__name__}: {exc}") from exc
-            raise
+            err = self._translate(exc, timeout)
+            if err is None:
+                raise
+            raise err from None
         res = done.result
-        if not disposable and getattr(done, "uuid", None) is not None:
-            self._cur = done
-        raw = getattr(res, "_raw", None)  # private in the SDK: the server's own timed_out flag
-        state = getattr(getattr(raw, "result", None), "state", None)
-        if getattr(state, "timed_out", False) is True:
+        self._check_cost(res)
+        if _server_timed_out(res):
             raise _SandboxTimeout(f"sandbox flagged a timeout after {timeout:g}s")
-        out, err = (_as_bytes(res.stdout), _as_bytes(res.stderr))
+        if not disposable:
+            if getattr(done, "uuid", None) is None:
+                # The call ran but the next image is unknown. Keeping the old one would drop its effects without
+                # a word, so the session is dead until reset() (the same rule as a refused reset).
+                self._cur = None
+                raise RuntimeError("sandbox returned no image for a state-changing call; call reset()")
+            self._cur = done
+        out, err_bytes = (_as_bytes(res.stdout), _as_bytes(res.stderr))
         elapsed = self._executor._clock() - started
         cut = bool(res.truncated)
         return Result(
-            res.exit_code, out.decode("utf-8", "replace"), err.decode("utf-8", "replace"), elapsed
+            res.exit_code, out.decode("utf-8", "replace"), err_bytes.decode("utf-8", "replace"), elapsed
         ), cut
 
     def _probe_network(self) -> None:
         if self._env.network or self._executor._trust_no_network:
             return
-        for prefix in _NETNS_PREFIXES:
-            try:
-                res, _ = self._call([*prefix, "true"], timeout=IO_TIMEOUT_S, disposable=True)
-            except RuntimeError:
-                continue
-            if res.exit_code == 0:
-                self._netns = list(prefix)
-                return
-        raise ExecutorUnavailable(
-            "cannot cut the network in this sandbox (unshare -n failed); nothing was run. "
+        refusal = (
+            "cannot cut the network in this sandbox ({why}); nothing was run. "
             f"Set {SANDBOX_TRUSTED_ENV}=1 only if the platform has no egress"
         )
+        # SDK errors and timeouts propagate from here on: an outage is not a missing wrapper.
+        located, _ = self._call(
+            ["sh", "-c", _LOCATE_UNSHARE], timeout=IO_TIMEOUT_S, disposable=True, wrap=False
+        )
+        paths = [line for line in located.stdout.splitlines() if line.startswith("/")]
+        if located.exit_code != 0 or not paths:
+            raise ExecutorUnavailable(refusal.format(why="no unshare in the image"))
+        unshare = paths[0]
+        pinned = [*dict.fromkeys(paths)][:MAX_PINNED_FILES]
+        exits = []
+        for flag in _UNSHARE_FLAGS:
+            res, _ = self._call(
+                [unshare, flag, "sh", "-c", _NETCUT_PROBE], timeout=IO_TIMEOUT_S, disposable=True, wrap=False
+            )
+            if res.exit_code == 0:
+                digests = {path: self._digest(self._base_image, path) for path in pinned}
+                if any(digest is None for digest in digests.values()):
+                    raise ExecutorUnavailable(
+                        refusal.format(why="the wrapper files cannot be read to pin them")
+                    )
+                digests[_LD_SO_PRELOAD] = self._digest(self._base_image, _LD_SO_PRELOAD)
+                digests[_LD_SO_CACHE] = self._digest(self._base_image, _LD_SO_CACHE)
+                self._pinned = digests
+                self._netns = [unshare, flag]
+                return
+            exits.append(f"unshare {flag} exit {res.exit_code}")
+        raise ExecutorUnavailable(refusal.format(why=", ".join(exits)))
 
     def _base_commit(self) -> str:
         script = f"cd {shlex.quote(self._env.workdir)} && git rev-parse HEAD"
@@ -1040,7 +1242,7 @@ class SandboxSession(Session):
         limit = min(float(timeout), MAX_RUN_TIMEOUT_S)
         self._live()
         script = _IN_CONTAINER_TIMEOUT.format(seconds=max(1, math.ceil(limit)))
-        argv = [*self._netns, "sh", "-lc", script, "cheatproof", cmd]
+        argv = ["sh", "-lc", script, "cheatproof", cmd]
         try:
             res, cut = self._call(argv, timeout=limit, disposable=False)
         except _SandboxTimeout:
@@ -1093,7 +1295,7 @@ class SandboxSession(Session):
         return res.stdout
 
     def reset(self) -> None:
-        self._live()
+        self._open()
         self._launch()
 
     def close(self) -> None:

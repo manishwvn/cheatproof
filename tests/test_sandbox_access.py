@@ -33,8 +33,9 @@ class Probe:
 
 
 class FakeResult:
-    def __init__(self, stdout):
+    def __init__(self, stdout, cost=None):
         self.stdout = stdout
+        self.cost = cost
 
 
 class FakeImage:
@@ -53,6 +54,8 @@ class FakeImage:
         outcome = self.probe.next()
         if isinstance(outcome, BaseException):
             raise outcome
+        if isinstance(outcome, FakeResult):
+            return outcome
         return FakeResult(outcome)
 
 
@@ -71,14 +74,21 @@ class FakeClient:
 
 
 class FakeBudget:
-    def __init__(self, cap=None):
+    def __init__(self, cap=None, halt_error=None):
         self.reserved = 0
         self.cap = cap
+        self.halts = []
+        self.halt_error = halt_error
 
     def reserve_sandbox_run(self):
         if self.cap is not None and self.reserved >= self.cap:
             raise BudgetExceeded("sandbox run cap reached")
         self.reserved += 1
+
+    def halt(self, reason):
+        if self.halt_error is not None:
+            raise self.halt_error
+        self.halts.append(reason)
 
 
 def run_check(outcomes, budget=None):
@@ -104,7 +114,7 @@ def test_success_after_two_transient_failures(capsys):
     assert capsys.readouterr().out == "ACCESS OK\n"
     assert probe.runs == 3
     assert sleeps == [2, 4]
-    assert budget.reserved == 3
+    assert budget.reserved == 1  # one reservation per invocation, not per try
 
 
 def test_auth_failure_exit_2_without_retry(capsys):
@@ -128,7 +138,7 @@ def test_persistent_failure_exit_1_after_five_tries(capsys):
     assert capsys.readouterr().out == "ERROR TransientError\n"
     assert probe.runs == 5
     assert sleeps == [2, 4, 8, 16]
-    assert budget.reserved == 5
+    assert budget.reserved == 1
 
 
 def test_stdout_without_ok_is_error(capsys):
@@ -159,3 +169,43 @@ def test_output_never_contains_secret(capsys, outcomes):
     captured = capsys.readouterr()
     assert FAKE_SECRET not in captured.out
     assert FAKE_SECRET not in captured.err
+
+
+def test_one_reservation_covers_all_tries_even_at_cap_one(capsys):
+    code, probe, _, budget = run_check([TransientError()], budget=FakeBudget(cap=1))
+    assert code == 1
+    assert capsys.readouterr().out == "ERROR TransientError\n"
+    assert probe.runs == 5
+    assert budget.reserved == 1
+
+
+def test_402_halts_budget_without_retry(capsys):
+    code, probe, sleeps, budget = run_check([ApiStatusCodeError(status=402, error="payment required")])
+    assert code == 1
+    assert capsys.readouterr().out == "ERROR budget halted (402)\n"
+    assert probe.runs == 1
+    assert sleeps == []
+    assert len(budget.halts) == 1
+
+
+def test_paid_run_halts_budget_without_retry(capsys):
+    code, probe, sleeps, budget = run_check([FakeResult("ok\n", cost=0.01)])
+    assert code == 1
+    assert capsys.readouterr().out == "ERROR budget halted (cost)\n"
+    assert probe.runs == 1
+    assert sleeps == []
+    assert len(budget.halts) == 1
+
+
+def test_zero_cost_run_is_access_ok_and_does_not_halt(capsys):
+    code, _, _, budget = run_check([FakeResult("ok\n", cost=0)])
+    assert code == 0
+    assert capsys.readouterr().out == "ACCESS OK\n"
+    assert budget.halts == []
+
+
+def test_halt_that_cannot_be_written_is_reported_by_class(capsys):
+    budget = FakeBudget(halt_error=BudgetExceeded("ledger is not valid JSON"))
+    code, _, _, _ = run_check([ApiStatusCodeError(status=402, error="payment required")], budget=budget)
+    assert code == 1
+    assert capsys.readouterr().out == "ERROR BudgetExceeded\n"
