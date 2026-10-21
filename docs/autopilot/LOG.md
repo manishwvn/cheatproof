@@ -244,3 +244,21 @@ progress 71% (15/25 tasks done, 8 days to submit)
 - Runnable now: T24 (rename) and T08 (eval run; no PR open, its needs are done). T01, T23, T25, T11 open 2026-10-21.
 - Main CI green, pre-push hook matches. No spend ($0), no alert (the cap resets on its own tonight).
 - Hand-back not due: T24 and T08 are `todo` and not owner-blocked. Daily audit skipped (no headroom).
+
+## 2026-10-20 routine (cycle 2026-10-20T19:24:11-05:00)
+progress 68% (15/26 tasks done, 8 days to submit)
+- Weekly window reset: W 0 at start, caps 95/95 (`~/.autopilot-pause` exists); emptied the old `weekly-cap` 99.
+- T08: `sphinx-doc__sphinx-8595` rerun on Docker (Super, combined prompt, 120k tokens, 30 steps): gold passes, empty
+  fails, attack inconclusive at the token limit. $0.034. n = 1. Kept uncommitted (`harden` keeps its image; use `batch`).
+- T08 batch (250k tokens, 40 steps) stopped before any model call: the pull grew colima's data disk on the Mac (17 GB
+  file for 6.3 GB used) and host free disk fell to 2 GB; the run watchdog killed it. Host later fell to 0.8 GB from
+  causes outside this repo. Alert sent; U17. Removed this cycle's two pushed worktrees.
+- PR #25 (U18): leakcheck skips values equal to `origin/main:.env.example` values, so certificates naming the public
+  model ID can be committed. Haiku built; Sonnet "fix first" (working-tree `.env.example` was a trust hole); one fix
+  round; Opus approve. PR #26 (U19): certifi 2026.10.19 for PYSEC-2026-4320 (pip-audit red on every branch).
+- Daily audit at 139e1e4: fresh clone green (1601 passed); Sonnet found 2 high, 2 medium, 4 low, queued as T26.
+- T26 built (2 Haiku builders in parallel), Sonnet "fix first" (3 high: silent resets could fake "not hackable"), one
+  Haiku fix round, Opus approve: PR #27 (U20), CI `test` green, `dependencies` red until #26. Item 7 deferred.
+- Spend: $0.034 (ledger $0.1214 to $0.1554). No Ultra, no Tavily, no sandbox runs.
+- Lessons: with colima, host free disk is the real limit (the VM file keeps freed blocks); a post-run reset must
+  surface to the attacker and grader or it fakes an honest-looking result.
