@@ -377,62 +377,6 @@ def test_internal_error_prints_a_generic_message_only(tmp_path, capsys, monkeypa
     assert captured.err == "leakcheck: internal error; the check did not finish\n"
 
 
-PUBLIC = "fakepublic-model-0123"  # 21 characters; a public value, like the model IDs in .env.example
-
-
-def test_value_also_in_sibling_env_example_is_not_flagged(tmp_path):
-    env = leak_env(tmp_path, f"MODEL={PUBLIC}\nTEST_TOKEN={FAKE}\n")
-    (tmp_path / ".env.example").write_text(f"MODEL={PUBLIC}\n", encoding="utf-8")
-    cert = write_bytes(tmp_path, "cert.md", f"model: {PUBLIC}\n")
-    r = cli(LEAKCHECK, "--env", env, cert)
-    assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
-
-
-def test_secret_absent_from_env_example_is_still_flagged_in_the_same_run(tmp_path):
-    env = leak_env(tmp_path, f"MODEL={PUBLIC}\nTEST_TOKEN={FAKE}\n")
-    (tmp_path / ".env.example").write_text(f"MODEL={PUBLIC}\n", encoding="utf-8")
-    cert = write_bytes(tmp_path, "cert.md", f"model: {PUBLIC}\n")
-    leaky = write_bytes(tmp_path, "leaky.md", f"model: {PUBLIC} key: {FAKE}\n")
-    r = cli(LEAKCHECK, "--env", env, cert, leaky)
-    assert (r.returncode, r.stdout) == (1, f"{leaky}\n")
-    assert FAKE not in r.stdout + r.stderr
-
-
-def test_explicit_public_file_is_used_instead_of_the_sibling(tmp_path):
-    env = leak_env(tmp_path, f"MODEL={PUBLIC}\nTEST_TOKEN={FAKE}\n")
-    (tmp_path / ".env.example").write_text("OTHER=unrelated-public-value\n", encoding="utf-8")
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    public = write_bytes(elsewhere, "public.env", f"MODEL={PUBLIC}\n")
-    cert = write_bytes(tmp_path, "cert.md", f"model: {PUBLIC}\n")
-    assert cli(LEAKCHECK, "--env", env, cert).returncode == 1  # sibling lacks the model, so it is flagged
-    r = cli(LEAKCHECK, "--env", env, "--public", public, cert)
-    assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
-
-
-@pytest.mark.parametrize("kind", ["missing", "directory"])
-def test_unreadable_explicit_public_file_exits_two_without_contents(tmp_path, kind):
-    env = leak_env(tmp_path, f"TEST_TOKEN={FAKE}\n")
-    leaky = write_bytes(tmp_path, "leaky.md", f"{FAKE}\n")
-    public = tmp_path / "absent.env"
-    if kind == "directory":
-        public = tmp_path / "public-dir"
-        public.mkdir()
-    r = cli(LEAKCHECK, "--env", env, "--public", public, leaky)
-    assert (r.returncode, r.stdout) == (2, "")
-    assert r.stderr == "leakcheck: cannot read public file\n"
-    assert FAKE not in r.stdout + r.stderr
-
-
-def test_substring_of_a_public_value_is_still_checked(tmp_path):
-    part = "fakepublic-model"  # 16 characters; a substring of PUBLIC, not a public value itself
-    (tmp_path / ".env.example").write_text(f"MODEL={PUBLIC}\n", encoding="utf-8")
-    env = leak_env(tmp_path, f"MODEL={PUBLIC}\nPART={part}\n")
-    hit = write_bytes(tmp_path, "hit.md", f"see {part} here\n")
-    r = cli(LEAKCHECK, "--env", env, hit)
-    assert (r.returncode, r.stdout) == (1, f"{hit}\n")
-
-
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 
 
@@ -480,6 +424,164 @@ def push(repo, *lines):
         text=True,
         cwd=repo,
         timeout=120,
+    )
+
+
+PUBLIC = "fakepublic-model-0123"  # 21 characters; a public value, like the model IDs in .env.example
+
+
+def origin_main_repo(tmp_path, env_example):
+    """Git repo whose origin/main commit holds env_example. Returns the repo path."""
+    path = tmp_path / "repo"
+    path.mkdir()
+    git(path, "init", "-q", "-b", "main")
+    for key, value in (
+        ("user.name", "test"),
+        ("user.email", "test@example.invalid"),
+        ("commit.gpgsign", "false"),
+        ("core.hooksPath", str(tmp_path / "no-hooks")),
+    ):
+        git(path, "config", key, value)
+    commit(path, {".env.example": env_example}, "base")
+    git(path, "update-ref", "refs/remotes/origin/main", "HEAD")
+    return path
+
+
+@needs_git
+def test_value_in_origin_main_env_example_is_not_flagged(tmp_path):
+    repo = origin_main_repo(tmp_path, f"MODEL={PUBLIC}\n")
+    env = leak_env(repo, f"MODEL={PUBLIC}\nTEST_TOKEN={FAKE}\n")
+    cert = write_bytes(repo, "cert.md", f"model: {PUBLIC}\n")
+    r = cli(LEAKCHECK, "--env", env, cert)
+    assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
+
+
+@needs_git
+def test_secret_absent_from_origin_main_is_still_flagged_in_the_same_run(tmp_path):
+    repo = origin_main_repo(tmp_path, f"MODEL={PUBLIC}\n")
+    env = leak_env(repo, f"MODEL={PUBLIC}\nTEST_TOKEN={FAKE}\n")
+    cert = write_bytes(repo, "cert.md", f"model: {PUBLIC}\n")
+    leaky = write_bytes(repo, "leaky.md", f"model: {PUBLIC} key: {FAKE}\n")
+    r = cli(LEAKCHECK, "--env", env, cert, leaky)
+    assert (r.returncode, r.stdout) == (1, f"{leaky}\n")
+    assert FAKE not in r.stdout + r.stderr
+
+
+@needs_git
+def test_value_only_in_edited_working_tree_env_example_is_still_flagged(tmp_path):
+    repo = origin_main_repo(tmp_path, "OTHER=unrelated-public-value\n")
+    (repo / ".env.example").write_text(f"TEST_TOKEN={FAKE}\n", encoding="utf-8")  # edited, never committed
+    env = leak_env(repo, f"TEST_TOKEN={FAKE}\n")
+    leaky = write_bytes(repo, "leaky.md", f"{FAKE}\n")
+    r = cli(LEAKCHECK, "--env", env, leaky)
+    assert (r.returncode, r.stdout) == (1, f"{leaky}\n")
+
+
+@pytest.mark.parametrize("kind", ["not-a-repo", "git-missing"])
+def test_without_git_no_value_is_public(tmp_path, monkeypatch, kind):
+    env = leak_env(tmp_path, f"MODEL={PUBLIC}\nTEST_TOKEN={FAKE}\n")
+    (tmp_path / ".env.example").write_text(f"MODEL={PUBLIC}\n", encoding="utf-8")  # never consulted
+    cert = write_bytes(tmp_path, "cert.md", f"model: {PUBLIC}\n")
+    leaky = write_bytes(tmp_path, "leaky.md", f"{FAKE}\n")
+    if kind == "git-missing":
+        empty_bin = tmp_path / "empty-bin"
+        empty_bin.mkdir()
+        monkeypatch.setenv("PATH", str(empty_bin))
+    else:
+        monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+    r = cli(LEAKCHECK, "--env", env, cert, leaky)
+    assert (r.returncode, r.stdout, r.stderr) == (1, f"{cert}\n{leaky}\n", "")
+
+
+@pytest.mark.parametrize("failure", ["timeout", "missing", "nonzero"])
+def test_git_timeout_or_failure_means_no_public_values(tmp_path, capsys, monkeypatch, failure):
+    leakcheck = load("leakcheck")
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+        if failure == "missing":
+            raise FileNotFoundError("git")
+        return subprocess.CompletedProcess(args, 128, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(leakcheck.subprocess, "run", fake_run)
+    env = leak_env(tmp_path, f"MODEL={PUBLIC}\nTEST_TOKEN={FAKE}\n")
+    cert = write_bytes(tmp_path, "cert.md", f"model: {PUBLIC}\n")
+    assert leakcheck.main(["--env", str(env), str(cert)]) == 1
+    assert capsys.readouterr().out == f"{cert}\n"
+    ((args, kwargs),) = calls
+    assert args == ["git", "-C", os.path.realpath(tmp_path), "show", "origin/main:.env.example"]
+    assert (kwargs["check"], kwargs["timeout"], kwargs["capture_output"]) == (False, 10, True)
+
+
+@needs_git
+def test_explicit_public_file_replaces_the_origin_main_default(tmp_path):
+    repo = origin_main_repo(tmp_path, f"MODEL={PUBLIC}\n")
+    env = leak_env(repo, f"MODEL={PUBLIC}\nTEST_TOKEN={FAKE}\n")
+    cert = write_bytes(repo, "cert.md", f"model: {PUBLIC}\n")
+    unrelated = write_bytes(tmp_path, "unrelated.env", "OTHER=unrelated-public-value\n")
+    assert cli(LEAKCHECK, "--env", env, "--public", unrelated, cert).returncode == 1
+    explicit = write_bytes(tmp_path, "public.env", f"MODEL={PUBLIC}\n")
+    r = cli(LEAKCHECK, "--env", env, "--public", explicit, cert)
+    assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
+
+
+@pytest.mark.parametrize("kind", ["missing", "directory"])
+def test_unreadable_explicit_public_file_exits_two_without_contents(tmp_path, kind):
+    env = leak_env(tmp_path, f"TEST_TOKEN={FAKE}\n")
+    leaky = write_bytes(tmp_path, "leaky.md", f"{FAKE}\n")
+    public = tmp_path / "absent.env"
+    if kind == "directory":
+        public = tmp_path / "public-dir"
+        public.mkdir()
+    r = cli(LEAKCHECK, "--env", env, "--public", public, leaky)
+    assert (r.returncode, r.stdout) == (2, "")
+    assert r.stderr == "leakcheck: cannot read public file\n"
+    assert FAKE not in r.stdout + r.stderr
+
+
+@needs_git
+def test_substring_of_a_public_value_is_still_checked(tmp_path):
+    part = "fakepublic-model"  # 16 characters; a substring of PUBLIC, not a public value itself
+    repo = origin_main_repo(tmp_path, f"MODEL={PUBLIC}\n")
+    env = leak_env(repo, f"MODEL={PUBLIC}\nPART={part}\n")
+    hit = write_bytes(repo, "hit.md", f"see {part} here\n")
+    r = cli(LEAKCHECK, "--env", env, hit)
+    assert (r.returncode, r.stdout) == (1, f"{hit}\n")
+
+
+@needs_git
+def test_public_value_with_escapes_is_skipped_by_its_decoded_form(tmp_path):
+    line = 'MODEL="fakepublic-line-one\\nfakepublic-line-two"\n'  # the file holds backslash and n
+    repo = origin_main_repo(tmp_path, line)
+    env = leak_env(repo, line + f"TEST_TOKEN={FAKE}\n")
+    decoded = write_bytes(repo, "decoded.md", "fakepublic-line-one\nfakepublic-line-two\n")
+    raw = write_bytes(repo, "raw.md", "fakepublic-line-one\\nfakepublic-line-two\n")
+    r = cli(LEAKCHECK, "--env", env, decoded, raw)
+    assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
+
+
+@needs_git
+def test_commented_out_public_line_does_not_make_its_value_public(tmp_path):
+    repo = origin_main_repo(tmp_path, f"# MODEL={PUBLIC}\n")
+    env = leak_env(repo, f"MODEL={PUBLIC}\nTEST_TOKEN={FAKE}\n")
+    cert = write_bytes(repo, "cert.md", f"model: {PUBLIC}\n")
+    r = cli(LEAKCHECK, "--env", env, cert)
+    assert (r.returncode, r.stdout) == (1, f"{cert}\n")
+
+
+@needs_git
+def test_env_whose_values_are_all_public_exits_two_with_its_own_message(tmp_path):
+    repo = origin_main_repo(tmp_path, f"MODEL={PUBLIC}\n")
+    env = leak_env(repo, f"MODEL={PUBLIC}\n")
+    cert = write_bytes(repo, "cert.md", f"model: {PUBLIC}\n")
+    r = cli(LEAKCHECK, "--env", env, cert)
+    assert (r.returncode, r.stdout, r.stderr.strip()) == (
+        2,
+        "",
+        "leakcheck: no values to check (all values are public)",
     )
 
 

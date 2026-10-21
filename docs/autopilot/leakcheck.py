@@ -9,20 +9,24 @@ literal; double quotes may span lines and decode backslash escapes; an unquoted 
 is searched for in its decoded and its raw text, encoded as UTF-8, UTF-16-LE and UTF-16-BE. Target files
 are read as bytes.
 
-A value that equals a whole value in the public file (`--public`, or else a `.env.example` beside the env
-file when one exists) is not checked, so public settings such as model IDs do not count as leaks.
+A value that equals a whole value in the public file is not checked, so public settings such as model IDs do
+not count as leaks. The public file is `--public` when given. Otherwise it is `.env.example` as committed on
+`origin/main`, read with `git -C <directory of the env file> show`. A working-tree copy is never used, so an
+edit that has not been committed cannot hide a value. When git is missing, fails or times out, or origin/main
+has no `.env.example`, no value is public.
 
 Stdout holds the name of each given file that contains one of those values, and nothing else: never a value
 and never a key name. Exit codes: 0 clean, 1 at least one file leaks, 2 usage error, a missing or unreadable
-env file, a public file that cannot be read (`--public`, or an existing `.env.example` beside the env file),
-an env file with no value of 12+ characters left to check, a target that cannot be read, or an internal
-error. Messages on stderr carry no file contents.
+env file, a `--public` file that cannot be read, an env file with no value of 12+ characters to check (none at
+all, or every one public), a target that cannot be read, or an internal error. Messages on stderr carry no
+file contents.
 
 Run it before any alert, LOG block, PR body, commit or learn-*.txt write.
 """
 import argparse
 import os
 import re
+import subprocess
 import sys
 
 MIN_LEN = 12
@@ -93,10 +97,29 @@ def needles(pairs):
     return found
 
 
+def origin_main_example(env_dir):
+    """Return .env.example as committed on origin/main, or None when git cannot supply it."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", env_dir, "show", "origin/main:.env.example"],
+            check=False,
+            capture_output=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):  # git is missing, or it timed out
+        return None
+    if done.returncode != 0:
+        return None
+    try:
+        return done.stdout.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return None
+
+
 def check(argv):
     p = argparse.ArgumentParser(description="Report which files contain a literal value from an env file.")
     p.add_argument("--env", required=True, help="env file with KEY=VALUE lines")
-    p.add_argument("--public", help="env file of public values to skip (default: .env.example beside --env)")
+    p.add_argument("--public", help="env file of public values to skip (default: origin/main:.env.example)")
     p.add_argument("files", nargs="+", help="files to check")
     a = p.parse_args(argv)
     try:
@@ -108,24 +131,23 @@ def check(argv):
     except (OSError, UnicodeDecodeError):
         print("leakcheck: cannot read env file", file=sys.stderr)
         return 2
-    public_path = a.public
-    if public_path is None:
-        public_path = os.path.join(os.path.dirname(a.env), ".env.example")
-    try:
-        with open(public_path, encoding="utf-8-sig") as fh:
-            public_text = fh.read()
-    except FileNotFoundError:
-        if a.public is not None:
+    if a.public is None:
+        example = origin_main_example(os.path.dirname(os.path.realpath(a.env)))
+        public = set() if example is None else {decoded for decoded, _ in env_pairs(example)}
+    else:
+        try:
+            with open(a.public, encoding="utf-8-sig") as fh:
+                public = {decoded for decoded, _ in env_pairs(fh.read())}
+        except (OSError, UnicodeDecodeError):
             print("leakcheck: cannot read public file", file=sys.stderr)
             return 2
-        public_text = ""  # no sibling .env.example, so no value is public
-    except (OSError, UnicodeDecodeError):
-        print("leakcheck: cannot read public file", file=sys.stderr)
-        return 2
-    public = {decoded for decoded, _ in env_pairs(public_text)}
-    values = needles([pair for pair in env_pairs(text) if pair[0] not in public])
+    pairs = env_pairs(text)
+    values = needles([pair for pair in pairs if pair[0] not in public])
     if not values:
-        print("leakcheck: no values to check", file=sys.stderr)
+        if any(len(decoded) >= MIN_LEN for decoded, _ in pairs):
+            print("leakcheck: no values to check (all values are public)", file=sys.stderr)
+        else:
+            print("leakcheck: no values to check", file=sys.stderr)
         return 2
     leaks, unreadable = [], []
     for name in a.files:
