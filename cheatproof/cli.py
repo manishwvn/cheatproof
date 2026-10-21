@@ -283,7 +283,8 @@ def _spent_since(budget: Any, spent_before: float) -> float | None:
     delta is not a finite number of 0 or more. Used when harden stops a paid run, so the stop keeps its own reason."""
     try:
         spent_after = _ledger_total(budget)
-    except (BudgetExceeded, OSError):  # an unreadable or corrupt ledger: the stop is reported, without a cost
+    except Exception:  # noqa: BLE001 - any ledger read error (BudgetExceeded, OSError, ValueError, KeyError, ...): the
+        # stop is reported with its own reason, without a cost, and the batch writes its not_run row
         return None
     if spent_after is None:
         return None

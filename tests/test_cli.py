@@ -1679,6 +1679,36 @@ def test_a_batch_stop_with_an_unreadable_ledger_is_a_row_without_a_cost(tmp_path
 
 
 @pytest.mark.parametrize(
+    "ledger_error",
+    [
+        KeyError("total_usd"),
+        json.JSONDecodeError("Expecting value", "", 0),
+        RuntimeError("ledger lock poisoned"),
+    ],
+    ids=["key-error", "json-error", "runtime-error"],
+)
+def test_any_ledger_read_error_during_a_stop_is_a_not_run_row_not_an_abort(tmp_path, ledger_error):
+    class LedgerErrorsAfterTheRun:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def snapshot(self) -> dict:
+            self.reads += 1
+            if self.reads > 1:
+                raise ledger_error
+            return {"total_usd": 0.10, "days": {}, "sandbox_runs": 0, "halted": None}
+
+    spy = Spy()
+    out = out_dir(tmp_path)
+    deps = batch_deps(spy, batch_tasks(ID_A), make_budget=LedgerErrorsAfterTheRun)
+    deps = dataclasses.replace(deps, harden=harden_stopping_at(spy, ID_A, DiskRefused("no room to reset")))
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0
+    state = read_batch(out)
+    assert state["not_run"] == [{"instance_id": ID_A, "reason": "disk", "error": "no room to reset"}]
+    assert (state["run"], state["already_certified"]) == (0, 0)
+
+
+@pytest.mark.parametrize(
     ("before", "after"),
     [(0.25, 0.10), (0.10, float("nan")), (0.10, float("inf"))],
     ids=["went-down", "nan", "infinite"],

@@ -22,7 +22,6 @@ from cheatproof.executor import (
     MAX_RUN_TIMEOUT_S,
     OUTPUT_KILL_EXIT_CODE,
     OUTPUT_MARGIN_BYTES,
-    POST_RUN_CHECK_INTERVAL_S,
     PULL_TIMEOUT_S,
     RUN_TIMEOUT_S,
     TASK_IMAGE_PREFIXES,
@@ -1229,11 +1228,11 @@ def test_release_image_removes_only_task_images():
 
 
 def test_pull_check_uses_docker_image_store_free_space(tmp_path):
-    # Host has 7 GB (above the floor for runs), the VM store has 90 GB: the pull goes ahead.
+    # Host has 12 GB (7.5 GB after a 4.5 GB pull, above the floor), the VM store has 90 GB: the pull goes ahead.
     fake = FakeDocker(image_present=False)
     executor = DockerExecutor(
         runner=fake,
-        disk_free_gb=lambda: 7.0,
+        disk_free_gb=lambda: 12.0,
         min_free_gb=5.0,
         image_store_free_gb=lambda: 90.0,
         platform="linux",
@@ -1257,21 +1256,154 @@ def test_pull_refused_when_image_store_is_low(tmp_path):
     assert fake.runs() == []
 
 
-def test_colima_store_free_parses_df_and_falls_back():
-    df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/vdb1 102624184 2643668 94721356 3% /var/lib/docker\n"
+COLIMA_DF = (
+    "Filesystem 1024-blocks Used Available Capacity Mounted on\n"
+    "/dev/vdb1 102624184 2643668 94721356 3% /var/lib/docker\n"
+)
+
+
+@pytest.fixture(autouse=True)
+def colima_absent(monkeypatch):
+    """colima is looked up on this machine's PATH. Tests answer for it: absent, unless a test asks for it present."""
+    monkeypatch.setattr("cheatproof.executor._colima_installed", lambda: False)
+
+
+@pytest.fixture
+def colima_present(monkeypatch):
+    monkeypatch.setattr("cheatproof.executor._colima_installed", lambda: True)
+
+
+def test_colima_store_free_reads_the_var_lib_docker_row(colima_present):
+    def runner(argv, timeout, stdin=None, max_bytes=None):
+        assert argv == ["colima", "ssh", "--", "df", "-Pk", "/var/lib/docker"]
+        return Result(0, COLIMA_DF, "", 0.0)
+
+    assert round(DockerExecutor(runner=runner, platform="linux")._colima_store_free_gb(), 1) == 90.3
+
+
+def test_colima_store_free_takes_the_docker_row_not_the_last_line(colima_present):
+    # Another mount listed after /var/lib/docker: the last line is not the image store.
+    df = COLIMA_DF + "tmpfs 1000 0 1000 0% /run\n"
 
     def runner(argv, timeout, stdin=None, max_bytes=None):
-        assert argv[:2] == ["colima", "ssh"]
         return Result(0, df, "", 0.0)
 
     assert round(DockerExecutor(runner=runner, platform="linux")._colima_store_free_gb(), 1) == 90.3
 
-    def missing(argv, timeout, stdin=None, max_bytes=None):
-        raise FileNotFoundError("colima")
 
-    assert DockerExecutor(runner=missing, platform="linux")._colima_store_free_gb() is None
-    failed = DockerExecutor(runner=lambda *a, **k: Result(1, "", "no vm", 0.0), platform="linux")
-    assert failed._colima_store_free_gb() is None
+def test_colima_df_without_a_docker_row_is_unreadable(colima_present):
+    df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/vda1 1 1 1 1% /\n"
+
+    def runner(argv, timeout, stdin=None, max_bytes=None):
+        return Result(0, df, "", 0.0)
+
+    with pytest.raises(DiskRefused, match="image store unreadable"):
+        DockerExecutor(runner=runner, platform="linux")._colima_store_free_gb()
+
+
+def test_colima_store_free_is_none_when_colima_is_not_installed():
+    def runner(argv, timeout, stdin=None, max_bytes=None):
+        raise AssertionError("colima is not installed: nothing may be asked of it")
+
+    assert DockerExecutor(runner=runner, platform="linux")._colima_store_free_gb() is None
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        Result(1, "", "no vm", 0.0),
+        Result(TIMEOUT_EXIT_CODE, "", "\n[timed out after 120s]", 0.0, timed_out=True),
+        Result(OUTPUT_KILL_EXIT_CODE, COLIMA_DF, "", 0.0, truncated=True),
+        ExecutorUnavailable("colima not found on PATH"),
+        OSError("ssh could not start"),
+    ],
+    ids=["ssh-fails", "ssh-times-out", "ssh-output-cut", "colima-vanished", "os-error"],
+)
+def test_colima_ssh_that_fails_is_unreadable_not_the_host_disk(colima_present, answer):
+    def runner(argv, timeout, stdin=None, max_bytes=None):
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    with pytest.raises(DiskRefused, match="image store unreadable"):
+        DockerExecutor(runner=runner, disk_free_gb=lambda: 100.0, platform="linux")._colima_store_free_gb()
+
+
+def test_colima_ssh_failure_refuses_the_pull_and_starts_nothing(tmp_path, colima_present):
+    # The host has 100 GB, but colima is installed and its store cannot be read: no fallback to the host.
+    fake = FakeDocker(image_present=False)
+
+    def runner(argv, timeout, stdin=None, max_bytes=None):
+        if argv[:1] == ["colima"]:
+            return Result(1, "", "vm not running", 0.0)
+        return fake(argv, timeout, stdin, max_bytes=max_bytes)
+
+    budget = make_budget(tmp_path)
+    with pytest.raises(DiskRefused, match="image store unreadable"):
+        DockerExecutor(runner=runner, disk_free_gb=lambda: 100.0, platform="linux").start(TASK_ENV, budget)
+    assert fake.argvs(["docker", "pull"]) == []
+    assert fake.runs() == []
+    assert local_runs(budget) == 0
+
+
+def test_colima_absent_pull_is_measured_on_the_host(tmp_path):
+    # colima is not installed: the host disk counts. 15 GB less the 4.5 GB pull keeps the 10 GB floor.
+    fake = FakeDocker(image_present=False)
+    executor = DockerExecutor(runner=fake, disk_free_gb=lambda: 15.0, platform="linux")
+    with executor.start(TASK_ENV, make_budget(tmp_path)):
+        pass
+    assert len(fake.argvs(["docker", "pull"])) == 1
+
+
+def test_colima_pull_refused_when_the_host_disk_would_drop_under_the_floor(tmp_path):
+    # The VM store has 90 GB, but the pull grows the VM disk file on the Mac: 14 GB less 4.5 GB is under 10 GB.
+    fake = FakeDocker(image_present=False)
+    executor = DockerExecutor(
+        runner=fake,
+        disk_free_gb=lambda: 14.0,
+        image_store_free_gb=lambda: 90.0,
+        platform="linux",
+    )
+    with pytest.raises(DiskRefused, match="free host disk"):
+        executor.start(TASK_ENV, make_budget(tmp_path))
+    assert fake.argvs(["docker", "pull"]) == []
+
+
+def test_colima_pull_allowed_when_host_and_store_both_keep_the_floor(tmp_path):
+    fake = FakeDocker(image_present=False)
+    executor = DockerExecutor(
+        runner=fake,
+        disk_free_gb=lambda: 15.0,
+        image_store_free_gb=lambda: 90.0,
+        platform="linux",
+    )
+    with executor.start(TASK_ENV, make_budget(tmp_path)):
+        pass
+    assert len(fake.argvs(["docker", "pull"])) == 1
+
+
+def test_pull_killed_at_the_output_cap_is_unavailable_and_starts_nothing(tmp_path):
+    # docker pull that printed past the cap is killed (exit 137, truncated): a failed pull, with the tail of stderr.
+    answer = Result(OUTPUT_KILL_EXIT_CODE, "", "x" * 2000 + "layer 3 failed", 0.0, truncated=True)
+    fake = FakeDocker(image_present=False, pull_result=answer)
+    budget = make_budget(tmp_path)
+    with pytest.raises(ExecutorUnavailable, match=r"docker pull failed \(137\)") as info:
+        make_docker(fake).start(TASK_ENV, budget)
+    assert str(info.value).endswith("layer 3 failed")
+    assert len(str(info.value)) < 600  # the tail is kept, not the whole output
+    assert fake.runs() == []
+    assert local_runs(budget) == 1
+
+
+def test_daemon_lost_mid_pull_is_unavailable_and_starts_nothing(tmp_path):
+    answer = Result(1, "", "Cannot connect to the Docker daemon at unix:///var/run/docker.sock.", 0.0)
+    fake = FakeDocker(image_present=False, pull_result=answer)
+    budget = make_budget(tmp_path)
+    with pytest.raises(ExecutorUnavailable, match="Cannot connect to the Docker daemon"):
+        make_docker(fake).start(TASK_ENV, budget)
+    assert fake.runs() == []
+    assert fake.names_removed() == []
+    assert local_runs(budget) == 1
 
 
 @pytest.fixture(autouse=True)
@@ -1469,24 +1601,75 @@ def store_executor(fake, store, *, min_free_gb=10.0, run_min_free_gb=2.0, clock=
     )
 
 
-def test_post_run_check_runs_on_the_first_run_then_once_per_interval(tmp_path):
-    clock = FakeClock()
-    checked_at = []
+def test_post_run_check_runs_after_every_command(tmp_path):
+    checks = []
 
     def store():
-        checked_at.append(clock.now)
+        checks.append(True)
         return 90.0
 
     fake = FakeDocker()
-    with store_executor(fake, store, clock=clock).start(ENV, make_budget(tmp_path)) as s:
-        s.run("true", timeout=5)  # the first run always checks
-        s.run("true", timeout=5)  # inside the interval: no check
-        clock.now = POST_RUN_CHECK_INTERVAL_S - 1
-        s.run("true", timeout=5)  # still inside the interval: no check
-        clock.now = POST_RUN_CHECK_INTERVAL_S
-        s.run("true", timeout=5)  # the interval has passed: checked again
-    assert checked_at == [0.0, float(POST_RUN_CHECK_INTERVAL_S)]
+    with store_executor(fake, store).start(ENV, make_budget(tmp_path)) as s:
+        for _ in range(3):
+            s.run("true", timeout=5)
+    assert len(checks) == 3
     assert len(fake.runs()) == 1  # no reset on a healthy run
+
+
+def test_command_that_fills_the_disk_is_caught_on_completion(tmp_path):
+    # Same clock reading for both runs: the second command fills the store and is refused at once, not at a later check.
+    free = [90.0]
+    fake = FakeDocker()
+    s = store_executor(fake, lambda: free[0]).start(ENV, make_budget(tmp_path))
+    assert s.run("true", timeout=5).exit_code == 0
+    free[0] = 1.5
+    with pytest.raises(DiskRefused, match="RUN_MIN_FREE_GB=2") as info:
+        s.run("dd if=/dev/zero of=/x bs=1M count=9999", timeout=5)
+    assert info.value.result is not None and info.value.result.exit_code == 0
+    assert len(fake.runs()) == 1  # no reset: the sandbox stays as the run left it
+    s.close()
+
+
+def test_disk_refused_after_a_kill_and_reset_keeps_the_reset_note(tmp_path):
+    free = [90.0]
+    fake = FakeDocker()
+    s = store_executor(fake, lambda: free[0]).start(ENV, make_budget(tmp_path))
+    fake.exec_result = Result(TIMEOUT_EXIT_CODE, "", "\n[timed out after 5s]", 0.0, timed_out=True)
+    free[0] = 1.5  # the disk is low by the time the killed command's sandbox has been reset
+    with pytest.raises(DiskRefused, match="sandbox was reset") as info:
+        s.run("sleep 99", timeout=5)
+    res = info.value.result
+    assert res is not None and res.reset is True and res.timed_out is True
+    assert res.exit_code == TIMEOUT_EXIT_CODE and "[timed out after 5s]" in res.stderr
+    assert len(fake.runs()) == 2  # the reset started a fresh container before the check
+    s.close()
+
+
+def test_unreadable_image_store_after_a_run_refuses_and_poisons_the_session(tmp_path, colima_present):
+    fake = FakeDocker()
+    colima_down = [False]
+
+    def runner(argv, timeout, stdin=None, max_bytes=None):
+        if argv[:1] == ["colima"]:
+            return Result(1, "", "vm stopped", 0.0) if colima_down[0] else Result(0, COLIMA_DF, "", 0.0)
+        return fake(argv, timeout, stdin, max_bytes=max_bytes)
+
+    clock = FakeClock()
+    executor = DockerExecutor(
+        runner=runner,
+        disk_free_gb=lambda: 100.0,
+        min_free_gb=10.0,
+        platform="linux",
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    s = executor.start(ENV, make_budget(tmp_path))
+    colima_down[0] = True
+    with pytest.raises(DiskRefused, match="image store unreadable"):
+        s.run("true", timeout=5)
+    with pytest.raises(DiskRefused, match="image store unreadable"):
+        s.run("true", timeout=5)  # poisoned: refused before docker is asked anything
+    s.close()
 
 
 def test_healthy_run_right_after_a_pull_does_not_trip_the_post_run_check(tmp_path):
