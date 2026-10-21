@@ -82,10 +82,13 @@ caller: (1) when the `colima` binary exists but `colima ssh` fails or times out,
 (`shutil.which("colima") is None`). (2) Parse the df row whose last field is `/var/lib/docker`, not `lines[-1]`.
 (3) CYCLE.md section 0: the "alert the owner when free disk is under 10 GB" rule names both the host disk and the
 Docker image store. (4) Routine 2026-10-20: with colima the pull also grows the VM data disk file on the Mac, which
-keeps freed blocks, so the guard must also refuse when host free disk minus the pull estimate is under the floor. Units already match (`GIB = 1024**3`, used by `_root_free_gb` too). Tests for each case with a
+keeps freed blocks, so the guard must also refuse when host free disk minus the pull estimate is under the floor. Units already match (`GIB = 1024**3`, used by `_root_free_gb` too). Also from the PR #27 review (all medium): (4) the post-run disk check runs at most every 30 s,
+so a command can fill the disk inside that window; (5) a `DiskRefused` after a kill-and-reset replaces the `Result`,
+dropping the reset note; (6) `cli._spent_since` catches only `BudgetExceeded`/`OSError`, so another ledger error can
+abort the batch instead of writing a not_run row; (7) add tests for `_pull` truncated output and mid-pull daemon loss. Tests for each case with a
 fake runner. `executor.py` is a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
 
-### T26 Executor and batch audit fixes before the 40-task run (audit 2026-10-20, planner-merge PR) — size M — waiting: U20 (PR #27)
+### T26 Executor and batch audit fixes before the 40-task run (audit 2026-10-20, planner-merge PR) — size M — done #27
 Sonnet daily audit of `eafa80c..139e1e4` (verified in code, not run). In `cheatproof/executor.py`: (1, high) task
 images are matched by the `swebench/` prefix only, but `tasks.py` also accepts `swerebench/`; such images are never
 released or counted by `TASK_IMAGE_CAP`, so the batch fills `DOCKER_IMAGE_CAP` and later pulls are refused. Use a
@@ -241,7 +244,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — waiting: U18, U20 — needs T23, T07, T16, T17, T18, T19, T20, T22
+### T08 Eval run and results with raw counts — size M — todo — needs T23, T07, T16, T17, T18, T19, T20, T22
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
@@ -348,7 +351,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
-- **U20 Review and merge PR #27 (T26 audit fixes)** (ready 2026-10-20; needed before T08 resumes): after U19, say
+- ~~**U20 Review and merge PR #27 (T26 audit fixes)**~~ Done 2026-10-21: PR #27 merged (Sonnet review: 0 critical). (ready 2026-10-20; needed before T08 resumes): after U19, say
   `review` in an interactive session to merge https://github.com/manishwvn/cheatproof/pull/27 (planner-merge path
   `cheatproof/executor.py`; low-disk latch, `Result.reset`, swerebench image prefix, fsize ulimit, pull timeout).
   Rerun its checks after #26. Then flip T26 to `done #27`.
@@ -356,7 +359,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
   branch): say `review` in an interactive session to merge https://github.com/manishwvn/cheatproof/pull/26 (certifi
   2026.7.22 to 2026.10.19 for PYSEC-2026-4320; only `uv.lock`, a planner-merge path). CI green. Then rerun PR #25's
   checks (U18).
-- **U18 Review and merge PR #25** (ready 2026-10-20; needed for T08 results): say `review` in an interactive session
+- ~~**U18 Review and merge PR #25**~~ Done 2026-10-21: PR #25 merged. (ready 2026-10-20; needed for T08 results): say `review` in an interactive session
   to merge https://github.com/manishwvn/cheatproof/pull/25 (leakcheck skips values that equal a public value in
   `origin/main:.env.example`, so certificates that name the model can be committed; planner-merge path
   `docs/autopilot/`). Sonnet review fixed in one round; Opus final review done.
