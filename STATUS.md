@@ -28,7 +28,8 @@
 - **Planner:** T22 (U11): Docker runs are booked at $0.05 each in `budget.py`, so the $4 daily cap would halt the
   40-task Docker run near task 16; plus `llm.py` timeout, workflow pins and git-ignoring `results/traces/`.
 - **Planner:** T16 (U9) attack strategy prompts and the Tavily budget counter; needed before live attacks (T08).
-- **Owner blockers:** U12 (Docker image cap blocks T08; by Oct 20), U3 (Sandboxes access). U7: colima is installed
+- **Owner blockers:** none for T08 (U12 and U3 done). Owner removed all local swebench images 2026-10-21: Sandboxes is
+  the default, no task assumes a local image. U7: colima is installed
   and runs (22 GB free on Oct 19). U10: merge
   PR #10 (planner-merge). U1 done
   2026-10-18: promo applied, key in `.env`, caps 20/4.
