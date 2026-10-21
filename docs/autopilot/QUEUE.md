@@ -7,7 +7,7 @@ Check: `python3 docs/autopilot/progress.py` counts the same tasks as
 
 ## Milestone: live access and executor
 
-### T01 Smoke test, model IDs and prices — size S — todo — after 2026-10-21 [85%]
+### T01 Smoke test, model IDs and prices — size S — waiting: U21 — after 2026-10-21 [85%]
 Run `uv run python scripts/smoke.py`. Live scripts load `.env` from the main checkout (the parent of `git rev-parse
 --git-common-dir`), so worktrees share one key file and never copy it. Record the exact Nemotron model IDs (Nano,
 Super, Ultra) from `/v1/models` and their per-1M prices from the public Token Factory price page into `.env.example`
@@ -76,7 +76,7 @@ Split for the team (size L): Sonnet builds the core `SandboxSession`; Haiku buil
 counter, tests and ADRs.
 Routine 2026-10-21 00:24: PR #30 open (planner merge). Live before hardening: access OK; gold passes, empty fails on psf__requests-1142; unshare -n, images.oci, image persistence confirmed. The hardened re-run halted the budget: a result carried `resources.cost != 0` (6 sandbox runs, ledger money unchanged). Left after U21: live-verify `-rn`, nsenter refusal, `image.read`, integrity pin; record the real-run fixture.
 
-### T25 Image-store disk check hardening (planner-merge PR) — size S — todo — after 2026-10-21
+### T25 Image-store disk check hardening (planner-merge PR) — size S — in-progress (cycle 2026-10-21T01:24:11-05:00) — after 2026-10-21
 From the Haiku review of PR #24 (0 blockers, 3 risks). In `cheatproof/executor.py` `_colima_store_free_gb` and its
 caller: (1) when the `colima` binary exists but `colima ssh` fails or times out, refuse the pull (`DiskRefused`,
 "image store unreadable") instead of falling back to host disk; fall back to host only when `colima` is absent
