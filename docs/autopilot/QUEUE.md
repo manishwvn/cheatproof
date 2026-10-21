@@ -54,23 +54,26 @@ USER item for the planner to merge. Do T02 first if both are runnable.
 Done 2026-10-18 (routine): PR #10 open, CI green, Sonnet review fixed (one round), Opus final review: ready. Items 10
 and 11 are below (T08, T12 text). Planner merges #10 (U10), then installs `docs/autopilot/pre-push`.
 
-### T23 Sandboxes access check and $0 booking (planner-merge PR) — size S — todo — after 2026-10-21
-Planner note 2026-10-20 (U3 done: Nebius emailed "access is active" 07:30Z). Image listing may stay forbidden while
-runs work, so `scripts/sandbox_access.py` must test a tiny run instead (`images.use("python:3.12-slim").run(...)`,
-free in beta). An owner-side check created operations, but polling `GET /sandboxes/v1/operations/<id>` returned HTTP
-500 twice. Steps: (1) change the check to a tiny run, polling with backoff (e.g. 5 tries, 2 s doubling); (2) if it
-succeeds, try importing one swebench task image and running its gold gate on the Sandbox executor; (3) if the 500
-persists, write an email draft for the owner to `contree@nebius.com` (file in `S/`, never sent by a routine) citing
-the operation IDs in `S/sandbox-ops.txt` and add a USER item to send it; keep T08 on Docker meanwhile.
-Every cycle while U3 is open, before picking work (even though this task waits on U3): run
-`uv run python scripts/sandbox_access.py` (free: whoami plus image list; never starts a sandbox run). Exit 2
-(`NO ACCESS`) means still waiting; exit 0 (`ACCESS OK`) means access is on. Checked 2026-10-19: key valid, image list
-forbidden. Log the result in one
-LOG.md line, never the IDs or the key. When it succeeds: flip this task and T01's sandbox part to `todo` and strike U3.
-Then: the Sandboxes page says beta runs are free and do not consume credits, so book Sandboxes sessions at $0 and count
-them toward `SANDBOX_RUN_CAP` only (a count-only path like `reserve_local_run()`), keep Docker as it is, record a
-fixture of the free-tier statement's effect (ledger unchanged after one run), and update ADR 0001/0002. `budget.py` is
-a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
+### T23 Sandbox executor and the eval on Sandboxes (TOP PRIORITY, planner-merge PR) — size L — todo
+Planner note 2026-10-21: Sandboxes work (owner-side live run 05:08Z: `python:3.12-slim` printed stdout; the HTTP 500s
+are gone). The Mac has about 3 GB free, so **no local swebench pulls**: `.env` now has `EXECUTOR=sandbox` (the
+planner set it); never switch it back to docker for task images. Steps, in order:
+1. `scripts/sandbox_access.py`: replace the image-list probe with a tiny run (`images.use("python:3.12-slim")`,
+   `print('ok')`), polling with backoff (5 tries, 2 s doubling). Exit 0 `ACCESS OK`, 2 `NO ACCESS`, 1 `ERROR`.
+2. Implement `SandboxExecutor` / a `SandboxSession` in `cheatproof/executor.py` with the same `Session` contract as
+   `DockerSession` (exec with timeouts and output caps, write files, attack diff, reset, close), using `contree_sdk`
+   (`ContreeSync`, `images.use` / `images.pull` / `import_from` for `swebench/*` images). Network off except the
+   network-fetch experiment. Each session books `reserve_sandbox_run()` at $0 (beta runs are free; count toward
+   `SANDBOX_RUN_CAP` only, a count-only path like `reserve_local_run()`), so `budget.py` changes too. Record a fixture
+   of one real run (ledger unchanged). Fakes in tests; no test calls the API. `make_executor()` defaults to sandbox
+   when `EXECUTOR` is unset.
+3. Gold gate smoke on one swebench task (`psf__requests-1142`) on Sandboxes; then T08 runs on Sandboxes.
+4. If a 500 or other API failure persists, write an email draft for the owner to `contree@nebius.com` in `S/` (never
+   sent by a routine) citing `S/sandbox-ops.txt`, add a USER item, and stop; do not fall back to local pulls.
+5. Update ADR 0001/0002. `executor.py` and `budget.py` are planner-merge paths: open the PR, Opus review, USER item
+   for the planner to merge.
+Split for the team (size L): Sonnet builds the core `SandboxSession`; Haiku builders do the access script, budget
+counter, tests and ADRs.
 
 ### T25 Image-store disk check hardening (planner-merge PR) — size S — todo — after 2026-10-21
 From the Haiku review of PR #24 (0 blockers, 3 risks). In `cheatproof/executor.py` `_colima_store_free_gb` and its
@@ -103,7 +106,7 @@ Routine 2026-10-20 19:24: PR #27 does all items except 7 (`COST_BASIS` is valida
 schema/fixture change). Sonnet "fix first" (silent resets could fake "not hackable"), one Haiku fix round, Opus
 approve. CI `test` green; `dependencies` red until PR #26 (certifi) is merged.
 
-### T24 Rename the product to RewardSeal — size M — todo
+### T24 Rename the product to RewardSeal — size M — todo — needs T08
 "Cheatproof" is another company's product name (CheatProof.ai). Rename every user-facing and public mention to
 **RewardSeal**: README, report site, CLI name and help (`rewardseal harden <env-id>`), certificate `tool` field (bump
 the schema version, keep reading old certificates), docs (CLAUDE.md, pitches, ADRs, STATUS, PLAN, prize-fit), video
@@ -238,7 +241,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — waiting: U17, U18, U20 — needs T07, T16, T17, T18, T19, T20, T22
+### T08 Eval run and results with raw counts — size M — waiting: U18, U20 — needs T23, T07, T16, T17, T18, T19, T20, T22
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
@@ -349,7 +352,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
   `review` in an interactive session to merge https://github.com/manishwvn/cheatproof/pull/27 (planner-merge path
   `cheatproof/executor.py`; low-disk latch, `Result.reset`, swerebench image prefix, fsize ulimit, pull timeout).
   Rerun its checks after #26. Then flip T26 to `done #27`.
-- **U19 Review and merge PR #26 first** (ready 2026-10-20; needed now: the `security` workflow fails on every
+- ~~**U19 Review and merge PR #26 first**~~ Done 2026-10-21: PR #26 merged. (ready 2026-10-20; needed now: the `security` workflow fails on every
   branch): say `review` in an interactive session to merge https://github.com/manishwvn/cheatproof/pull/26 (certifi
   2026.7.22 to 2026.10.19 for PYSEC-2026-4320; only `uv.lock`, a planner-merge path). CI green. Then rerun PR #25's
   checks (U18).
@@ -357,7 +360,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
   to merge https://github.com/manishwvn/cheatproof/pull/25 (leakcheck skips values that equal a public value in
   `origin/main:.env.example`, so certificates that name the model can be committed; planner-merge path
   `docs/autopilot/`). Sonnet review fixed in one round; Opus final review done.
-- **U17 Mac free disk 0.8 GB blocks T08 (urgent)** (ready 2026-10-20; needed for the Oct 21 go/no-go): free at least 15 GB on
+- ~~**U17 Mac free disk 0.8 GB blocks T08 (urgent)**~~ Done 2026-10-21: eval moves to Sandboxes (T23), no local pulls. (ready 2026-10-20; needed for the Oct 21 go/no-go): free at least 15 GB on
   the Mac. Optional: `docker image rm swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8595`, and return freed VM
   blocks with `colima ssh -- sudo fstrim -v /var/lib/docker`, then check `df -h /`. Or move T08 to Sandboxes (T23).
   Routines may not delete images or files.
