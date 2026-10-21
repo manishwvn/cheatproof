@@ -82,7 +82,7 @@ Docker image store. (4) Routine 2026-10-20: with colima the pull also grows the 
 keeps freed blocks, so the guard must also refuse when host free disk minus the pull estimate is under the floor. Units already match (`GIB = 1024**3`, used by `_root_free_gb` too). Tests for each case with a
 fake runner. `executor.py` is a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
 
-### T26 Executor and batch audit fixes before the 40-task run (audit 2026-10-20, planner-merge PR) — size M — todo
+### T26 Executor and batch audit fixes before the 40-task run (audit 2026-10-20, planner-merge PR) — size M — in-progress (cycle 2026-10-20T19:24:11-05:00)
 Sonnet daily audit of `eafa80c..139e1e4` (verified in code, not run). In `cheatproof/executor.py`: (1, high) task
 images are matched by the `swebench/` prefix only, but `tasks.py` also accepts `swerebench/`; such images are never
 released or counted by `TASK_IMAGE_CAP`, so the batch fills `DOCKER_IMAGE_CAP` and later pulls are refused. Use a
