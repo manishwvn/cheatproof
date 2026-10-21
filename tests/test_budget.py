@@ -75,7 +75,8 @@ def test_ledger_is_shared_across_instances(tmp_path):
 
 
 def test_unknown_model_uses_conservative_default_price(tmp_path):
-    b = make_budget(tmp_path, total=20)
+    # The trial cap is lifted here: a $3 hold would otherwise hit the $0.74 trial cap, and this test is about price.
+    b = Budget(tmp_path / "ledger.json", 20, 20, 2, trial_credit_cap_usd=20)
     hold = b.reserve("unknown", 1_000_000, 0)
     assert hold.usd == pytest.approx(3.0)
 
@@ -133,7 +134,7 @@ def test_unbounded_output_is_rejected(tmp_path):
 
 
 def test_sandbox_runs_book_no_money(tmp_path):
-    # Sandboxes beta runs are free: a run leaves total_usd and the daily ledger untouched.
+    # A Sandboxes run books no Token Factory money: it leaves total_usd and the daily ledger untouched.
     b = make_budget(tmp_path, total=0.15, runs=100, run_usd=0.1)
     b.reserve_sandbox_run()
     b.reserve_sandbox_run()
@@ -317,6 +318,13 @@ def test_charge_refuses_a_bad_amount_without_booking(tmp_path, worst):
         {"total_usd": -0.5},
         {"total_usd": True},
         {"total_usd": "1"},
+        {"sandbox_cost_usd": math.nan},
+        {"sandbox_cost_usd": -1.0},
+        {"sandbox_cost_usd": "1"},
+        {"sandbox_cost_days": []},
+        {"sandbox_cost_days": {TODAY: -1.0}},
+        {"trial_spend_usd": math.inf},
+        {"trial_spend_usd": "1"},
     ],
 )
 def test_malformed_ledger_is_refused_by_every_read(tmp_path, fields):
@@ -430,6 +438,8 @@ def cap_env(monkeypatch, tmp_path):
         "LOCAL_RUN_CAP": "2000",
         "TAVILY_CALL_CAP": "200",
         "MODEL_PRICES_JSON": "{}",
+        "SANDBOX_COST_CAP_USD": "0.5",
+        "TRIAL_CREDIT_CAP_USD": "0.74",
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
@@ -749,4 +759,164 @@ def test_counter_caps_are_read_from_env(cap_env, monkeypatch):
 def test_invalid_counter_cap_env_fails_closed(cap_env, monkeypatch, name, value):
     monkeypatch.setenv(name, value)
     with pytest.raises(BudgetExceeded, match=name):
+        Budget.from_env()
+
+
+# --- Sandboxes cost log and the Token Factory trial cap -------------------------------------------
+
+
+def make_capped(tmp_path, sandbox_cost=0.5, trial=0.74, total=20, daily=20):
+    return Budget(
+        tmp_path / "ledger.json",
+        total,
+        daily,
+        250,
+        prices={"m": PRICE},
+        sandbox_cost_cap_usd=sandbox_cost,
+        trial_credit_cap_usd=trial,
+    )
+
+
+def test_sandbox_cost_is_logged_and_not_halted_below_the_cap(tmp_path):
+    b = make_capped(tmp_path)
+    b.book_sandbox_cost(0.2)
+    b.book_sandbox_cost(0.25)  # the sum is 0.45, still under 0.50
+    s = b.snapshot()
+    assert s["sandbox_cost_usd"] == pytest.approx(0.45)
+    assert s["sandbox_cost_days"] == {TODAY: pytest.approx(0.45)}
+    assert s["halted"] is None
+    assert s["total_usd"] == 0.0 and s["days"] == {}  # Token Factory totals are untouched
+    assert b.reserve_sandbox_run() is None  # runs still go on
+
+
+def test_sandbox_cost_sum_exactly_at_the_cap_does_not_halt(tmp_path):
+    b = make_capped(tmp_path)
+    b.book_sandbox_cost(0.25)
+    b.book_sandbox_cost(0.25)
+    assert b.snapshot()["sandbox_cost_usd"] == pytest.approx(0.5)
+    assert b.snapshot()["halted"] is None
+
+
+def test_summed_sandbox_cost_over_the_cap_halts_and_stops_later_calls(tmp_path):
+    b = make_capped(tmp_path)
+    b.book_sandbox_cost(0.3)
+    with pytest.raises(BudgetExceeded, match="above the .* cap"):
+        b.book_sandbox_cost(0.3)  # the sum is 0.6, above 0.50
+    s = b.snapshot()
+    assert s["sandbox_cost_usd"] == pytest.approx(0.6)
+    assert "Sandboxes cost" in s["halted"]
+    with pytest.raises(BudgetExceeded, match="halted"):
+        b.reserve_sandbox_run()
+    with pytest.raises(BudgetExceeded, match="halted"):
+        b.reserve("m", 1, 1)
+
+
+@pytest.mark.parametrize("usd", [0.6, 1, 2.5])
+def test_one_sandbox_cost_above_the_cap_halts(tmp_path, usd):
+    b = make_capped(tmp_path)
+    with pytest.raises(BudgetExceeded, match="cap"):
+        b.book_sandbox_cost(usd)
+    s = b.snapshot()
+    assert s["halted"] and s["sandbox_cost_usd"] == pytest.approx(usd)
+
+
+def test_halt_from_http_402_is_kept_when_a_sandbox_cost_lands_later(tmp_path):
+    b = make_capped(tmp_path)
+    b.halt("HTTP 402 from Sandboxes: payment required")
+    with pytest.raises(BudgetExceeded, match="halted"):
+        b.book_sandbox_cost(0.1)  # logged, and the in-flight call still stops
+    s = b.snapshot()
+    assert s["halted"] == "HTTP 402 from Sandboxes: payment required"
+    assert s["sandbox_cost_usd"] == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -1.0, True, "0", 10**400])
+def test_malformed_sandbox_cost_halts_and_is_not_logged(tmp_path, bad):
+    b = make_capped(tmp_path)
+    with pytest.raises(BudgetExceeded, match="malformed"):
+        b.book_sandbox_cost(bad)
+    s = b.snapshot()
+    assert s["halted"] and "not a finite number" in s["halted"]
+    assert s.get("sandbox_cost_usd", 0.0) == 0.0
+
+
+def test_a_free_sandbox_result_writes_no_ledger(tmp_path):
+    b = make_capped(tmp_path)
+    b.book_sandbox_cost(0)
+    assert not (tmp_path / "ledger.json").exists()
+
+
+def test_logged_sandbox_cost_over_the_cap_refuses_the_next_run_even_after_a_manual_unhalt(tmp_path):
+    # A person may clear `halted` by hand; a logged sum still over the cap must refuse the next run anyway.
+    write_ledger(tmp_path, sandbox_cost_usd=0.9, sandbox_cost_days={TODAY: 0.9})
+    b = make_capped(tmp_path)
+    with pytest.raises(BudgetExceeded, match="sandbox cost cap"):
+        b.reserve_sandbox_run()
+    assert b.snapshot().get("sandbox_runs", 0) == 0
+
+
+def test_trial_cap_refuses_token_factory_spend_past_0_74(tmp_path):
+    b = make_capped(tmp_path)
+    b.reserve("m", 500_000, 0)  # $0.50 held
+    with pytest.raises(BudgetExceeded, match="trial credit cap"):
+        b.reserve("m", 500_000, 0)  # $1.00 in all would pass $0.74
+    s = b.snapshot()
+    assert s["total_usd"] == pytest.approx(0.5)  # the refused call booked nothing
+    assert s["trial_spend_usd"] == pytest.approx(0.5)
+
+
+def test_trial_cap_allows_exactly_0_74_and_no_more(tmp_path):
+    b = make_capped(tmp_path)
+    b.reserve("m", 740_000, 0)  # $0.74 exactly
+    with pytest.raises(BudgetExceeded, match="trial credit cap"):
+        b.reserve("m", 1, 0)
+
+
+def test_trial_cap_counts_spend_from_now_not_the_old_ledger_total(tmp_path):
+    write_ledger(tmp_path, total_usd=5.0, days={TODAY: 5.0})  # spend from before the trial cap existed
+    b = make_capped(tmp_path)
+    b.reserve("m", 700_000, 0)  # $0.70 from now fits under $0.74, though the total is already $5.00
+    assert b.snapshot()["trial_spend_usd"] == pytest.approx(0.7)
+
+
+def test_trial_cap_gives_back_what_a_settled_hold_did_not_spend(tmp_path):
+    b = make_capped(tmp_path)
+    hold = b.reserve("m", 700_000, 0)  # $0.70 held
+    b.settle(hold, 0, 0)  # actual $0
+    b.reserve("m", 700_000, 0)  # the refund leaves room again
+    assert b.snapshot()["trial_spend_usd"] == pytest.approx(0.7)
+
+
+@pytest.mark.parametrize("bad", [math.nan, -1.0, 0.0])
+def test_constructor_refuses_bad_sandbox_and_trial_caps(tmp_path, bad):
+    with pytest.raises(BudgetExceeded, match="SANDBOX_COST_CAP_USD"):
+        make_capped(tmp_path, sandbox_cost=bad)
+    with pytest.raises(BudgetExceeded, match="TRIAL_CREDIT_CAP_USD"):
+        make_capped(tmp_path, trial=bad)
+
+
+def test_trial_and_sandbox_cost_caps_default_when_unset(cap_env, monkeypatch):
+    monkeypatch.delenv("TRIAL_CREDIT_CAP_USD")
+    monkeypatch.delenv("SANDBOX_COST_CAP_USD")
+    b = Budget.from_env()
+    assert b.trial_credit_cap_usd == pytest.approx(0.74)
+    assert b.sandbox_cost_cap_usd == pytest.approx(0.50)
+
+
+@pytest.mark.parametrize("value", ["", "nan", "inf", "-1", "0", "abc", "21", "1e308"])
+def test_invalid_sandbox_cost_cap_falls_back_to_0_50_never_to_no_cap(cap_env, monkeypatch, value):
+    monkeypatch.setenv("SANDBOX_COST_CAP_USD", value)
+    assert Budget.from_env().sandbox_cost_cap_usd == pytest.approx(0.50)
+
+
+@pytest.mark.parametrize("value", ["2", "0.25"])
+def test_valid_sandbox_cost_cap_is_read(cap_env, monkeypatch, value):
+    monkeypatch.setenv("SANDBOX_COST_CAP_USD", value)
+    assert Budget.from_env().sandbox_cost_cap_usd == pytest.approx(float(value))
+
+
+@pytest.mark.parametrize("value", ["", "nan", "inf", "-1", "0", "abc", "20.01"])
+def test_invalid_trial_cap_fails_closed(cap_env, monkeypatch, value):
+    monkeypatch.setenv("TRIAL_CREDIT_CAP_USD", value)
+    with pytest.raises(BudgetExceeded, match="TRIAL_CREDIT_CAP_USD"):
         Budget.from_env()

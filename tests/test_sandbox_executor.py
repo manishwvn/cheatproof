@@ -23,7 +23,7 @@ from contree_sdk.sdk.exceptions import (
 )
 from contree_sdk.sdk.exceptions.api import RequestInfo, ResponseInfo
 
-from cheatproof.budget import BudgetExceeded
+from cheatproof.budget import Budget, BudgetExceeded
 from cheatproof.executor import (
     _BASELINE_SCRIPT,
     _DIFF_SCRIPT,
@@ -63,6 +63,7 @@ class FakeBudget:
         self.sandbox_runs = 0
         self.fail_after = fail_after
         self.halted = None
+        self.sandbox_costs = []
 
     def reserve_sandbox_run(self):
         if self.fail_after is not None and self.sandbox_runs >= self.fail_after:
@@ -71,6 +72,9 @@ class FakeBudget:
 
     def reserve_local_run(self):  # a sandbox session must never take a local run
         raise AssertionError("sandbox session reserved a local run")
+
+    def book_sandbox_cost(self, usd):  # the real Budget logs and caps the cost; this fake only records it
+        self.sandbox_costs.append(usd)
 
     def halt(self, reason):
         self.halted = reason
@@ -370,13 +374,68 @@ def test_http_402_while_resolving_the_image_halts_the_budget():
     assert_no_secret(err.value)
 
 
-@pytest.mark.parametrize("cost", [0.0004, 1, float("nan"), -1.0, "0"])
-def test_a_result_that_reports_a_cost_halts_the_budget(cost):
-    box, budget, session = make()
+def real_budget(tmp_path):
+    # A real ledger, so the Sandboxes cost log, its $0.50 cap and the halt run as they do in production.
+    return Budget(tmp_path / "ledger.json", 20.0, 20.0, 250, sandbox_cost_cap_usd=0.5)
+
+
+def test_sandbox_costs_under_the_cap_are_logged_and_the_run_goes_on(tmp_path):
+    budget = real_budget(tmp_path)
+    box, _, session = make(budget=budget)
+    box.cost = 0.0004
+    session.run("x", timeout=5)
+    box.cost = 0.0006
+    session.run("x", timeout=5)
+    snap = budget.snapshot()
+    assert snap["sandbox_cost_usd"] == pytest.approx(0.001)
+    assert snap["halted"] is None
+    assert snap["total_usd"] == 0.0  # Token Factory totals are untouched
+
+
+def test_summed_sandbox_cost_over_the_cap_halts_the_real_ledger(tmp_path):
+    budget = real_budget(tmp_path)
+    box, _, session = make(budget=budget)
+    box.cost = 0.3
+    session.run("x", timeout=5)
+    box.cost = 0.3  # the sum is 0.6, above 0.50
+    with pytest.raises(BudgetExceeded, match="cost"):
+        session.run("x", timeout=5)
+    assert "Sandboxes cost" in budget.snapshot()["halted"]
+
+
+@pytest.mark.parametrize("cost", [1, 0.5001])
+def test_one_sandbox_cost_above_the_cap_halts_the_real_ledger(tmp_path, cost):
+    budget = real_budget(tmp_path)
+    box, _, session = make(budget=budget)
     box.cost = cost
     with pytest.raises(BudgetExceeded, match="cost"):
         session.run("x", timeout=5)
-    assert budget.halted and "cost" in budget.halted
+    assert budget.snapshot()["halted"]
+
+
+@pytest.mark.parametrize("cost", [float("nan"), -1.0, "0", True])
+def test_a_malformed_sandbox_cost_halts_the_real_ledger(tmp_path, cost):
+    budget = real_budget(tmp_path)
+    box, _, session = make(budget=budget)
+    box.cost = cost
+    with pytest.raises(BudgetExceeded, match="cost"):
+        session.run("x", timeout=5)
+    assert budget.snapshot()["halted"]
+
+
+def test_http_402_halts_the_real_ledger_and_a_later_cost_cannot_clear_it(tmp_path):
+    budget = real_budget(tmp_path)
+    box, _, session = make(budget=budget)
+    box.raise_on = lambda argv: leaky_error(402)
+    with pytest.raises(BudgetExceeded, match="402"):
+        session.run("x", timeout=5)
+    box.raise_on = None
+    box.cost = 0.1  # under the cap, but the budget is halted, so the call still stops
+    with pytest.raises(BudgetExceeded, match="halted"):
+        session.run("x", timeout=5)
+    snap = budget.snapshot()
+    assert "402" in snap["halted"]
+    assert snap["sandbox_cost_usd"] == pytest.approx(0.1)
 
 
 def test_a_free_result_does_not_halt():

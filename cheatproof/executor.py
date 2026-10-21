@@ -1138,13 +1138,12 @@ class SandboxSession(Session):
         return RuntimeError(f"sandbox call failed: {_describe_error(exc)}")
 
     def _check_cost(self, res: object) -> None:
-        """Sandboxes beta runs are free. A result that reports any cost means billing started: halt, then stop."""
+        """Log the cost a Sandboxes result reports. The budget halts only when the logged Sandboxes sum passes its cap,
+        or when the cost is malformed (see Budget.book_sandbox_cost). Token Factory totals are not touched."""
         cost = getattr(res, "cost", None)
         if cost is None:
             return
-        if isinstance(cost, bool) or not isinstance(cost, (int, float)) or cost != 0:  # nan counts as a cost
-            self._budget.halt("a Sandboxes result reported a cost above 0: billing has started")
-            raise BudgetExceeded("a Sandboxes result reported a cost; the budget is halted")
+        self._budget.book_sandbox_cost(cost)
 
     def _digest(self, image, path: str) -> str | None:
         """sha256 of a file in an image, read by the host over the SDK. None when the file is absent."""
@@ -1186,7 +1185,7 @@ class SandboxSession(Session):
         """One exec on the current image, under the network wrapper unless wrap=False (only the start probe, which
         runs the wrapper itself). Returns (result with raw decoded streams, server_cut). A non-disposable call
         advances the current image. Raises _SandboxTimeout on an operation timeout, RuntimeError on an SDK error,
-        BudgetExceeded on HTTP 402 or a reported cost, ExecutorRefused when the wrapper was tampered with."""
+        BudgetExceeded on HTTP 402 or a Sandboxes cost over its cap, ExecutorRefused when the wrapper was tampered with."""
         image = self._cur
         if image is None:
             raise RuntimeError("no live sandbox: the last reset() or call failed; call reset() again")

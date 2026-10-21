@@ -7,7 +7,7 @@ Check: `python3 docs/autopilot/progress.py` counts the same tasks as
 
 ## Milestone: live access and executor
 
-### T01 Smoke test, model IDs and prices — size S — waiting: U21 — after 2026-10-21 [85%]
+### T01 Smoke test, model IDs and prices — size S — todo — after 2026-10-21 [85%]
 Run `uv run python scripts/smoke.py`. Live scripts load `.env` from the main checkout (the parent of `git rev-parse
 --git-common-dir`), so worktrees share one key file and never copy it. Record the exact Nemotron model IDs (Nano,
 Super, Ultra) from `/v1/models` and their per-1M prices from the public Token Factory price page into `.env.example`
@@ -54,7 +54,7 @@ USER item for the planner to merge. Do T02 first if both are runnable.
 Done 2026-10-18 (routine): PR #10 open, CI green, Sonnet review fixed (one round), Opus final review: ready. Items 10
 and 11 are below (T08, T12 text). Planner merges #10 (U10), then installs `docs/autopilot/pre-push`.
 
-### T23 Sandbox executor and the eval on Sandboxes (TOP PRIORITY, planner-merge PR) — size L — waiting: U21, U22
+### T23 Sandbox executor and the eval on Sandboxes (TOP PRIORITY, planner-merge PR) — size L — done #30
 Planner note 2026-10-21: Sandboxes work (owner-side live run 05:08Z: `python:3.12-slim` printed stdout; the HTTP 500s
 are gone). The Mac has about 3 GB free, so **no local swebench pulls**: `.env` now has `EXECUTOR=sandbox` (the
 planner set it); never switch it back to docker for task images. Steps, in order:
@@ -74,9 +74,9 @@ planner set it); never switch it back to docker for task images. Steps, in order
    for the planner to merge.
 Split for the team (size L): Sonnet builds the core `SandboxSession`; Haiku builders do the access script, budget
 counter, tests and ADRs.
-Routine 2026-10-21 00:24: PR #30 open (planner merge). Live before hardening: access OK; gold passes, empty fails on psf__requests-1142; unshare -n, images.oci, image persistence confirmed. The hardened re-run halted the budget: a result carried `resources.cost != 0` (6 sandbox runs, ledger money unchanged). Left after U21: live-verify `-rn`, nsenter refusal, `image.read`, integrity pin; record the real-run fixture.
+Routine 2026-10-21 00:24: PR #30 open (planner merge). Live before hardening: access OK; gold passes, empty fails on psf__requests-1142; unshare -n, images.oci, image persistence confirmed. The hardened re-run halted the budget: a result carried `resources.cost != 0` (6 sandbox runs, ledger money unchanged). Left after U21: live-verify `-rn`, nsenter refusal, `image.read`, integrity pin; record the real-run fixture. U21 closed 2026-10-21: each reported Sandboxes cost is logged in the ledger, and the budget halts only when the logged sum passes `SANDBOX_COST_CAP_USD` (default $0.50).
 
-### T25 Image-store disk check hardening (planner-merge PR) — size S — waiting: U23 — after 2026-10-21
+### T25 Image-store disk check hardening (planner-merge PR) — size S — done #31
 From the Haiku review of PR #24 (0 blockers, 3 risks). In `cheatproof/executor.py` `_colima_store_free_gb` and its
 caller: (1) when the `colima` binary exists but `colima ssh` fails or times out, refuse the pull (`DiskRefused`,
 "image store unreadable") instead of falling back to host disk; fall back to host only when `colima` is absent
@@ -246,6 +246,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
 ### T08 Eval run and results with raw counts — size M — todo — needs T23, T07, T16, T17, T18, T19, T20, T22
+Unblocked 2026-10-21: U21 is closed and T23 is done (#30), so T08 has no U21 dependency left.
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
@@ -357,7 +358,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
   session to merge https://github.com/manishwvn/cheatproof/pull/31 (GitHub retargets it to `main` once #30 merges).
   CI green; Sonnet approve, Opus approve.
 - **U22 Merge PR #30** (planner-merge paths): say `review` in an interactive session to merge PR #30.
-- **U21 Sandboxes cost halt** (2026-10-21, blocks T23 and T08): the budget halted itself because a Sandboxes result reported `resources.cost != 0`. Steps: check Nebius console billing for Sandboxes today; if still free, clear the ledger `halted` field yourself and tell the planner to log the cost instead of halting; if billed, keep the halt and set a per-run price and cap. Alerted 2026-10-21.
+- ~~**U21 Sandboxes cost halt**~~ Done 2026-10-21: the Nebius console shows Sandboxes not billed. The budget halted itself on a Sandboxes result with `resources.cost != 0`. Now each reported cost is logged (`sandbox_cost_usd` in the ledger) and the budget halts only when the sum passes `SANDBOX_COST_CAP_USD` (default $0.50); HTTP 402 still halts. Planner, after this merges: clear the top-level `halted` field in the live ledger (`~/.cheatproof-autopilot/ledger.json`, the path in `.env.example`).
 - ~~**U20 Review and merge PR #27 (T26 audit fixes)**~~ Done 2026-10-21: PR #27 merged (Sonnet review: 0 critical). (ready 2026-10-20; needed before T08 resumes): after U19, say
   `review` in an interactive session to merge https://github.com/manishwvn/cheatproof/pull/27 (planner-merge path
   `cheatproof/executor.py`; low-disk latch, `Result.reset`, swerebench image prefix, fsize ulimit, pull timeout).
@@ -370,7 +371,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
   to merge https://github.com/manishwvn/cheatproof/pull/25 (leakcheck skips values that equal a public value in
   `origin/main:.env.example`, so certificates that name the model can be committed; planner-merge path
   `docs/autopilot/`). Sonnet review fixed in one round; Opus final review done.
-- ~~**U17 Mac free disk 0.8 GB blocks T08 (urgent)**~~ Done 2026-10-21: eval moves to Sandboxes (T23), no local pulls. (ready 2026-10-20; needed for the Oct 21 go/no-go): free at least 15 GB on
+- ~~**U17 Mac free disk 0.8 GB blocks T08 (urgent)**~~ Done 2026-10-21: eval moves to Sandboxes (T23), no local pulls. Disk now: host 15 GB free, colima VM 91 GB. (ready 2026-10-20; needed for the Oct 21 go/no-go): free at least 15 GB on
   the Mac. Optional: `docker image rm swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8595`, and return freed VM
   blocks with `colima ssh -- sudo fstrim -v /var/lib/docker`, then check `df -h /`. Or move T08 to Sandboxes (T23).
   Routines may not delete images or files.
@@ -437,7 +438,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 - ~~**U5 Final product name**~~ Done 2026-10-19: "Cheatproof" is taken (CheatProof.ai); new product name **RewardSeal**; rename is T24.  (before any public asset): check that "Cheatproof" is not an existing product's
   trademark, or pick another name. The lead can propose options.
 - **U6 Video voice-over and submission** (2026-10-26 to 2026-10-28).
-- **U7 Disk space and a Docker daemon for the fallback** (ready 2026-10-18; needed by 2026-10-20 if U3 is still
+- ~~**U7 Disk space and a Docker daemon for the fallback**~~ Done 2026-10-21: host disk 15 GB free, colima VM 91 GB. (ready 2026-10-18; needed by 2026-10-20 if U3 is still
   pending): free at least 30 GB on the Mac (16 GB free on Oct 18). The Mac has the docker CLI but no Docker Desktop
   app (`open -a Docker` fails, found 2026-10-18), and routines cannot install software. Install Docker Desktop (or
   colima: `brew install colima && colima start`), start it once, then run

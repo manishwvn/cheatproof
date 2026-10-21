@@ -21,9 +21,9 @@
   1332 tests.
   Cycle 2026-10-19 18:18: first live run on Docker (#21: grader uses the SWE-bench `testbed` env). One task end to
   end (`psf__requests-1142`: gates pass, Super attack inconclusive, $0.0146); batch stopped at 5.9 GB free disk (U14).
-- **Next for the routine:** 2026-10-21 01:24 cycle: T25 built as PR #31 (stacked on #30, planner merge U23); T01 now
-  waits on U21 (its sandbox run needs the budget unhalted). Nothing runnable until U21/U22/U23 or T12 (after
-  2026-10-27).
+- **Next for the routine:** U21 closed: Sandboxes cost is logged, and the budget halts only past `SANDBOX_COST_CAP_USD`
+  ($0.50). The planner clears the live ledger `halted` after merge. T23 (#30) and T25 (#31) are done; T01 and T08 are
+  unblocked. Token Factory trial cap `TRIAL_CREDIT_CAP_USD` ($0.74 from now) is on.
 - **Certificates:** schema 2 since #15; schema 1 files are refused (none are committed).
 - **Planner:** T22 (U11): Docker runs are booked at $0.05 each in `budget.py`, so the $4 daily cap would halt the
   40-task Docker run near task 16; plus `llm.py` timeout, workflow pins and git-ignoring `results/traces/`.
