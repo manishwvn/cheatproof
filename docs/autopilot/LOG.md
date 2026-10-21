@@ -289,3 +289,12 @@ progress 70% (17/26 tasks done, 7 days to submit)
 - T25 skipped (shares executor.py with T23).
 - Learning notes for #22-#29 added.
 - Lessons: an SDK cost field must be checked on the very first live run, before relying on "beta is free". zsh does not word-split unquoted `$F`; pipe file lists through xargs.
+
+## 2026-10-21 routine (cycle 2026-10-21T01:24:11-05:00)
+progress 70% (17/26 tasks done, 7 days to submit)
+- Task: T25. PR #31 open, stacked on PR #30 (both change executor.py), for planner merge (U23). CI green.
+- Haiku build, Sonnet approve (0 critical/high; 3 medium), one Haiku fix round (15 s df timeout, fail-closed post-run
+  check, ledger read errors), Opus approve. 1802 tests pass.
+- T01 set to `waiting: U21`: only its sandbox run is left, and the budget is halted.
+- Hand-back not due: T12 is date-gated `todo`, not owner-blocked. Spend: $0 (no model, sandbox or Docker runs).
+- Lessons: stacking a PR on an open planner-merge PR unblocks work that shares a file; `timeout` is not on macOS.

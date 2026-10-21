@@ -76,7 +76,7 @@ Split for the team (size L): Sonnet builds the core `SandboxSession`; Haiku buil
 counter, tests and ADRs.
 Routine 2026-10-21 00:24: PR #30 open (planner merge). Live before hardening: access OK; gold passes, empty fails on psf__requests-1142; unshare -n, images.oci, image persistence confirmed. The hardened re-run halted the budget: a result carried `resources.cost != 0` (6 sandbox runs, ledger money unchanged). Left after U21: live-verify `-rn`, nsenter refusal, `image.read`, integrity pin; record the real-run fixture.
 
-### T25 Image-store disk check hardening (planner-merge PR) — size S — in-progress (cycle 2026-10-21T01:24:11-05:00) — after 2026-10-21
+### T25 Image-store disk check hardening (planner-merge PR) — size S — waiting: U23 — after 2026-10-21
 From the Haiku review of PR #24 (0 blockers, 3 risks). In `cheatproof/executor.py` `_colima_store_free_gb` and its
 caller: (1) when the `colima` binary exists but `colima ssh` fails or times out, refuse the pull (`DiskRefused`,
 "image store unreadable") instead of falling back to host disk; fall back to host only when `colima` is absent
@@ -353,6 +353,9 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
+- **U23 Merge PR #31** (T25, planner-merge paths, stacked on PR #30): after U22, say `review` in an interactive
+  session to merge https://github.com/manishwvn/cheatproof/pull/31 (GitHub retargets it to `main` once #30 merges).
+  CI green; Sonnet approve, Opus approve.
 - **U22 Merge PR #30** (planner-merge paths): say `review` in an interactive session to merge PR #30.
 - **U21 Sandboxes cost halt** (2026-10-21, blocks T23 and T08): the budget halted itself because a Sandboxes result reported `resources.cost != 0`. Steps: check Nebius console billing for Sandboxes today; if still free, clear the ledger `halted` field yourself and tell the planner to log the cost instead of halting; if billed, keep the halt and set a per-run price and cap. Alerted 2026-10-21.
 - ~~**U20 Review and merge PR #27 (T26 audit fixes)**~~ Done 2026-10-21: PR #27 merged (Sonnet review: 0 critical). (ready 2026-10-20; needed before T08 resumes): after U19, say
