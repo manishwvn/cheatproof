@@ -32,10 +32,23 @@ class Probe:
         return self.outcomes.pop(0) if len(self.outcomes) > 1 else self.outcomes[0]
 
 
-class FakeResult:
-    def __init__(self, stdout, cost=None):
+class FakeContreeResult:
+    """Mirrors contree_sdk ContreeResult: `cost` lives here, on `.result`, not on the finished image."""
+
+    def __init__(self, stdout, cost=0.0):
         self.stdout = stdout
         self.cost = cost
+
+
+class FakeDone:
+    """Mirrors the finished image `run(...).wait()` returns: `.result` holds the ContreeResult, `.stdout` proxies it."""
+
+    def __init__(self, result):
+        self.result = result
+
+    @property
+    def stdout(self):
+        return self.result.stdout
 
 
 class FakeImage:
@@ -54,9 +67,9 @@ class FakeImage:
         outcome = self.probe.next()
         if isinstance(outcome, BaseException):
             raise outcome
-        if isinstance(outcome, FakeResult):
-            return outcome
-        return FakeResult(outcome)
+        if isinstance(outcome, FakeContreeResult):
+            return FakeDone(outcome)
+        return FakeDone(FakeContreeResult(outcome))
 
 
 class FakeImages:
@@ -189,7 +202,7 @@ def test_402_halts_budget_without_retry(capsys):
 
 
 def test_paid_run_halts_budget_without_retry(capsys):
-    code, probe, sleeps, budget = run_check([FakeResult("ok\n", cost=0.01)])
+    code, probe, sleeps, budget = run_check([FakeContreeResult("ok\n", cost=0.01)])
     assert code == 1
     assert capsys.readouterr().out == "ERROR budget halted (cost)\n"
     assert probe.runs == 1
@@ -197,8 +210,19 @@ def test_paid_run_halts_budget_without_retry(capsys):
     assert len(budget.halts) == 1
 
 
+@pytest.mark.parametrize("cost", [0.0004, 1, 2.5])
+def test_nonzero_result_cost_triggers_existing_halt_path(capsys, cost):
+    # The SDK reports billing on done.result.cost. The finished image has no cost of its own, so this must read .result.
+    code, probe, sleeps, budget = run_check([FakeContreeResult("ok\n", cost=cost)])
+    assert code == 1
+    assert capsys.readouterr().out == "ERROR budget halted (cost)\n"
+    assert probe.runs == 1
+    assert sleeps == []
+    assert budget.halts == ["sandbox access check: cost"]
+
+
 def test_zero_cost_run_is_access_ok_and_does_not_halt(capsys):
-    code, _, _, budget = run_check([FakeResult("ok\n", cost=0)])
+    code, _, _, budget = run_check([FakeContreeResult("ok\n", cost=0)])
     assert code == 0
     assert capsys.readouterr().out == "ACCESS OK\n"
     assert budget.halts == []

@@ -79,7 +79,8 @@ def check_access(
     for attempt in range(TRIES):
         try:
             done = _probe(make_client())
-            if _is_paid(getattr(done, "cost", None)):
+            # The SDK bills on ContreeResult.cost (done.result), not on the finished image itself.
+            if _is_paid(getattr(getattr(done, "result", None), "cost", None)):
                 return _halt(budget, "cost")
             if "ok" in str(done.stdout or ""):
                 print("ACCESS OK")

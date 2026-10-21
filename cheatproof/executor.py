@@ -1011,10 +1011,10 @@ class SandboxExecutor:
                     self._client = self._client_factory()
                 except ExecutorUnavailable:
                     raise
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - only the class name leaves this function
                     raise ExecutorUnavailable(
                         f"Sandboxes client could not be built: {type(exc).__name__}"
-                    ) from exc
+                    ) from None
             return self._client
 
     def _resolve_image(self, image: str, budget: Budget | None = None):
