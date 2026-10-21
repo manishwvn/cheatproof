@@ -78,8 +78,30 @@ caller: (1) when the `colima` binary exists but `colima ssh` fails or times out,
 "image store unreadable") instead of falling back to host disk; fall back to host only when `colima` is absent
 (`shutil.which("colima") is None`). (2) Parse the df row whose last field is `/var/lib/docker`, not `lines[-1]`.
 (3) CYCLE.md section 0: the "alert the owner when free disk is under 10 GB" rule names both the host disk and the
-Docker image store. Units already match (`GIB = 1024**3`, used by `_root_free_gb` too). Tests for each case with a
+Docker image store. (4) Routine 2026-10-20: with colima the pull also grows the VM data disk file on the Mac, which
+keeps freed blocks, so the guard must also refuse when host free disk minus the pull estimate is under the floor. Units already match (`GIB = 1024**3`, used by `_root_free_gb` too). Tests for each case with a
 fake runner. `executor.py` is a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
+
+### T26 Executor and batch audit fixes before the 40-task run (audit 2026-10-20, planner-merge PR) — size M — waiting: U20 (PR #27)
+Sonnet daily audit of `eafa80c..139e1e4` (verified in code, not run). In `cheatproof/executor.py`: (1, high) task
+images are matched by the `swebench/` prefix only, but `tasks.py` also accepts `swerebench/`; such images are never
+released or counted by `TASK_IMAGE_CAP`, so the batch fills `DOCKER_IMAGE_CAP` and later pulls are refused. Use a
+prefix tuple in `is_task_image` and the `docker images` filter. (2, high) only `/tmp` is size-limited; a hostile `dd`
+in the container root or `/testbed` can fill the colima VM and grow its data disk on the Mac. Add
+`--ulimit fsize=<cap>` and a free-space check after each `run()` that resets or aborts past a floor. (3, medium)
+`_colima_store_free_gb` does not catch `ExecutorUnavailable` from `subprocess_runner`, so with `colima` off PATH
+every pull fails; catch it (coordinate with T25 item 1). (5, low) containers owned by this pid whose `close()` failed
+are never swept, so non-forced `release_image` fails; sweep them at task start. (6, low) an output-overflow kill
+leaves the process running in the container; treat `OUTPUT_KILL_EXIT_CODE` like a timeout and reset. (8, low)
+`docker run` pulls under the 900 s run timeout; pull first with its own longer timeout. In `cheatproof/cli.py`:
+(4, medium) a `DiskRefused`/`ExecutorRefused` on a reset after the paid attack leaves no report, diffs or cost in
+`batch.json`; record the ledger delta in the not-run row and keep the trace. (7, low) `cost_usd` is a shared-ledger
+delta; say "single process assumed" in `cost_basis` or sum this process's holds. Tests with fakes for each item.
+`executor.py` is a planner-merge path: open the PR, Opus review, USER item for the planner to merge. Do items 1-4
+before T08 resumes.
+Routine 2026-10-20 19:24: PR #27 does all items except 7 (`COST_BASIS` is validated in `certify.py`; needs a
+schema/fixture change). Sonnet "fix first" (silent resets could fake "not hackable"), one Haiku fix round, Opus
+approve. CI `test` green; `dependencies` red until PR #26 (certifi) is merged.
 
 ### T24 Rename the product to RewardSeal — size M — todo
 "Cheatproof" is another company's product name (CheatProof.ai). Rename every user-facing and public mention to
@@ -216,7 +238,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — in-progress (cycle 2026-10-20T19:24:11-05:00) — needs T07, T16, T17, T18, T19, T20, T22
+### T08 Eval run and results with raw counts — size M — waiting: U17, U18, U20 — needs T07, T16, T17, T18, T19, T20, T22
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
@@ -272,6 +294,14 @@ Rerun both after #23; their certificates (kept in `../cheatproof-wt/t08-run/resu
 `../cheatproof-wt/t08-run-scratch/r2/`, not committed) are void for the certified count. Every further pull is refused
 as `disk`: host free disk stayed 7.4 GB after both task images were removed (colima keeps freed blocks), U15. The
 attacker spends its steps searching; consider a prompt nudge to write a candidate early (T16 follow-up).
+Routine 2026-10-20 19:24: `sphinx-doc__sphinx-8595` rerun (Super, 120k tokens, 30 steps, combined prompt): gold
+1/1, empty fails, attack inconclusive at the token limit, $0.034, n = 1 (certificate, trace and diff kept uncommitted
+in `../cheatproof-wt/t08-eval/results/`). `harden` does not remove its image; only `batch` does, so use `batch`. The
+next `batch` (250k tokens, 40 steps) pulled a new image: colima's data disk file on the Mac grew (17 GB on the Mac for
+6.3 GB used in the VM; freed VM blocks are not returned to macOS), host free disk fell to 2 GB and the routine's
+watchdog killed the run before any model call (U17, alerted). The PR #24 guard reads the VM (87 GB free) and missed
+it (see T25). Certificates still cannot be committed until PR #25 (leakcheck skips public `.env.example` values, U18)
+is merged. Next: rerun via `batch` with 250k tokens once the host has room, or on Sandboxes after T23.
 ### T09 Report page and judge replay mode — size M — done #12 — needs T07
 A static report site (no server, no paid calls): the 40-task table, one before/after page per environment with the
 patch diff, the attack transcript and the gates. Judge mode replays recorded runs, labelled "recorded". Builds from
@@ -315,6 +345,22 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
+- **U20 Review and merge PR #27 (T26 audit fixes)** (ready 2026-10-20; needed before T08 resumes): after U19, say
+  `review` in an interactive session to merge https://github.com/manishwvn/cheatproof/pull/27 (planner-merge path
+  `cheatproof/executor.py`; low-disk latch, `Result.reset`, swerebench image prefix, fsize ulimit, pull timeout).
+  Rerun its checks after #26. Then flip T26 to `done #27`.
+- **U19 Review and merge PR #26 first** (ready 2026-10-20; needed now: the `security` workflow fails on every
+  branch): say `review` in an interactive session to merge https://github.com/manishwvn/cheatproof/pull/26 (certifi
+  2026.7.22 to 2026.10.19 for PYSEC-2026-4320; only `uv.lock`, a planner-merge path). CI green. Then rerun PR #25's
+  checks (U18).
+- **U18 Review and merge PR #25** (ready 2026-10-20; needed for T08 results): say `review` in an interactive session
+  to merge https://github.com/manishwvn/cheatproof/pull/25 (leakcheck skips values that equal a public value in
+  `origin/main:.env.example`, so certificates that name the model can be committed; planner-merge path
+  `docs/autopilot/`). Sonnet review fixed in one round; Opus final review done.
+- **U17 Mac free disk 0.8 GB blocks T08 (urgent)** (ready 2026-10-20; needed for the Oct 21 go/no-go): free at least 15 GB on
+  the Mac. Optional: `docker image rm swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8595`, and return freed VM
+  blocks with `colima ssh -- sudo fstrim -v /var/lib/docker`, then check `df -h /`. Or move T08 to Sandboxes (T23).
+  Routines may not delete images or files.
 - ~~**U16 Review and merge PR #23**~~ Done 2026-10-20: PR #23 merged. (ready 2026-10-19; needed by 2026-10-20 for the Oct 21 go/no-go): say `review` in
   an interactive session to merge https://github.com/manishwvn/cheatproof/pull/23 (attack diffs no longer include
   files already untracked in the image; planner-merge path `cheatproof/executor.py`). CI green, Sonnet and Opus
