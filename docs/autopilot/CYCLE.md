@@ -30,8 +30,7 @@ apart, so 30 minutes from both is impossible). Never read or touch the other pro
   keeps at most `TASK_IMAGE_CAP` (2) `swebench/*` images; after each task the batch removes that task's `swebench/*`
   image (`docker image rm`, never forced). No other image is ever removed. Prefer Sandboxes once U3 is done.
 - Tests never call models or paid APIs.
-- Never use an extra-billed model. Effort `max` only for Haiku builders on hard size L pieces; every other agent
-  stays at `xhigh` or below.
+- Never use an extra-billed model. Effort `high` or `xhigh` only; never `max`, for any agent.
 - Never end the turn while a workflow or background agent runs; block on it.
 - Never `git restore`, `git checkout -- <file>`, `git reset --hard`, `git clean` or force-push. Direct pushes to
   `main` may change only `docs/autopilot/QUEUE.md`, `docs/autopilot/LOG.md` and `STATUS.md` (claims, done marks,
@@ -97,12 +96,12 @@ or needs only such tasks. If it holds, `S/handback-done` does not exist, and `te
 4. Claim the task on `main`: status `in-progress (cycle <START>)`, commit `chore: claim <id>`, push. Never start a
    task that a live cycle claimed. A claim from a cycle whose lock is gone is stale: reclaim it and say so in LOG.md.
 5. Build in a worktree: `git worktree add ../cheatproof-wt/<branch> -b <branch> origin/main`, then `uv sync --locked`.
-   **Model routing (owner rule, 2026-10-18; saves the Opus limit):** Opus (this session) only orchestrates (splits
-   the task, writes each agent's brief, integrates, decides merges) and gives the final independent review; it writes
-   no bulk code. Haiku 5.5 does almost everything else: building, tests, docs, lookups, fixes (`model: haiku`, effort
-   `xhigh`; `max` allowed for Haiku only, on hard pieces of size L tasks). Sonnet takes what Haiku fails twice, the
-   hardest single piece of a size L task, and the first-pass review. The reviewer is Sonnet (`model: sonnet` in
-   `.claude/agents/reviewer.md`). Route by size:
+   **Model routing (owner rule, 2026-10-21):** Opus (this session) orchestrates only: it reads state, decides,
+   writes short briefs, makes the final merge call and relays to the owner. Opus does no builds, no bulk edits, and no
+   large file reads or long diffs in its own thread; subagents return short summaries. Haiku 5.5 does builds, lookups,
+   test runs, docs, and LOG/QUEUE edits (`model: haiku`). Sonnet 5.5 does the first-pass review (`model: sonnet` in
+   `.claude/agents/reviewer.md`) and whatever Haiku fails twice, including the hardest core piece of a size L task.
+   Effort `high` or `xhigh` only; never `max`, for any agent. Route by size:
    - S or docs: one Haiku builder → Sonnet review → Opus final review of the diff.
    - M: plan into 2–4 disjoint pieces → Haiku builders in parallel → one Haiku audit (tests, lint, spec check) →
      Sonnet review → Opus final review.
