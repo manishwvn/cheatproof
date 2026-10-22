@@ -7,7 +7,7 @@ set is clean, and a "no hole found" outcome against one attacker model is not a 
 
 - Task source: SWE-rebench, 5 tasks, via `python -m cheatproof.tasks fetch --source swe-rebench --n 5`
   (public rows API, cached in the git-ignored `runs/tasks/swe-rebench.json`). Selection rule: per source, the n
-  lowest by score (fail-to-pass plus pass-to-pass count, gold patch size in KB, +1000 per non-.py file). The
+  lowest by score (fail-to-pass plus pass-to-pass count, gold patch size in KB, +1000 per non-.py file).
   These 5 are the 5 lowest-scoring (smallest) swe-rebench tasks from that fetch, so they are not representative
   of the planned 40-task set. The batch ran them in selection order (`selected_ids` in `results/batch.json`).
   1000 rows scanned, 243 valid, 756 skipped as `no_image`, 1 as `non_pytest_id`.
