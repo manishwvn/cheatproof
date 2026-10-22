@@ -12,7 +12,7 @@ from cheatproof.budget import BudgetExceeded
 from cheatproof.executor import DiskRefused, EnvSpec, ExecutorRefused, ExecutorUnavailable, Result, Session
 from cheatproof.exposure import ExposureReport
 from cheatproof.grader import GateReport, GradeResult
-from cheatproof.harden import HardenOps, HardenReport, harden
+from cheatproof.harden import HardenOps, HardenReport, _grade_dict, harden
 from cheatproof.holes import HoleReport
 from cheatproof.tasks import TaskSpec
 
@@ -1004,6 +1004,31 @@ def test_patch_failure_inside_the_after_round_ends_the_round():
     assert report.after.patch_outcomes[0].ok is False
     assert lab.attack_calls and len(lab.attack_calls) == 1  # no after attack
     assert_clean(lab, report)
+
+
+def test_grade_dict_keeps_the_short_error_line_beside_the_digest_and_not_the_log():
+    tail = "$ pytest -q\nRAW-LOG-LINE collected 0 items\nERROR: unrecognized arguments: --cov\nRAW-LOG-LINE again\n"
+    grade = GradeResult(
+        passed=False,
+        f2p_passed=0,
+        f2p_total=1,
+        p2p_passed=0,
+        p2p_total=0,
+        applied=True,
+        error="pytest exited 4: ERROR: unrecognized arguments: --cov",
+        log_tail=tail,
+    )
+    data = _grade_dict(grade)
+    assert data["log_tail"] == {
+        "sha256": hashlib.sha256(tail.encode()).hexdigest(),
+        "chars": len(tail),
+        "error_line": "ERROR: unrecognized arguments: --cov",
+    }
+    text = json.dumps(data)
+    assert "RAW-LOG-LINE" not in text and "$ pytest" not in text
+    # A log with no ERROR or E line keeps the digest alone.
+    quiet = _grade_dict(replace(grade, log_tail="PASSED one\n"))["log_tail"]
+    assert set(quiet) == {"sha256", "chars"}
 
 
 def test_to_dict_is_json_and_holds_no_raw_diff_log_text_or_evidence():

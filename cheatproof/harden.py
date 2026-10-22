@@ -83,7 +83,7 @@ from typing import TYPE_CHECKING, Any
 from cheatproof.budget import Budget, BudgetExceeded
 from cheatproof.executor import EnvSpec, Executor, ExecutorRefused, ExecutorUnavailable, Session
 from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, ExposureReport
-from cheatproof.grader import GateReport, GradeResult
+from cheatproof.grader import GateReport, GradeResult, sanitized_line
 from cheatproof.holes import HoleReport
 
 if TYPE_CHECKING:
@@ -161,8 +161,18 @@ def _grade_dict(grade: GradeResult) -> dict[str, Any]:
     # JSON types only: a tuple (GradeResult.labels) becomes a list, as json.dumps would write it.
     data = {key: list(value) if isinstance(value, tuple) else value for key, value in asdict(grade).items()}
     tail = data["log_tail"]  # sandbox output: a digest only, so a certificate never carries log text
-    data["log_tail"] = {"sha256": _digest(tail), "chars": len(tail)}
+    digest: dict[str, Any] = {"sha256": _digest(tail), "chars": len(tail)}
+    line = _error_line(tail)  # plus the one short ERROR or E line, sanitized: never the raw log
+    if line is not None:
+        digest["error_line"] = line
+    data["log_tail"] = digest
     return data
+
+
+def _error_line(tail: str) -> str | None:
+    """The first line of the log tail that starts with ERROR or E, sanitized and capped, or None."""
+    hit = next((line for line in tail.splitlines() if line.startswith(("ERROR", "E "))), None)
+    return None if hit is None else sanitized_line(hit)
 
 
 def _gates_dict(gates: GateReport) -> dict[str, Any]:

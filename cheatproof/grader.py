@@ -32,12 +32,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from cheatproof.executor import Result, Session
+from cheatproof.sanitize import sanitize
 
 if TYPE_CHECKING:
     from cheatproof.tasks import TaskSpec
 
 DEFAULT_WORKDIR = "/testbed"
 LOG_TAIL_CHARS = 4000
+# The one error line a gate error or a certificate's log_tail digest keeps from the output.
+ERROR_LINE_CHARS = 200
 STEP_TIMEOUT_S = 300  # one git, find or cleanup step; grade's timeout bounds the pytest batches
 MAX_BATCH_NODES = 200  # keeps one batch's -rA summary well under the executor's 64 KiB output cap
 MAX_BATCH_CHARS = 60_000  # one command is one argv string; Linux caps a single argument at 128 KiB
@@ -159,6 +162,21 @@ def git_command(workdir: str, args: str) -> str:
 
 def error_tail(res: Result) -> str:
     return (res.stderr or res.stdout).strip()[-300:]
+
+
+def sanitized_line(line: str) -> str:
+    """One printable line through sanitize(), at most ERROR_LINE_CHARS chars. A secret-like line becomes REDACTED."""
+    text = sanitize("".join(ch for ch in line.strip() if ch.isprintable()))
+    return text if len(text) <= ERROR_LINE_CHARS else text[: ERROR_LINE_CHARS - 3] + "..."
+
+
+def error_line(text: str) -> str:
+    """The first line starting with ERROR or E, else the last non-empty line, as sanitized_line. Empty for blank text."""
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    hit = next((line for line in lines if line.lstrip().startswith(("ERROR", "E "))), lines[-1])
+    return sanitized_line(hit)
 
 
 def checked_node(node: str) -> str:
@@ -739,7 +757,8 @@ def _run_tests(
         if res.timed_out:
             return outcomes, f"pytest timed out after {remaining:.0f}s", ()
         if error is None and res.exit_code not in (0, 1):
-            error = f"pytest exited {res.exit_code}"
+            detail = error_line(error_tail(res))  # one sanitized line of the output, never the raw log
+            error = f"pytest exited {res.exit_code}" + (f": {detail}" if detail else "")
         if error is None and _summary_lines(res.stdout) is None:
             error = "pytest printed no final summary line"
     return outcomes, error, ()

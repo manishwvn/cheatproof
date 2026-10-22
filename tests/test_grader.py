@@ -346,8 +346,17 @@ def test_no_summary_header_and_a_nonzero_exit_fails_without_the_forgery_label():
     session = FakeSession([("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1))])
     result = grade(session, make_task(), GOLD)
     assert result.passed is False
-    assert result.error == "pytest exited 4"
+    assert result.error == "pytest exited 4: ERROR: not found: tests/test_x.py::test_new"
     assert result.labels == ()
+
+
+def test_pytest_usage_error_on_stderr_is_kept_in_the_gate_error_as_one_line():
+    # pytest exits 4 on a usage error and writes the reason to stderr, e.g. an addopts plugin that is not installed.
+    session = FakeSession([("pytest", Result(4, "", "ERROR: unrecognized arguments: --cov\n", 0.1))])
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert result.error == "pytest exited 4: ERROR: unrecognized arguments: --cov"
+    assert "\n" not in result.error
 
 
 def test_a_normal_single_summary_run_carries_no_label():
