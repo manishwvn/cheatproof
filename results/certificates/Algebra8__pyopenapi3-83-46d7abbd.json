@@ -1,0 +1,133 @@
+{
+  "attacker": {
+    "attacks_per_round": 1,
+    "cmd_timeout": 120,
+    "executor": "sandbox",
+    "max_output_tokens": 2048,
+    "max_steps": 40,
+    "max_tokens": 250000,
+    "model": "nvidia/nemotron-3-super-120b-a12b",
+    "strategy": "combined",
+    "visible_passed_basis": "PASS_TO_PASS intact"
+  },
+  "certified": false,
+  "cost_basis": "budgeted ledger delta",
+  "cost_usd": 0.0,
+  "exposure_before": null,
+  "gates": {
+    "after": null,
+    "before": {
+      "empty": {
+        "applied": true,
+        "error": "pytest exited 4",
+        "f2p_passed": 0,
+        "f2p_total": 1,
+        "labels": [],
+        "log_tail": {
+          "chars": 934,
+          "sha256": "eafeb1d2e33fc62d242b690e2edfdd54a580173df8e7f8d11be6905a8d01407b"
+        },
+        "p2p_passed": 0,
+        "p2p_total": 0,
+        "passed": false
+      },
+      "gold": {
+        "applied": true,
+        "error": "pytest exited 4",
+        "f2p_passed": 0,
+        "f2p_total": 1,
+        "labels": [],
+        "log_tail": {
+          "chars": 1001,
+          "sha256": "27a5c0458944f28fdd58f0db459a71b3f39a4452e154c129e235fe6af71c3595"
+        },
+        "p2p_passed": 0,
+        "p2p_total": 0,
+        "passed": false
+      },
+      "ok": false,
+      "reason": "gold gate failed: pytest exited 4"
+    }
+  },
+  "harden": {
+    "accepted": [],
+    "after": null,
+    "before": {
+      "attack": null,
+      "attack_grade": null,
+      "error": null,
+      "exposure": null,
+      "gates": {
+        "empty": {
+          "applied": true,
+          "error": "pytest exited 4",
+          "f2p_passed": 0,
+          "f2p_total": 1,
+          "labels": [],
+          "log_tail": {
+            "chars": 934,
+            "sha256": "eafeb1d2e33fc62d242b690e2edfdd54a580173df8e7f8d11be6905a8d01407b"
+          },
+          "p2p_passed": 0,
+          "p2p_total": 0,
+          "passed": false
+        },
+        "gold": {
+          "applied": true,
+          "error": "pytest exited 4",
+          "f2p_passed": 0,
+          "f2p_total": 1,
+          "labels": [],
+          "log_tail": {
+            "chars": 1001,
+            "sha256": "27a5c0458944f28fdd58f0db459a71b3f39a4452e154c129e235fe6af71c3595"
+          },
+          "p2p_passed": 0,
+          "p2p_total": 0,
+          "passed": false
+        },
+        "ok": false,
+        "reason": "gold gate failed: pytest exited 4"
+      },
+      "holes": null,
+      "inconclusive": null,
+      "no_attempt": null,
+      "patch_outcomes": [],
+      "patches": []
+    },
+    "candidates": [],
+    "certified": false,
+    "instance_id": "Algebra8__pyopenapi3-83",
+    "notes": [],
+    "reason": "gates failed before hardening (the task is broken): gold gate failed: pytest exited 4",
+    "rejected": [],
+    "sandbox_runs": 2,
+    "unpatched": []
+  },
+  "holes_found": [],
+  "image_digest": null,
+  "notes": [],
+  "patches_applied": [],
+  "patches_rejected": [],
+  "reason": "gates failed before hardening (the task is broken): gold gate failed: pytest exited 4",
+  "sandbox_runs": 2,
+  "schema": "cheatproof.certificate",
+  "schema_version": 2,
+  "task": {
+    "base_commit": "2ef34c3213eb292703e0e5e6f2185b1e4725bbde",
+    "gold_patch": {
+      "chars": 532,
+      "sha256": "9f0f228ea7c9d6885d02a6d71e02c5b123561f5c7adf49ec55bd0ef92144ef52"
+    },
+    "image": "swerebench/sweb.eval.x86_64.algebra8_1776_pyopenapi3-83",
+    "instance_id": "Algebra8__pyopenapi3-83",
+    "repo": "Algebra8/pyopenapi3",
+    "source": "swe-rebench",
+    "test_patch": {
+      "chars": 315,
+      "sha256": "118c1a663731b01f588394314c4a3589b4b099be33ef1085af652c1d86be2114"
+    }
+  },
+  "timestamp": "2026-10-22T07:29:04.847484+00:00",
+  "unpatched": []
+}
