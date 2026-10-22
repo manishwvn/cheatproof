@@ -1,8 +1,10 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from cheatproof import executor
 from cheatproof.budget import BudgetExceeded
 from cheatproof.sanitize import REDACTED, assert_clean, sanitize
 from scripts import smoke
@@ -287,6 +289,57 @@ def test_sandbox_step_reraises_budget_exceeded():
 def test_sandbox_step_still_skips_other_failures(capsys):
     smoke.run_sandbox_step(FailingBudget())
     assert capsys.readouterr().out.startswith("sandbox step skipped (RuntimeError): network down")
+
+
+class CountingBudget:
+    def __init__(self):
+        self.reserved = 0
+
+    def reserve_sandbox_run(self):
+        self.reserved += 1
+
+
+class FakeSandboxImage:
+    """Stands in for a ContreeImageSync. run() records its kwargs and returns a finished run; no network."""
+
+    def __init__(self, client):
+        self._client = client
+
+    def run(self, *args, **kwargs):
+        self._client.runs.append(kwargs)
+        done = SimpleNamespace(result=SimpleNamespace(exit_code=0, stdout="sandbox ok Linux\n"))
+        return SimpleNamespace(wait=lambda: done)
+
+
+class FakeContreeSync:
+    """Stands in for ContreeSync. Every images call is recorded as (method, ref, kwargs)."""
+
+    def __init__(self):
+        self.lookups = []
+        self.runs = []
+        self.images = SimpleNamespace(use=self._use, oci=self._oci)
+
+    def _use(self, ref, **kwargs):
+        self.lookups.append(("use", ref, kwargs))
+        return FakeSandboxImage(self)
+
+    def _oci(self, ref, **kwargs):
+        self.lookups.append(("oci", ref, kwargs))
+        return FakeSandboxImage(self)
+
+
+def test_sandbox_hello_resolves_image_like_the_executor(monkeypatch, capsys):
+    client = FakeContreeSync()
+    monkeypatch.setattr(executor, "_default_client", lambda: client)
+    budget = CountingBudget()
+    smoke.run_sandbox_step(budget)
+    assert budget.reserved == 1
+    # The executor's own resolution for the same image name, on a separate fake client.
+    reference = FakeContreeSync()
+    executor.SandboxExecutor(client_factory=lambda: reference)._resolve_image("alpine:3.19")
+    assert client.lookups == reference.lookups == [("use", "alpine:3.19", {})]
+    assert client.runs == [{"shell": "echo sandbox ok && uname -a", "disposable": True}]
+    assert capsys.readouterr().out.startswith("sandbox exit=0 stdout='sandbox ok Linux'")
 
 
 def test_record_fixtures_writes_redacted_files(tmp_path):
