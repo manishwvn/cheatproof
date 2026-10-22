@@ -346,8 +346,40 @@ def test_no_summary_header_and_a_nonzero_exit_fails_without_the_forgery_label():
     session = FakeSession([("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1))])
     result = grade(session, make_task(), GOLD)
     assert result.passed is False
-    assert result.error == "pytest exited 4"
+    assert result.error == "pytest exited 4: ERROR: not found: tests/test_x.py::test_new"
     assert result.labels == ()
+
+
+REAL_USAGE_STDERR = (
+    "ERROR: usage: pytest [options] [file_or_dir] [file_or_dir] [...]\n"
+    "pytest: error: unrecognized arguments: --cov=foo -n\n"
+    "  inifile: /testbed/setup.cfg\n"
+    "  rootdir: /testbed\n"
+)
+
+
+def test_pytest_usage_error_keeps_the_pytest_error_line_in_the_gate_error():
+    # pytest exits 4 on a usage error and writes the reason to stderr, e.g. an addopts plugin that is not installed.
+    session = FakeSession([("pytest", Result(4, "", REAL_USAGE_STDERR, 0.1))])
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert result.error == "pytest exited 4: pytest: error: unrecognized arguments: --cov=foo -n"
+    assert "unrecognized arguments" in result.error
+    assert "usage" not in result.error and "/testbed" not in result.error and "\n" not in result.error
+
+
+def test_pytest_exit_4_with_no_output_has_no_suffix():
+    session = FakeSession([("pytest", Result(4, "", "", 0.1))])
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert result.error == "pytest exited 4"
+
+
+def test_non_4_exit_keeps_the_e_line_over_a_bare_error_summary_line():
+    stderr = "ERROR tests/test_a.py - ImportError\nE   ImportError: no module named foo\n"
+    session = FakeSession([("pytest", Result(2, "", stderr, 0.1))])
+    result = grade(session, make_task(), GOLD)
+    assert result.error == "pytest exited 2: E   ImportError: no module named foo"
 
 
 def test_a_normal_single_summary_run_carries_no_label():
@@ -521,6 +553,18 @@ def test_hidden_tests_that_still_do_not_apply_fail_the_grade():
     assert result.passed is False
     assert result.error == "hidden tests did not apply: error: nope"
     assert session.cmds("pytest") == []
+
+
+def test_multi_line_step_output_becomes_one_line_in_the_grade_error():
+    stderr = "error: patch failed: calc.py:3\npytest: error: INJECTED later\n  /root/work/x\n"
+    session = FakeSession([("candidate.diff", Result(1, "", stderr, 0.0)), ("pytest", all_pass)])
+    result = grade(session, make_task(), GOLD)
+    assert result.applied is False
+    assert (
+        result.error
+        == "candidate patch did not apply: error: patch failed: calc.py:3 | pytest: error: INJECTED later | <path>"
+    )
+    assert "\n" not in result.error
 
 
 def test_timed_out_run_fails_and_says_so():

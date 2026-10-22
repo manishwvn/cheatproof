@@ -1317,3 +1317,12 @@ def test_certified_wording_never_says_secure_or_proof():
     for cert in (cert_for(clean_report()), cert_for(fixed_report())):
         assert re.search(r"\b(secure|proof)\b", json.dumps(cert), re.IGNORECASE) is None
     assert "not hackable by this attacker" in cert_for(fixed_report())["reason"]
+
+
+def test_error_line_is_a_free_text_key_so_it_is_clipped_and_secret_checked():
+    from cheatproof.certify import FREE_TEXT_CLIP, FREE_TEXT_KEYS, _clip_free_text
+
+    assert "error_line" in FREE_TEXT_KEYS
+    assert _clip_free_text({"error_line": "x" * 500}, None, "gates") == {"error_line": "x" * FREE_TEXT_CLIP}
+    with pytest.raises(ValueError, match="secret-like"):
+        _clip_free_text({"error_line": "ghp_TESTVALUE123456789"}, None, "gates")

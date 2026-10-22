@@ -56,9 +56,10 @@ attacker never succeeded before any patch) and certified_hardened (certified aft
 the reason strings say "not hackable by this attacker" and nothing stronger.
 
 Report keys (stable; T07 writes these into certificates). to_dict() holds only JSON types and no raw sandbox or
-attacker text: each GradeResult.log_tail becomes {"sha256", "chars"}, and each hole's evidence becomes a count per
-label (evidence_counts). Do not serialise a report with dataclasses.asdict for a certificate: that includes
-`attacks`, which holds raw diffs and steps. Use to_dict().
+attacker text: each GradeResult.log_tail becomes {"sha256", "chars"}. When GradeResult.error is set, the grade also
+gets error_line: one sanitized line of that error (grader.error_line), never a line of the log. And each hole's
+evidence becomes a count per label (evidence_counts). Do not serialise a report with dataclasses.asdict for a
+certificate: that includes `attacks`, which holds raw diffs and steps. Use to_dict().
   HardenReport: instance_id, before, candidates, accepted, rejected, unpatched, after, certified, reason,
     sandbox_runs, notes. `attacks` (the AttackResult objects, with raw diffs and steps, for trace saving) is a
     plain field and is NOT in to_dict. It holds one result per round whose attack ran, before first; before.attack
@@ -83,7 +84,7 @@ from typing import TYPE_CHECKING, Any
 from cheatproof.budget import Budget, BudgetExceeded
 from cheatproof.executor import EnvSpec, Executor, ExecutorRefused, ExecutorUnavailable, Session
 from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, ExposureReport
-from cheatproof.grader import GateReport, GradeResult
+from cheatproof.grader import GateReport, GradeResult, error_line
 from cheatproof.holes import HoleReport
 
 if TYPE_CHECKING:
@@ -162,6 +163,9 @@ def _grade_dict(grade: GradeResult) -> dict[str, Any]:
     data = {key: list(value) if isinstance(value, tuple) else value for key, value in asdict(grade).items()}
     tail = data["log_tail"]  # sandbox output: a digest only, so a certificate never carries log text
     data["log_tail"] = {"sha256": _digest(tail), "chars": len(tail)}
+    # The one sanitized line of the gate error, taken from grade.error only, never from the log.
+    if grade.error:
+        data["error_line"] = error_line(grade.error)
     return data
 
 
