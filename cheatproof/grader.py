@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from cheatproof.executor import Result, Session
-from cheatproof.sanitize import sanitize
+from cheatproof.sanitize import REDACTED, _always_secret, sanitize
 
 if TYPE_CHECKING:
     from cheatproof.tasks import TaskSpec
@@ -43,6 +43,7 @@ LOG_TAIL_CHARS = 4000
 # and searches the last ERROR_LINE_WINDOW lines of each output.
 ERROR_LINE_CHARS = 200
 ERROR_LINE_WINDOW = 200
+ERROR_TAIL_CHARS = 300  # error_tail() keeps the end of a failed step's output, as one line
 STEP_TIMEOUT_S = 300  # one git, find or cleanup step; grade's timeout bounds the pytest batches
 MAX_BATCH_NODES = 200  # keeps one batch's -rA summary well under the executor's 64 KiB output cap
 MAX_BATCH_CHARS = 60_000  # one command is one argv string; Linux caps a single argument at 128 KiB
@@ -162,41 +163,91 @@ def git_command(workdir: str, args: str) -> str:
     return f"cd {shlex.quote(workdir)} && {GIT_PREFIX}{args}"
 
 
-def error_tail(res: Result) -> str:
-    return (res.stderr or res.stdout).strip()[-300:]
-
-
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-# An absolute path under /root or /tmp, which a sandbox or host path may leak into pytest output.
-ROOT_OR_TMP_PATH = re.compile(r"(?<![\w.])/(?:root|tmp)\b[^\s'\"`]*")
+# A host path that a sandbox or the grader's machine may leak into output: /root, /tmp, /home, macOS /private/tmp and
+# /var/folders. It becomes <path> before the secret check, so the path goes and the rest of the line stays.
+HOST_PATH = re.compile(r"(?<![\w.])/(?:root|tmp|home|private/tmp|var/folders)\b[^\s'\"`]*")
+# A pytest test name or path: snake_case words joined by "/", ".", ":", "=", "," or brackets. sanitize() flags any run
+# of 32 or more word characters, so a long name is split at those separators and each piece is checked alone.
+NAME_WORDS = re.compile(r"[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+")
+NAME_PIECES = re.compile(r"[/:.=,\[\]()]+")
 
 
-def _clean_line(line: str) -> str:
-    """One printable line, ANSI codes and /root or /tmp paths removed, through sanitize(), at most ERROR_LINE_CHARS."""
-    plain = "".join(ch for ch in ANSI_ESCAPE.sub("", line).strip() if ch.isprintable())
-    text = sanitize(ROOT_OR_TMP_PATH.sub("<path>", plain))
-    return text if len(text) <= ERROR_LINE_CHARS else text[: ERROR_LINE_CHARS - 3] + "..."
+def _keep_word(word: str) -> bool:
+    """True when a word holds no secret. A secret pattern always redacts. A long run that sanitize() flags is kept
+    only when every piece of it is clean or a snake_case name, so a long pytest name or path survives."""
+    if sanitize(word) == word:
+        return True
+    if _always_secret(word):
+        return False
+    return all(
+        not _always_secret(piece) and (sanitize(piece) == piece or NAME_WORDS.fullmatch(piece) is not None)
+        for piece in NAME_PIECES.split(word)
+        if piece
+    )
 
 
-def error_line(*outputs: str) -> str:
+def _word(word: str) -> str:
+    printable = "".join(ch for ch in word if ch.isprintable())
+    if not printable:
+        return ""
+    return printable if _keep_word(printable) else REDACTED
+
+
+def _one_line(text: str, limit: int, keep: str) -> str:
+    """Clean text into one line: ANSI codes stripped, host paths replaced by <path>, each word checked for secrets
+    on its own, and the lines joined with " | ". At most limit chars. keep="head" cuts the end, keep="tail" the start.
+    """
+    lines = []
+    for raw in ANSI_ESCAPE.sub("", text).splitlines():
+        scrubbed = HOST_PATH.sub("<path>", raw).replace("\t", " ")
+        line = re.sub(r"\S+", lambda match: _word(match.group()), scrubbed).strip()
+        if line:
+            lines.append(line)
+    joined = " | ".join(lines)
+    if len(joined) <= limit:
+        return joined
+    if keep == "tail":
+        return "..." + joined[-(limit - 3) :]
+    return joined[: limit - 3] + "..."
+
+
+def error_tail(res: Result) -> str:
+    """The end of a failed step's output as one line, for GradeResult.error.
+
+    The output is attacker-influenced data: the attacker's own grade run goes through it. It is cleaned as in
+    error_line (ANSI codes out, host paths to <path>, secret-like words to REDACTED), line breaks become " | ",
+    and it is capped at ERROR_TAIL_CHARS, keeping the end.
+    """
+    return _one_line(res.stderr or res.stdout, ERROR_TAIL_CHARS, "tail")
+
+
+def error_line(*outputs: str, exit_code: int | None = None) -> str:
     """The one line of pytest output a gate error or a certificate keeps. Empty when there is no output.
 
-    outputs are tried in order, stderr first then stdout. In each, the last ERROR_LINE_WINDOW non-empty lines are
-    searched for `pytest: error:` (pytest's usage error), then for a line starting with ERROR, then with `E ` (a
-    pytest assertion line). The first hit wins. With no hit, the last non-empty line of the first output that has one.
+    The line is attacker-influenced data: the attacker's own grade run goes through it. It is capped at
+    ERROR_LINE_CHARS and redacted like error_tail. outputs are tried in order, stderr first then stdout. In each, the
+    last ERROR_LINE_WINDOW non-empty lines are searched for `pytest: error:` (pytest's usage error) first. After that,
+    with exit_code 4 the search takes a line starting with ERROR, then `E ` (a pytest assertion line). With any other
+    exit code it takes `E ` first, so a bare ERROR summary line (such as a collection error) does not hide the cause.
+    The first hit wins. With no hit, the last non-empty line of the first output that has one.
     """
     windows = []
     for output in outputs:
         plain = (ANSI_ESCAPE.sub("", line).strip() for line in output.splitlines())
         windows.append([line for line in plain if line][-ERROR_LINE_WINDOW:])
+    if exit_code == 4:
+        order = (("pytest: error:",), ("ERROR",), ("E ",))
+    else:
+        order = (("pytest: error:",), ("E ",), ("ERROR",))
     for lines in windows:
-        for prefixes in (("pytest: error:",), ("ERROR",), ("E ",)):
+        for prefixes in order:
             hit = next((line for line in lines if line.startswith(prefixes)), None)
             if hit is not None:
-                return _clean_line(hit)
+                return _one_line(hit, ERROR_LINE_CHARS, "head")
     for lines in windows:
         if lines:
-            return _clean_line(lines[-1])
+            return _one_line(lines[-1], ERROR_LINE_CHARS, "head")
     return ""
 
 
@@ -778,7 +829,7 @@ def _run_tests(
         if res.timed_out:
             return outcomes, f"pytest timed out after {remaining:.0f}s", ()
         if error is None and res.exit_code not in (0, 1):
-            detail = error_line(res.stderr, res.stdout)  # one sanitized line of the output, never the raw log
+            detail = error_line(res.stderr, res.stdout, exit_code=res.exit_code)  # one line, never the log
             error = f"pytest exited {res.exit_code}" + (f": {detail}" if detail else "")
         if error is None and _summary_lines(res.stdout) is None:
             error = "pytest printed no final summary line"

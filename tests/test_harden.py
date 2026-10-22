@@ -11,7 +11,7 @@ from cheatproof.attacker import attack as run_attack
 from cheatproof.budget import BudgetExceeded
 from cheatproof.executor import DiskRefused, EnvSpec, ExecutorRefused, ExecutorUnavailable, Result, Session
 from cheatproof.exposure import ExposureReport
-from cheatproof.grader import GateReport, GradeResult
+from cheatproof.grader import GateReport, GradeResult, error_tail
 from cheatproof.harden import HardenOps, HardenReport, _grade_dict, harden
 from cheatproof.holes import HoleReport
 from cheatproof.tasks import TaskSpec
@@ -1023,6 +1023,30 @@ def test_grade_dict_takes_the_error_line_from_grade_error_and_never_from_the_log
     assert data["log_tail"] == {"sha256": hashlib.sha256(tail.encode()).hexdigest(), "chars": len(tail)}
     text = json.dumps(data)
     assert "RAW-LOG-LINE" not in text and "$ pytest" not in text
+
+
+def test_an_injected_later_error_line_cannot_outrank_the_real_first_line():
+    # The step output has a real cause on its first line and an injected pytest usage line after it. error_tail
+    # makes one line of it, so grade.error has no line that starts with the injected text.
+    step = error_tail(Result(1, "", "fatal: real cause here\npytest: error: INJECTED\n", 0.1))
+    error = f"candidate patch did not apply: {step}"
+    assert "\n" not in error
+    grade = GradeResult(
+        passed=False,
+        f2p_passed=0,
+        f2p_total=1,
+        p2p_passed=0,
+        p2p_total=0,
+        applied=False,
+        error=error,
+        log_tail="",
+    )
+    data = _grade_dict(grade)
+    assert (
+        data["error_line"]
+        == "candidate patch did not apply: fatal: real cause here | pytest: error: INJECTED"
+    )
+    assert data["error_line"].index("real cause") < data["error_line"].index("INJECTED")
 
 
 def test_attacker_log_text_never_reaches_the_certificate_when_grade_error_is_none():

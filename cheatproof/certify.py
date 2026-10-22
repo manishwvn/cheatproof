@@ -127,7 +127,9 @@ SECRET_KEY = re.compile(r"secret|password|passwd|api[_-]?key|credential|(^|_)tok
 UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 # Free text from the sandbox or the attacker. build_certificate cuts these keys to FREE_TEXT_CLIP chars after
 # a secret check of the full text. validate_certificate refuses any string longer than FREE_TEXT_MAX chars.
-FREE_TEXT_KEYS = frozenset({"error", "inconclusive", "no_attempt", "reason", "explanation", "notes"})
+FREE_TEXT_KEYS = frozenset(
+    {"error", "error_line", "inconclusive", "no_attempt", "reason", "explanation", "notes"}
+)
 FREE_TEXT_CLIP = 300
 FREE_TEXT_MAX = 2000
 # The outcomes of score(), in the order they are checked. Each certificate is in exactly one.

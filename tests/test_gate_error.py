@@ -3,10 +3,12 @@
 Helper-level tests and a certificate round trip. No sandbox, model or network.
 """
 
+import pytest
 from test_certify import cert_for, gate_failed_report, grade, with_before
 
 from cheatproof.certify import load_certificate, write_certificate
-from cheatproof.grader import ERROR_LINE_CHARS, GateReport, error_line
+from cheatproof.executor import Result
+from cheatproof.grader import ERROR_LINE_CHARS, ERROR_TAIL_CHARS, GateReport, error_line, error_tail
 
 USAGE_STDERR = (
     "ERROR: usage: pytest [options] [file_or_dir] [file_or_dir] [...]\n"
@@ -60,8 +62,78 @@ def test_root_and_tmp_paths_are_replaced_with_a_placeholder():
     assert line == "ERROR: cannot open <path> and <path>"
 
 
-def test_secret_like_line_becomes_redacted():
-    assert error_line("", "ERROR: token sk-TESTVALUE12345") == "REDACTED"
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/root/.cache/x.py",
+        "/tmp/abc/x.py",
+        "/home/runner/x.py",
+        "/private/tmp/abc/x.py",
+        "/var/folders/zz/T/x.py",
+    ],
+)
+def test_each_host_path_is_replaced_before_the_secret_check(path):
+    line = error_line("", f"ERROR: cannot open {path} now")
+    assert line == "ERROR: cannot open <path> now"
+
+
+def test_a_secret_token_is_redacted_and_the_rest_of_the_line_kept():
+    assert error_line("", "ERROR: token sk-TESTVALUE12345 failed") == "ERROR: token REDACTED failed"
+
+
+def test_a_long_random_token_is_redacted_and_the_rest_of_the_line_kept():
+    # No underscores and mixed case: not a pytest name, so the long-run check redacts it.
+    line = error_line("", "ERROR: key AbCdEf0123456789GhIjKl0123456789MnOpQr is bad")
+    assert line == "ERROR: key REDACTED is bad"
+
+
+def test_a_long_test_name_survives():
+    name = "test_a_really_long_function_name_here"
+    line = error_line("", f"ERROR: file or directory not found: tests/{name}.py")
+    assert line == f"ERROR: file or directory not found: tests/{name}.py"
+
+
+def test_a_long_relative_path_survives():
+    path = "tests/integration/sub_package/test_another_really_long_function_name_here.py"
+    assert error_line("", f"ERROR: file or directory not found: {path}") == (
+        f"ERROR: file or directory not found: {path}"
+    )
+
+
+def test_exit_4_takes_the_error_summary_line_before_an_e_line():
+    output = "E   ImportError: nope\nERROR tests/a.py - ImportError\n"
+    assert error_line("", output, exit_code=4) == "ERROR tests/a.py - ImportError"
+
+
+def test_other_exit_codes_take_the_e_line_before_a_bare_error_line():
+    output = "ERROR tests/a.py - ImportError\nE   ImportError: nope\n"
+    assert error_line("", output, exit_code=1) == "E   ImportError: nope"
+    assert error_line("", output, exit_code=2) == "E   ImportError: nope"
+
+
+def test_pytest_usage_error_line_wins_over_e_and_error_lines_at_any_exit_code():
+    output = "E   boom\nERROR: usage: pytest\npytest: error: unrecognized arguments: -n\n"
+    assert error_line("", output, exit_code=4) == "pytest: error: unrecognized arguments: -n"
+    assert error_line("", output, exit_code=1) == "pytest: error: unrecognized arguments: -n"
+
+
+def test_error_tail_is_one_sanitized_line_and_keeps_the_end():
+    tail = error_tail(Result(1, "", "fatal: first\n  \x1b[31mpytest: error: second\x1b[0m\n/root/x\n", 0.1))
+    assert tail == "fatal: first | pytest: error: second | <path>"
+    assert "\n" not in tail
+
+
+def test_error_tail_is_capped_at_error_tail_chars_keeping_the_end():
+    stderr = "\n".join(f"line {i} " + "word " * 10 for i in range(100)) + "\nlast line here\n"
+    tail = error_tail(Result(1, "", stderr, 0.1))
+    assert len(tail) == ERROR_TAIL_CHARS
+    assert tail.startswith("...") and tail.endswith("| last line here")
+    assert "\n" not in tail
+
+
+def test_error_tail_uses_stdout_when_stderr_is_empty():
+    assert error_tail(Result(1, "from stdout\n", "", 0.1)) == "from stdout"
+    assert error_tail(Result(1, "", "", 0.1)) == ""
 
 
 def test_gate_error_line_survives_a_certificate_write_and_load(tmp_path):

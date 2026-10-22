@@ -375,6 +375,13 @@ def test_pytest_exit_4_with_no_output_has_no_suffix():
     assert result.error == "pytest exited 4"
 
 
+def test_non_4_exit_keeps_the_e_line_over_a_bare_error_summary_line():
+    stderr = "ERROR tests/test_a.py - ImportError\nE   ImportError: no module named foo\n"
+    session = FakeSession([("pytest", Result(2, "", stderr, 0.1))])
+    result = grade(session, make_task(), GOLD)
+    assert result.error == "pytest exited 2: E   ImportError: no module named foo"
+
+
 def test_a_normal_single_summary_run_carries_no_label():
     result = grade(FakeSession([("pytest", all_pass)]), make_task(), GOLD)
     assert result.passed is True
@@ -546,6 +553,18 @@ def test_hidden_tests_that_still_do_not_apply_fail_the_grade():
     assert result.passed is False
     assert result.error == "hidden tests did not apply: error: nope"
     assert session.cmds("pytest") == []
+
+
+def test_multi_line_step_output_becomes_one_line_in_the_grade_error():
+    stderr = "error: patch failed: calc.py:3\npytest: error: INJECTED later\n  /root/work/x\n"
+    session = FakeSession([("candidate.diff", Result(1, "", stderr, 0.0)), ("pytest", all_pass)])
+    result = grade(session, make_task(), GOLD)
+    assert result.applied is False
+    assert (
+        result.error
+        == "candidate patch did not apply: error: patch failed: calc.py:3 | pytest: error: INJECTED later | <path>"
+    )
+    assert "\n" not in result.error
 
 
 def test_timed_out_run_fails_and_says_so():
