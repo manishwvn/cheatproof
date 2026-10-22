@@ -1,0 +1,26 @@
+{
+  "already_certified": 0,
+  "not_run": [],
+  "run": 5,
+  "scanned": 1000,
+  "schema_version": 1,
+  "selected": 5,
+  "selected_ids": [
+    "Algebra8__pyopenapi3-83",
+    "DRMacIver__shrinkray-7",
+    "BQSKit__bqskit-267",
+    "Azure__msrest-for-python-55",
+    "DataBiosphere__toil-4805"
+  ],
+  "selection_rule": "per source, the n lowest by score: fail-to-pass plus pass-to-pass test count, plus gold patch size in KB, plus 1000 per non-.py file in the gold patch; ties by instance_id; repos on the deny list are left out (astropy/astropy, matplotlib/matplotlib, numpy/numpy, pandas-dev/pandas, scikit-learn/scikit-learn, scipy/scipy)",
+  "skipped": {
+    "no_image": 756,
+    "non_pytest_id": 1
+  },
+  "source": [
+    "swe-rebench"
+  ],
+  "started": "2026-10-22T07:26:57.453434+00:00",
+  "updated": "2026-10-22T07:47:19.617451+00:00",
+  "valid": 243
+}
