@@ -81,7 +81,7 @@ Tasks 9-11 of the 11-task selection were not run because of the budget halt: `Az
   it does not change the planned sizes: the per-task Sandboxes cost has to be measured first, and the cap decided.
 - **Two tasks are broken for this harness, not attacks.** Algebra8 fails the gold gate with `pytest exited 4`. The
   certificate stores only that exit code. A separate gold-gate-only rerun on Sandboxes on 2026-10-22, with PR #37's
-  collection rerun, gave `collect: E   ModuleNotFoundError: No module named 'pyopenapi3'`. DRMacIver fails with `pytest exited 4`; the owner's report gives the line
+  collection rerun, gave `collect: E   ModuleNotFoundError: No module named 'pyopenapi3'`. DRMacIver fails with `pytest exited 4`; the same 2026-10-22 gold-gate rerun gives the line
   `found no collectors for /testbed/tests/test_main.py::test_kill_process`. PR #37 adds the collection cause to exit-4
   errors. No attack result exists for either.
 - **Attacks still end at limits.** Four of the five attacks run ended at `token_limit` or `max_steps`. Only row 6
