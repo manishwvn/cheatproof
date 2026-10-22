@@ -837,10 +837,13 @@ def _collect_cause(
 
 
 NOT_FOUND = "not found: "
+NO_COLLECTORS = (
+    "found no collectors for "  # pytest's wording when a node's file collects nothing (same exit 4)
+)
 
 
 def _reported_not_found(*outputs: str) -> set[str]:
-    """The node ids that pytest reports as `not found: <node>`, one per line.
+    """The node ids that pytest reports as `not found: <node>` or `found no collectors for <node>`, one per line.
 
     A line may carry pytest's "(no match in any of [...])" note after the node, on the same line. "ERROR: " may
     prefix the line. Any other text on the line makes the node no match.
@@ -849,8 +852,9 @@ def _reported_not_found(*outputs: str) -> set[str]:
     for output in outputs:
         for line in ANSI_ESCAPE.sub("", output).splitlines():
             text = line.strip().removeprefix("ERROR: ")
-            if text.startswith(NOT_FOUND):
-                reported.add(text[len(NOT_FOUND) :].partition(" (no match")[0].strip())
+            for prefix in (NOT_FOUND, NO_COLLECTORS):
+                if text.startswith(prefix):
+                    reported.add(text[len(prefix) :].partition(" (no match")[0].strip())
     return reported
 
 
