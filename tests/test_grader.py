@@ -343,7 +343,12 @@ def test_exit_zero_with_a_forged_header_and_no_real_summary_is_forgery():
 
 
 def test_no_summary_header_and_a_nonzero_exit_fails_without_the_forgery_label():
-    session = FakeSession([("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1))])
+    session = FakeSession(
+        [
+            ("--collect-only", Result(2, "", "", 0.1)),  # the collection rerun prints nothing
+            ("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1)),
+        ]
+    )
     result = grade(session, make_task(), GOLD)
     assert result.passed is False
     assert result.error == "pytest exited 4: ERROR: not found: tests/test_x.py::test_new"
@@ -373,6 +378,59 @@ def test_pytest_exit_4_with_no_output_has_no_suffix():
     result = grade(session, make_task(), GOLD)
     assert result.passed is False
     assert result.error == "pytest exited 4"
+
+
+def test_exit_4_not_found_reruns_collection_and_adds_the_import_error_to_the_gate_error():
+    # --tb=no hides the ImportError. The collection rerun of the file shows it, and the gate error keeps one line of it.
+    collect = Result(
+        2, "ERROR collecting tests/test_x.py\nE   ModuleNotFoundError: No module named 'foo'\n", "", 0.1
+    )
+    session = FakeSession(
+        [
+            ("--collect-only", collect),
+            ("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1)),
+        ]
+    )
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert "ModuleNotFoundError" in result.error
+    assert result.error.startswith("pytest exited 4: ERROR: not found: tests/test_x.py::test_new; collect: ")
+    assert "\n" not in result.error
+
+
+def test_exit_4_collection_rerun_is_once_per_gate_on_the_file_path_with_the_gate_env():
+    collect = Result(2, "E   ModuleNotFoundError: No module named 'foo'\n", "", 0.1)
+    session = FakeSession(
+        [
+            ("--collect-only", collect),
+            ("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1)),
+        ]
+    )
+    grade(session, make_task(), GOLD)
+    reruns = session.cmds("--collect-only")
+    assert len(reruns) == 1
+    assert reruns[0].startswith(TESTBED_SETUP + "cd /testbed && ")
+    assert reruns[0].endswith(" tests/test_x.py")
+    assert "::" not in reruns[0]
+
+
+def test_exit_4_without_not_found_does_not_rerun_collection():
+    session = FakeSession([("pytest", Result(4, "", REAL_USAGE_STDERR, 0.1))])
+    result = grade(session, make_task(), GOLD)
+    assert session.cmds("--collect-only") == []
+    assert result.error == "pytest exited 4: pytest: error: unrecognized arguments: --cov=foo -n"
+
+
+def test_exit_4_empty_collection_rerun_keeps_the_gate_error_unchanged():
+    session = FakeSession(
+        [
+            ("--collect-only", Result(2, "", "", 0.1)),
+            ("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1)),
+        ]
+    )
+    result = grade(session, make_task(), GOLD)
+    assert len(session.cmds("--collect-only")) == 1
+    assert result.error == "pytest exited 4: ERROR: not found: tests/test_x.py::test_new"
 
 
 def test_non_4_exit_keeps_the_e_line_over_a_bare_error_summary_line():

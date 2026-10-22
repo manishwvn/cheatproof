@@ -54,6 +54,12 @@ TESTBED_PATH = f"if [ -d {TESTBED_BIN} ]; then PATH={TESTBED_BIN}:$PATH; export 
 PYTEST_CMD = (
     "PYTHONDONTWRITEBYTECODE=1 python -m pytest -p no:cacheprovider --color=no --tb=no --show-capture=no -rA"
 )
+# The collection rerun after an exit-4 "not found:" run (see _collect_cause). --tb=short shows the import error that
+# --tb=no hides. Same env as PYTEST_CMD, and the file path is its only argument.
+COLLECT_CMD = (
+    "PYTHONDONTWRITEBYTECODE=1 python -m pytest -p no:cacheprovider --color=no --collect-only -q --tb=short"
+    " --show-capture=no"
+)
 # Git calls that read the sandbox's repo (refs, objects, the index). System and global config are ignored, and
 # so are repo hooks, fsmonitor and external diff drivers. Objects are read without replace refs. No flag here
 # stops a filter driver; the grader avoids the commands that run one (see the module docstring).
@@ -802,6 +808,27 @@ def _apply_hidden_tests(
         raise _GradeStep(f"hidden tests did not apply: {error_tail(res)}")
 
 
+def _collect_cause(
+    session: Session, workdir: str, file: str, deadline: float, logs: list[str]
+) -> tuple[str, bool]:
+    """Why pytest cannot collect file, as one line, or "" when there is none. Returns (cause, reset).
+
+    The rerun runs in the gate's env and cwd (TESTBED_PATH, workdir). A rerun that exits 0 collected the file, so it
+    has no cause. A timeout, a cut or an empty result also gives "", and the gate keeps its error. reset is True when
+    the executor reset the sandbox during the rerun: the caller must run no later batch in it.
+    """
+    remaining = min(deadline - time.monotonic(), STEP_TIMEOUT_S)
+    if remaining <= 0:
+        return "", False
+    cmd = f"{TESTBED_PATH}cd {shlex.quote(workdir)} && {COLLECT_CMD} {shlex.quote(file)}"
+    res = _exec(session, cmd, remaining, logs, "pytest collect", cut_ok=True)
+    if res.reset:
+        return "", True
+    if res.timed_out or res.truncated or res.exit_code == 0:
+        return "", False
+    return error_line(res.stderr, res.stdout), False
+
+
 def _run_tests(
     session: Session, workdir: str, nodes: Sequence[str], deadline: float, logs: list[str]
 ) -> tuple[dict[str, bool], str | None, tuple[str, ...]]:
@@ -831,6 +858,16 @@ def _run_tests(
         if error is None and res.exit_code not in (0, 1):
             detail = error_line(res.stderr, res.stdout, exit_code=res.exit_code)  # one line, never the log
             error = f"pytest exited {res.exit_code}" + (f": {detail}" if detail else "")
+            output = res.stdout + res.stderr
+            if res.exit_code == 4 and "not found:" in output:
+                # --tb=no hides a collection error, such as an ImportError in the test module. Rerun collection once,
+                # for the file of the node pytest could not find. error is set now, so this runs once per gate.
+                named = next((node for node in batch if node in output), batch[0])
+                cause, reset = _collect_cause(session, workdir, node_file(named), deadline, logs)
+                if reset:
+                    return outcomes, error, ()
+                if cause:
+                    error += f"; collect: {cause}"
         if error is None and _summary_lines(res.stdout) is None:
             error = "pytest printed no final summary line"
     return outcomes, error, ()
