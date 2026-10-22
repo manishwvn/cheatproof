@@ -312,3 +312,4 @@ progress 81% (19/28 tasks done, 6 days to submit)
 - Haiku run, Sonnet review (1 high, 1 medium, 4 low, all fixed), Opus final review. 1897 tests pass.
 - New T28: keep the pytest error text so the exit 4 cause is visible.
 - Lessons: the gold-gate error must carry stderr, or a failed gate cannot be diagnosed after the run. All 3 runnable attacks hit their token or step limit.
+- T28 draft on branch `t28-gate-error` (no PR). Sonnet review: 2 high findings (the real pytest `pytest: error:` line; attacker text in `harden` error_line). Fixes are queued in T28.
