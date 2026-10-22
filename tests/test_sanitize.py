@@ -288,15 +288,41 @@ def test_sandbox_step_reraises_budget_exceeded():
 
 def test_sandbox_step_still_skips_other_failures(capsys):
     smoke.run_sandbox_step(FailingBudget())
-    assert capsys.readouterr().out.startswith("sandbox step skipped (RuntimeError): network down")
+    assert capsys.readouterr().out == "sandbox step skipped (RuntimeError)\n"
 
 
 class CountingBudget:
     def __init__(self):
         self.reserved = 0
+        self.booked = []
 
     def reserve_sandbox_run(self):
         self.reserved += 1
+
+    def book_sandbox_cost(self, usd):
+        self.booked.append(usd)
+
+
+class RecordingBudget(CountingBudget):
+    """A budget whose halt() is recorded, so a 402 can be checked without a ledger file."""
+
+    def __init__(self):
+        super().__init__()
+        self.halted = []
+
+    def halt(self, reason):
+        self.halted.append(reason)
+
+
+class FakeHttpError(Exception):
+    """Stands in for an SDK error. The executor reads the HTTP status from status_code and never prints the text."""
+
+    def __init__(self, status_code):
+        super().__init__("server text with https://api.example.com/v1 and headers")
+        self.status_code = status_code
+
+
+SANDBOX_COST = 0.0021
 
 
 class FakeSandboxImage:
@@ -307,39 +333,89 @@ class FakeSandboxImage:
 
     def run(self, *args, **kwargs):
         self._client.runs.append(kwargs)
-        done = SimpleNamespace(result=SimpleNamespace(exit_code=0, stdout="sandbox ok Linux\n"))
-        return SimpleNamespace(wait=lambda: done)
+        if self._client.fail_at == "run":
+            raise self._client.error
+        done = SimpleNamespace(
+            result=SimpleNamespace(exit_code=0, stdout="sandbox ok Linux\n", cost=SANDBOX_COST)
+        )
+
+        def wait():
+            if self._client.fail_at == "wait":
+                raise self._client.error
+            return done
+
+        return SimpleNamespace(wait=wait)
 
 
 class FakeContreeSync:
-    """Stands in for ContreeSync. Every images call is recorded as (method, ref, kwargs)."""
+    """Stands in for ContreeSync. Every images call is recorded as (method, ref, kwargs). fail_at names the call
+    ("lookup", "run" or "wait") that raises error instead of returning."""
 
-    def __init__(self):
+    def __init__(self, fail_at=None, error=None):
+        self.fail_at = fail_at
+        self.error = error
         self.lookups = []
         self.runs = []
         self.images = SimpleNamespace(use=self._use, oci=self._oci)
 
     def _use(self, ref, **kwargs):
         self.lookups.append(("use", ref, kwargs))
+        if self.fail_at == "lookup":
+            raise self.error
         return FakeSandboxImage(self)
 
     def _oci(self, ref, **kwargs):
         self.lookups.append(("oci", ref, kwargs))
+        if self.fail_at == "lookup":
+            raise self.error
         return FakeSandboxImage(self)
 
 
-def test_sandbox_hello_resolves_image_like_the_executor(monkeypatch, capsys):
-    client = FakeContreeSync()
+def _install_client(monkeypatch, **kwargs) -> FakeContreeSync:
+    client = FakeContreeSync(**kwargs)
     monkeypatch.setattr(executor, "_default_client", lambda: client)
+    return client
+
+
+def test_sandbox_hello_resolves_image_like_the_executor(monkeypatch, capsys):
+    client = _install_client(monkeypatch)
     budget = CountingBudget()
     smoke.run_sandbox_step(budget)
-    assert budget.reserved == 1
+    assert budget.reserved == 1  # one reservation for the one run
+    assert budget.booked == [SANDBOX_COST]  # the reported cost is booked once
     # The executor's own resolution for the same image name, on a separate fake client.
     reference = FakeContreeSync()
     executor.SandboxExecutor(client_factory=lambda: reference)._resolve_image("alpine:3.19")
     assert client.lookups == reference.lookups == [("use", "alpine:3.19", {})]
-    assert client.runs == [{"shell": "echo sandbox ok && uname -a", "disposable": True}]
+    assert client.runs == [{"shell": "echo sandbox ok && uname -a", "disposable": True, "timeout": 60}]
     assert capsys.readouterr().out.startswith("sandbox exit=0 stdout='sandbox ok Linux'")
+
+
+@pytest.mark.parametrize("fail_at", ["lookup", "run", "wait"])
+def test_402_from_sandboxes_halts_the_budget_and_propagates(monkeypatch, capsys, fail_at):
+    _install_client(monkeypatch, fail_at=fail_at, error=FakeHttpError(402))
+    budget = RecordingBudget()
+    with pytest.raises(BudgetExceeded):
+        smoke.run_sandbox_step(budget)
+    assert budget.halted == ["HTTP 402 from Sandboxes: payment required"]
+    assert budget.booked == []
+    assert "skipped" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("fail_at", "expected"),
+    [("lookup", "ExecutorUnavailable"), ("run", "RuntimeError"), ("wait", "RuntimeError")],
+)
+def test_other_sandbox_errors_print_the_class_name_only(monkeypatch, capsys, fail_at, expected):
+    _install_client(
+        monkeypatch, fail_at=fail_at, error=RuntimeError("network down https://x.example/?token=abc")
+    )
+    budget = RecordingBudget()
+    smoke.run_sandbox_step(budget)  # does not raise: an optional step
+    assert capsys.readouterr().out == f"sandbox step skipped ({expected})\n"
+    assert budget.reserved == 1
+    assert budget.halted == []
+    assert budget.booked == []
 
 
 def test_record_fixtures_writes_redacted_files(tmp_path):

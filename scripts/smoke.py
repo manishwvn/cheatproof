@@ -18,9 +18,13 @@ if __name__ == "__main__":
     ENV_LOADED = load_env()
 
 from cheatproof.budget import Budget, BudgetExceeded
-from cheatproof.executor import SandboxExecutor
+from cheatproof.executor import SandboxExecutor, _halt_for_payment
 from cheatproof.llm import GuardedLLM
 from cheatproof.sanitize import assert_clean, sanitize
+
+SMOKE_IMAGE = "alpine:3.19"
+SMOKE_CMD = "echo sandbox ok && uname -a"
+SMOKE_TIMEOUT_S = 60
 
 
 def list_nvidia_models(llm: GuardedLLM) -> dict:
@@ -40,12 +44,25 @@ def call_cheap_model(llm: GuardedLLM):
 
 
 def sandbox_hello(budget: Budget) -> None:
+    # One reservation for the one disposable run below. A session start is not used: it runs `git ls-files` in its
+    # workdir before any command, and alpine has no git repo, so it would fail after reserving a run.
     budget.reserve_sandbox_run()  # the cap check comes before any SDK import or network call
-    # Same image path as the executor's session (SandboxExecutor._resolve_image): a tag lookup with no strict check.
-    # strict=True fetches the tag from the account and raises NotFoundError when that image is not imported yet.
-    base = SandboxExecutor()._resolve_image("alpine:3.19", budget)
-    result = base.run(shell="echo sandbox ok && uname -a", disposable=True).wait().result
+    executor = SandboxExecutor()
+    # Same image lookup as the executor's session: a tag lookup with no import (see SandboxExecutor._resolve_image).
+    # A 402 here halts the budget and comes back as BudgetExceeded.
+    base = executor._resolve_image(SMOKE_IMAGE, budget)
+    try:
+        done = base.run(shell=SMOKE_CMD, disposable=True, timeout=SMOKE_TIMEOUT_S).wait()
+    except Exception as exc:
+        paid = _halt_for_payment(exc, budget)  # HTTP 402 halts every paid call, as in the executor
+        if paid is not None:
+            raise paid from None
+        raise
+    result = done.result
     print(f"sandbox exit={result.exit_code} stdout={result.stdout.strip()!r}")
+    cost = getattr(result, "cost", None)  # the executor's _check_cost rule: no cost reported, nothing to book
+    if cost is not None:
+        budget.book_sandbox_cost(cost)
 
 
 def run_sandbox_step(budget: Budget) -> None:
@@ -53,8 +70,8 @@ def run_sandbox_step(budget: Budget) -> None:
         sandbox_hello(budget)
     except BudgetExceeded:
         raise  # a tripped cap or a halt must stop the run, never turn into a skipped step
-    except Exception as exc:  # noqa: BLE001 - optional step: report the class and a short, redacted message
-        print(f"sandbox step skipped ({type(exc).__name__}): {sanitize(str(exc))[:200]}")
+    except Exception as exc:  # noqa: BLE001 - optional step: print the class name only, never the message
+        print(f"sandbox step skipped ({type(exc).__name__})")
 
 
 def record_fixtures(out_dir: Path, models_listing: dict, completion: dict) -> None:
