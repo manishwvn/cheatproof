@@ -254,7 +254,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — todo — needs T23, T07, T16, T17, T18, T19, T20, T22 [30%]
+### T08 Eval run and results with raw counts — size M — in-progress (cycle 2026-10-22T04:23:55-05:00) — needs T23, T07, T16, T17, T18, T19, T20, T22 [30%]
 Unblocked 2026-10-21: U21 is closed and T23 is done (#30), so T08 has no U21 dependency left.
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
@@ -340,7 +340,7 @@ round trip. (low) one shared helper in grader and harden; scrub `/root` and `/tm
 
 Routine 2026-10-22 03:40 (#35): merged. Gold-gate rerun of Algebra8__pyopenapi3-83 on Sandboxes (1 run, $0.0084 sandbox cost): `pytest exited 4: ERROR: not found: /testbed/tests/test_schemas.py::test_free_form_object`. Pytest could not collect the node; `--tb=no` hides the reason (likely an import error at collection, uncertain). Follow-up: T29.
 
-### T29 Show why pytest cannot collect a gold-gate node — size S — in-progress (cycle 2026-10-22T04:23:55-05:00)
+### T29 Show why pytest cannot collect a gold-gate node — size S — done #37
 The gold gate for Algebra8__pyopenapi3-83 fails with `pytest exited 4: ERROR: not found: .../tests/test_schemas.py::test_free_form_object` (T28 rerun, 2026-10-22). The grader runs pytest with `--tb=no`, so a collection error (for example an ImportError in the test module) is hidden. When pytest exits 4 with `not found:`, rerun the collection once for that file with `--collect-only -q --tb=short` in the same session and keep one sanitized line of the cause via `grader.error_line` (no new raw text in certificates). Test with fakes near tests/test_grader.py. Then rerun the gold gate for Algebra8__pyopenapi3-83 and DRMacIver__shrinkray-7 on Sandboxes (cents) and record the cause in T08. If the cause is the image (package not installed), mark both tasks as `env-broken` in the batch with raw counts, never as attacker results.
 
 ### T27 Budget hardening from PR #32 review — size S — todo — needs T08
