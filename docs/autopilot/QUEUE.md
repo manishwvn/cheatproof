@@ -252,7 +252,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — todo — needs T23, T07, T16, T17, T18, T19, T20, T22
+### T08 Eval run and results with raw counts — size M — in-progress (cycle 2026-10-22T02:23:53-05:00) — needs T23, T07, T16, T17, T18, T19, T20, T22
 Unblocked 2026-10-21: U21 is closed and T23 is done (#30), so T08 has no U21 dependency left.
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
@@ -331,6 +331,9 @@ Review of PR #32 (`cheatproof/budget.py` and the Sandboxes cost path, planner-me
 6. Fix the `.env.example` note: removing `TRIAL_CREDIT_CAP_USD` restores 0.74; only a raise works.
 7. Document the in-flight overshoot bound (the most one in-flight call can add past the cap).
 8. ADR 0001 and ADR 0002 say sandbox runs book $0; fix both to match the logged-cost rule (U21).
+9. `tests/test_budget.py` `TODAY` is computed at import, so `test_sandbox_cost_is_logged_and_not_halted_below_the_cap`
+   fails when CI crosses UTC midnight (main run 39696924691, 2026-10-21 23:59 UTC; rerun green). Compute the date at
+   assert time or freeze the clock.
 `budget.py` is a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
 
 ### T09 Report page and judge replay mode — size M — done #12 — needs T07
