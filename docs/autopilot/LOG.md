@@ -313,3 +313,14 @@ progress 81% (19/28 tasks done, 6 days to submit)
 - New T28: keep the pytest error text so the exit 4 cause is visible.
 - Lessons: the gold-gate error must carry stderr, or a failed gate cannot be diagnosed after the run. All 3 runnable attacks hit their token or step limit.
 - T28 draft on branch `t28-gate-error` (no PR). Sonnet review: 2 high findings (the real pytest `pytest: error:` line; attacker text in `harden` error_line). Fixes are queued in T28.
+
+## 2026-10-22 routine (cycle 2026-10-22T03:23:53-05:00)
+progress 81% (20/29 tasks done, 6 days to submit)
+- Tasks: T28 and T01.
+- T28 (#35): merged. Haiku fix rounds 1 and 2 on the earlier draft, Sonnet review twice (CHANGES: whole-line redaction hid the cause, raw multi-line step error tails), Opus final approve. 1929 tests pass.
+- T28 live check: Algebra8__pyopenapi3-83 gold gate fails with `ERROR: not found: .../test_schemas.py::test_free_form_object`; new T29.
+- T01 (PR #36, planner merge): smoke sandbox hello failed with NotFoundError (tag never imported; `images.use` is lazy). Haiku diagnosis was wrong once; Sonnet found `images.oci`. Live verify `sandbox ok`. 1904 tests pass on the branch.
+- Spend: three Nano chat calls (about $0.00003), four sandbox runs (22 to 26; two failed before the fix), sandbox cost $0.2144 to $0.2229.
+- Learning notes for #35 added.
+- Branch `t28-gate-rerun` (scratch, no commits) left behind: the branch delete was refused by permission; not retried.
+- Lessons: an SDK handle call that makes no network request (`images.use`) can only fail later; verify a fix live before calling it done. A per-word secret check keeps long test names readable.

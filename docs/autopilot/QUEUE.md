@@ -14,7 +14,7 @@ applies). Other projects' images (`fde1-app`, `pgvector/pgvector:pg16`) must nev
 
 ## Milestone: live access and executor
 
-### T01 Smoke test, model IDs and prices — size S — in-progress (cycle 2026-10-22T03:23:53-05:00) — after 2026-10-21 [85%]
+### T01 Smoke test, model IDs and prices — size S — in review — after 2026-10-21 [95%]
 Run `uv run python scripts/smoke.py`. Live scripts load `.env` from the main checkout (the parent of `git rev-parse
 --git-common-dir`), so worktrees share one key file and never copy it. Record the exact Nemotron model IDs (Nano,
 Super, Ultra) from `/v1/models` and their per-1M prices from the public Token Factory price page into `.env.example`
@@ -33,6 +33,8 @@ Done 2026-10-18 (routine, #5): `cheatproof/envfile.py` (worktrees load the main 
 `cheatproof/sanitize.py` with tests, `smoke.py --record`, fixtures in `tests/fixtures/token_factory/`. Left: the
 sandbox run once U3 and `NEBIUS_PROJECT_ID` exist (then flip to `todo`). Note: Nano spent all 64 output tokens on
 reasoning (`content` null); callers that need text from Nano must allow more output tokens.
+
+Routine 2026-10-22 03:40 (PR #36, planner merge, U24): the smoke sandbox step failed with NotFoundError because `images.use` only builds a handle for a tag never imported; the fix resolves `alpine:3.19` with `images.oci` like the executor, books cost and halts on 402. Live verify printed `sandbox ok`. Done when #36 is merged.
 
 ### T02 Executor interface and Docker backend; Sandboxes recon — size M — done #4
 Implement `cheatproof/executor.py` per `docs/adr/0002-execution-model.md`: one interface (`start(env)`,
@@ -323,7 +325,9 @@ it (see T25). Certificates still cannot be committed until PR #25 (leakcheck ski
 is merged. Next: rerun via `batch` with 250k tokens once the host has room, or on Sandboxes after T23.
 Routine 2026-10-22 02:24 (PR #34): first Sandboxes batch, 5 of 40 (the 5 smallest swe-rebench tasks, not representative), Super, combined prompt, 40 steps, 250k tokens, $0.212, about 20 min, 16 sandbox runs. Gold 3 pass, 2 fail with `pytest exited 4` (Algebra8__pyopenapi3-83, DRMacIver__shrinkray-7); attacks 2 inconclusive (`token_limit`), 1 no_attempt (`max_steps`); 0 holes, 0 certified. `docs/results.md` and `results/` committed. Next: T28 first, then the next batch (about $2.5 and 2.5 h for 35 more tasks at this rate); consider more tokens per attempt, since 3 of 3 runnable attacks ran out of budget.
 
-### T28 Keep the gold-gate pytest error text — size S — in-progress (cycle 2026-10-22T03:23:53-05:00)
+Routine 2026-10-22 03:40: T28 merged (#35); gate errors now carry the pytest line. Algebra8__pyopenapi3-83 gold fails at collection (node not found); see T29 before the next batch.
+
+### T28 Keep the gold-gate pytest error text — size S — done #35
 `pytest exited 4` (usage error) failed the gold gate on 2 of 5 tasks in PR #34, but the stderr was dropped: `grader.py` (around line 742) sets the error without stderr, and `harden.py` (around line 163) replaces log_tail with a digest. Append a sanitized error tail (for example the first `ERROR:` line) to the gate error in `grader.py`, and keep it next to the digest in `harden.py`. Likely cause (uncertain): the repo's pytest `addopts` needs a plugin that is missing (`--cov`, `-n`). Test with fakes near `tests/test_grader.py:349`: a FakeSession returns exit 4 with stderr `ERROR: unrecognized arguments: --cov`, and the gate error contains `unrecognized arguments`. Then rerun one gold gate on Sandboxes for Algebra8__pyopenapi3-83 (cents) and record the cause in T08.
 
 Routine 2026-10-22 03:00: draft on branch `t28-gate-error` (d759000, pushed, no PR; worktree kept), 1899 tests pass.
@@ -333,6 +337,11 @@ Sonnet review CHANGES, fix these next cycle: (high) real pytest exit-4 stderr is
 the line only from `grade.error` and emit it only when `grade.error` is set. (medium) search stderr then stdout with a
 wider window; strip ANSI before matching; add tests for the cap, ANSI, the `E ` prefix, empty output and a certificate
 round trip. (low) one shared helper in grader and harden; scrub `/root` and `/tmp` paths; update the `harden.py` docstring.
+
+Routine 2026-10-22 03:40 (#35): merged. Gold-gate rerun of Algebra8__pyopenapi3-83 on Sandboxes (1 run, $0.0084 sandbox cost): `pytest exited 4: ERROR: not found: /testbed/tests/test_schemas.py::test_free_form_object`. Pytest could not collect the node; `--tb=no` hides the reason (likely an import error at collection, uncertain). Follow-up: T29.
+
+### T29 Show why pytest cannot collect a gold-gate node — size S — todo
+The gold gate for Algebra8__pyopenapi3-83 fails with `pytest exited 4: ERROR: not found: .../tests/test_schemas.py::test_free_form_object` (T28 rerun, 2026-10-22). The grader runs pytest with `--tb=no`, so a collection error (for example an ImportError in the test module) is hidden. When pytest exits 4 with `not found:`, rerun the collection once for that file with `--collect-only -q --tb=short` in the same session and keep one sanitized line of the cause via `grader.error_line` (no new raw text in certificates). Test with fakes near tests/test_grader.py. Then rerun the gold gate for Algebra8__pyopenapi3-83 and DRMacIver__shrinkray-7 on Sandboxes (cents) and record the cause in T08. If the cause is the image (package not installed), mark both tasks as `env-broken` in the batch with raw counts, never as attacker results.
 
 ### T27 Budget hardening from PR #32 review — size S — todo — needs T08
 Review of PR #32 (`cheatproof/budget.py` and the Sandboxes cost path, planner-merge). Do all items, with fakes:
@@ -393,6 +402,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
+- **U24 Merge PR #36** (T01 smoke sandbox fix): say `review` in an interactive session to merge PR #36 (touches `scripts/smoke.py`, a planner-merge path). CI green, Opus final review approve.
 - **U23 Merge PR #31** (T25, planner-merge paths, stacked on PR #30): after U22, say `review` in an interactive
   session to merge https://github.com/manishwvn/cheatproof/pull/31 (GitHub retargets it to `main` once #30 merges).
   CI green; Sonnet approve, Opus approve.
