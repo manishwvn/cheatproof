@@ -23,7 +23,8 @@
   end (`psf__requests-1142`: gates pass, Super attack inconclusive, $0.0146); batch stopped at 5.9 GB free disk (U14).
 - **Next for the routine:** U21 closed: Sandboxes cost is logged, and the budget halts only past `SANDBOX_COST_CAP_USD`
   ($0.50). The planner clears the live ledger `halted` after merge. T23 (#30) and T25 (#31) are done; T01 and T08 are
-  unblocked. Token Factory trial cap `TRIAL_CREDIT_CAP_USD` ($0.74 from now) is on.
+  unblocked. Token Factory trial cap `TRIAL_CREDIT_CAP_USD` ($0.74 from now) is on. 2026-10-22: first Sandboxes batch
+  (5 of 40, PR #34, $0.21) is in `docs/results.md`; T28 (gold-gate error text) comes before the next batch.
 - **Certificates:** schema 2 since #15; schema 1 files are refused (none are committed).
 - **Planner:** T22 (U11): Docker runs are booked at $0.05 each in `budget.py`, so the $4 daily cap would halt the
   40-task Docker run near task 16; plus `llm.py` timeout, workflow pins and git-ignoring `results/traces/`.

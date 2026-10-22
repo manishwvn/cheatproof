@@ -1,5 +1,11 @@
 # Autopilot log
 
+## 2026-10-22 summary
+progress 81% (19/28 tasks done, 6 days to submit)
+T08 first Sandboxes batch done (PR #34): 5 of 40 tasks, $0.21. Gold 3 of 5 pass; 2 fail with `pytest exited 4`.
+0 holes, 0 certified. All 3 runnable attacks hit their token or step limit.
+New T28 keeps the pytest error text so the exit 4 cause is visible. Next: T28, then the next batch.
+
 ## 2026-10-21 summary
 progress 70% (17/26 tasks done, 7 days to submit)
 T11 done (PR #29): video script and rough-cut tool; dry-run tested only.
@@ -298,3 +304,11 @@ progress 70% (17/26 tasks done, 7 days to submit)
 - T01 set to `waiting: U21`: only its sandbox run is left, and the budget is halted.
 - Hand-back not due: T12 is date-gated `todo`, not owner-blocked. Spend: $0 (no model, sandbox or Docker runs).
 - Lessons: stacking a PR on an open planner-merge PR unblocks work that shares a file; `timeout` is not on macOS.
+
+## 2026-10-22 routine (cycle 2026-10-22T02:23:53-05:00)
+progress 81% (19/28 tasks done, 6 days to submit)
+- Main CI was red: `tests/test_budget.py` `TODAY` crossed UTC midnight (run 39696924691). Rerun green; the fix is queued as T27 item 9.
+- Task: T08 first Sandboxes batch, 5 of 40, PR #34 merged. Gold 3/5 (2 `pytest exited 4`), 0 holes, 0 certified, $0.212131 (ledger 0.155438 to 0.367568).
+- Haiku run, Sonnet review (1 high, 1 medium, 4 low, all fixed), Opus final review. 1897 tests pass.
+- New T28: keep the pytest error text so the exit 4 cause is visible.
+- Lessons: the gold-gate error must carry stderr, or a failed gate cannot be diagnosed after the run. All 3 runnable attacks hit their token or step limit.
