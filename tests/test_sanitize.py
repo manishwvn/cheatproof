@@ -377,16 +377,17 @@ def _install_client(monkeypatch, **kwargs) -> FakeContreeSync:
     return client
 
 
-def test_sandbox_hello_resolves_image_like_the_executor(monkeypatch, capsys):
+def test_sandbox_hello_imports_the_image_like_the_executor_task_path(monkeypatch, capsys):
     client = _install_client(monkeypatch)
     budget = CountingBudget()
     smoke.run_sandbox_step(budget)
     assert budget.reserved == 1  # one reservation for the one run
     assert budget.booked == [SANDBOX_COST]  # the reported cost is booked once
-    # The executor's own resolution for the same image name, on a separate fake client.
+    # images.oci imports on a miss (the executor's path for task images); images.use is lazy and never imports.
     reference = FakeContreeSync()
-    executor.SandboxExecutor(client_factory=lambda: reference)._resolve_image("alpine:3.19")
-    assert client.lookups == reference.lookups == [("use", "alpine:3.19", {})]
+    executor.SandboxExecutor(client_factory=lambda: reference)._resolve_image("swebench/x")
+    assert client.lookups == [("oci", "alpine:3.19", {})]
+    assert reference.lookups == [("oci", "swebench/x", {})]
     assert client.runs == [{"shell": "echo sandbox ok && uname -a", "disposable": True, "timeout": 60}]
     assert capsys.readouterr().out.startswith("sandbox exit=0 stdout='sandbox ok Linux'")
 
@@ -404,7 +405,7 @@ def test_402_from_sandboxes_halts_the_budget_and_propagates(monkeypatch, capsys,
 
 @pytest.mark.parametrize(
     ("fail_at", "expected"),
-    [("lookup", "ExecutorUnavailable"), ("run", "RuntimeError"), ("wait", "RuntimeError")],
+    [("lookup", "RuntimeError"), ("run", "RuntimeError"), ("wait", "RuntimeError")],
 )
 def test_other_sandbox_errors_print_the_class_name_only(monkeypatch, capsys, fail_at, expected):
     _install_client(

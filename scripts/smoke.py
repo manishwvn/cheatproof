@@ -47,11 +47,12 @@ def sandbox_hello(budget: Budget) -> None:
     # One reservation for the one disposable run below. A session start is not used: it runs `git ls-files` in its
     # workdir before any command, and alpine has no git repo, so it would fail after reserving a run.
     budget.reserve_sandbox_run()  # the cap check comes before any SDK import or network call
-    executor = SandboxExecutor()
-    # Same image lookup as the executor's session: a tag lookup with no import (see SandboxExecutor._resolve_image).
-    # A 402 here halts the budget and comes back as BudgetExceeded.
-    base = executor._resolve_image(SMOKE_IMAGE, budget)
+    client = SandboxExecutor()._get_client()
     try:
+        # images.oci finds the tag or imports it from the registry on a miss, as the executor does for task images.
+        # images.use (the executor's path for other names) is lazy: it makes no call, and an untagged name only
+        # fails later at run() with NotFoundError. alpine is about 3 MB, so the import is cheap.
+        base = client.images.oci(SMOKE_IMAGE)
         done = base.run(shell=SMOKE_CMD, disposable=True, timeout=SMOKE_TIMEOUT_S).wait()
     except Exception as exc:
         paid = _halt_for_payment(exc, budget)  # HTTP 402 halts every paid call, as in the executor
