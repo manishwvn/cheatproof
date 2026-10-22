@@ -54,6 +54,15 @@ TESTBED_PATH = f"if [ -d {TESTBED_BIN} ]; then PATH={TESTBED_BIN}:$PATH; export 
 PYTEST_CMD = (
     "PYTHONDONTWRITEBYTECODE=1 python -m pytest -p no:cacheprovider --color=no --tb=no --show-capture=no -rA"
 )
+# The collection rerun after an exit-4 "not found:" run (see _collect_cause). --tb=short shows the import error that
+# --tb=no hides. Same env as PYTEST_CMD, and the file path is its only argument.
+COLLECT_CMD = (
+    "PYTHONDONTWRITEBYTECODE=1 python -m pytest -p no:cacheprovider --color=no --collect-only -q --tb=short"
+    " --show-capture=no"
+)
+COLLECT_CAUSE_CHARS = (
+    100  # the collection cause goes first in the gate error, so a certificate's 200-char head keeps it
+)
 # Git calls that read the sandbox's repo (refs, objects, the index). System and global config are ignored, and
 # so are repo hooks, fsmonitor and external diff drivers. Objects are read without replace refs. No flag here
 # stops a filter driver; the grader avoids the commands that run one (see the module docstring).
@@ -802,11 +811,73 @@ def _apply_hidden_tests(
         raise _GradeStep(f"hidden tests did not apply: {error_tail(res)}")
 
 
+def _collect_cause(
+    session: Session, workdir: str, file: str, deadline: float, logs: list[str]
+) -> tuple[str, bool]:
+    """Why pytest cannot collect file, as one line of at most COLLECT_CAUSE_CHARS, or "" when there is none.
+
+    Returns (cause, reset). The rerun runs in the gate's env and cwd (TESTBED_PATH, workdir). A rerun that exits 0
+    collected the file, so it has no cause. A cut or an empty result also gives "", and the gate keeps its error.
+    A timeout resets the sandbox, so it comes back as reset. reset is True when the executor reset the sandbox during
+    the rerun: the caller must run no later batch in it.
+    """
+    remaining = min(deadline - time.monotonic(), STEP_TIMEOUT_S)
+    if remaining <= 0:
+        return "", False
+    cmd = f"{TESTBED_PATH}cd {shlex.quote(workdir)} && {COLLECT_CMD} {shlex.quote(file)}"
+    res = _exec(session, cmd, remaining, logs, "pytest collect", cut_ok=True)
+    if res.reset:
+        return "", True
+    if res.truncated or res.exit_code == 0:
+        return "", False
+    cause = error_line(res.stderr, res.stdout)
+    if len(cause) > COLLECT_CAUSE_CHARS:
+        cause = cause[: COLLECT_CAUSE_CHARS - 3] + "..."
+    return cause, False
+
+
+NOT_FOUND = "not found: "
+
+
+def _reported_not_found(*outputs: str) -> set[str]:
+    """The node ids that pytest reports as `not found: <node>`, one per line.
+
+    A line may carry pytest's "(no match in any of [...])" note after the node, on the same line. "ERROR: " may
+    prefix the line. Any other text on the line makes the node no match.
+    """
+    reported: set[str] = set()
+    for output in outputs:
+        for line in ANSI_ESCAPE.sub("", output).splitlines():
+            text = line.strip().removeprefix("ERROR: ")
+            if text.startswith(NOT_FOUND):
+                reported.add(text[len(NOT_FOUND) :].partition(" (no match")[0].strip())
+    return reported
+
+
+def _not_found_file(batch: Sequence[str], workdir: str, *outputs: str) -> str:
+    """The file part of the batch node that pytest reports as not found.
+
+    pytest reports the node bare or under the run's directory: `not found: <node>` or `not found: <workdir>/<node>`.
+    Both must match in full. "" when no batch node is reported that way, or when the node has no file part, so the
+    caller skips the collection rerun.
+    """
+    reported = _reported_not_found(*outputs)
+    prefix = f"{workdir.rstrip('/')}/"
+    for node in batch:
+        if node in reported or f"{prefix}{node}" in reported:
+            return node_file(node)
+    return ""
+
+
 def _run_tests(
     session: Session, workdir: str, nodes: Sequence[str], deadline: float, logs: list[str]
 ) -> tuple[dict[str, bool], str | None, tuple[str, ...]]:
     outcomes: dict[str, bool] = {}
     error: str | None = None
+    detail = ""
+    collect_file = (
+        ""  # set with the gate error when pytest exits 4 on a not-found node: that file is collected below
+    )
     for batch in _batches(nodes):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -826,13 +897,24 @@ def _run_tests(
         if forged is not None:
             return outcomes, forged, (GRADER_FORGERY,)  # this run's summary is not read: it cannot be trusted
         outcomes.update(node_outcomes(res.stdout, batch))
-        if res.timed_out:
+        if res.timed_out:  # the executor reset the sandbox here, so no later batch runs
             return outcomes, f"pytest timed out after {remaining:.0f}s", ()
         if error is None and res.exit_code not in (0, 1):
             detail = error_line(res.stderr, res.stdout, exit_code=res.exit_code)  # one line, never the log
             error = f"pytest exited {res.exit_code}" + (f": {detail}" if detail else "")
+            if res.exit_code == 4:
+                # --tb=no hides a collection error, such as an ImportError in the test module. The collection rerun waits
+                # until every batch has run, so a reset in it cannot drop a later batch.
+                collect_file = _not_found_file(batch, workdir, res.stdout, res.stderr)
         if error is None and _summary_lines(res.stdout) is None:
             error = "pytest printed no final summary line"
+    if collect_file:
+        # Once per gate, after every batch. The loop returned early on any reset, so the sandbox is still the same one.
+        cause, reset = _collect_cause(session, workdir, collect_file, deadline, logs)
+        if reset:
+            return outcomes, f"{error}; collect rerun: sandbox reset", ()
+        if cause:
+            error = f"pytest exited 4: collect: {cause}" + (f"; {detail}" if detail else "")
     return outcomes, error, ()
 
 

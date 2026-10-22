@@ -9,6 +9,7 @@ import pytest
 
 from cheatproof.executor import Result, Session
 from cheatproof.grader import (
+    COLLECT_CAUSE_CHARS,
     LOG_TAIL_CHARS,
     MAX_BATCH_NODES,
     GateReport,
@@ -17,8 +18,10 @@ from cheatproof.grader import (
     _c_unquote,
     _forgery,
     _GradeStep,
+    _not_found_file,
     diff_files,
     empty_gate,
+    error_line,
     gold_gate,
     grade,
     node_outcomes,
@@ -343,7 +346,12 @@ def test_exit_zero_with_a_forged_header_and_no_real_summary_is_forgery():
 
 
 def test_no_summary_header_and_a_nonzero_exit_fails_without_the_forgery_label():
-    session = FakeSession([("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1))])
+    session = FakeSession(
+        [
+            ("--collect-only", Result(2, "", "", 0.1)),  # the collection rerun prints nothing
+            ("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1)),
+        ]
+    )
     result = grade(session, make_task(), GOLD)
     assert result.passed is False
     assert result.error == "pytest exited 4: ERROR: not found: tests/test_x.py::test_new"
@@ -373,6 +381,185 @@ def test_pytest_exit_4_with_no_output_has_no_suffix():
     result = grade(session, make_task(), GOLD)
     assert result.passed is False
     assert result.error == "pytest exited 4"
+
+
+def test_exit_4_not_found_reruns_collection_and_adds_the_import_error_to_the_gate_error():
+    # --tb=no hides the ImportError. The collection rerun of the file shows it, and the gate error keeps one line of it.
+    collect = Result(
+        2, "ERROR collecting tests/test_x.py\nE   ModuleNotFoundError: No module named 'foo'\n", "", 0.1
+    )
+    session = FakeSession(
+        [
+            ("--collect-only", collect),
+            ("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1)),
+        ]
+    )
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert "ModuleNotFoundError" in result.error
+    assert result.error.startswith("pytest exited 4: collect: E   ModuleNotFoundError")
+    assert result.error.endswith("; ERROR: not found: tests/test_x.py::test_new")
+    assert "\n" not in result.error
+
+
+def test_exit_4_collection_rerun_is_once_per_gate_on_the_file_path_with_the_gate_env():
+    collect = Result(2, "E   ModuleNotFoundError: No module named 'foo'\n", "", 0.1)
+    session = FakeSession(
+        [
+            ("--collect-only", collect),
+            ("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1)),
+        ]
+    )
+    grade(session, make_task(), GOLD)
+    reruns = session.cmds("--collect-only")
+    assert len(reruns) == 1
+    assert reruns[0].startswith(TESTBED_SETUP + "cd /testbed && ")
+    assert reruns[0].endswith(" tests/test_x.py")
+    assert "::" not in reruns[0]
+
+
+def test_exit_4_without_not_found_does_not_rerun_collection():
+    session = FakeSession([("pytest", Result(4, "", REAL_USAGE_STDERR, 0.1))])
+    result = grade(session, make_task(), GOLD)
+    assert session.cmds("--collect-only") == []
+    assert result.error == "pytest exited 4: pytest: error: unrecognized arguments: --cov=foo -n"
+
+
+def test_exit_4_empty_collection_rerun_keeps_the_gate_error_unchanged():
+    session = FakeSession(
+        [
+            ("--collect-only", Result(2, "", "", 0.1)),
+            ("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1)),
+        ]
+    )
+    result = grade(session, make_task(), GOLD)
+    assert len(session.cmds("--collect-only")) == 1
+    assert result.error == "pytest exited 4: ERROR: not found: tests/test_x.py::test_new"
+
+
+LONG_NODE = "tests/test_collect_causes.py::test_" + "long_node_name_" * 4 + "end"
+
+
+def test_long_node_id_keeps_the_collection_cause_in_the_certificate_head():
+    # A certificate keeps error_line(error), the first 200 chars of the gate error. The cause comes first, so a long node
+    # id after it does not cut the cause off. The cause is capped at COLLECT_CAUSE_CHARS.
+    assert 95 <= len(LONG_NODE) <= 110
+    collect = Result(2, "", "E   ModuleNotFoundError: " + "no module named foo; " * 10 + "\n", 0.1)
+    session = FakeSession(
+        [
+            ("--collect-only", collect),
+            ("pytest", Result(4, f"ERROR: not found: {LONG_NODE}\n", "", 0.1)),
+        ]
+    )
+    result = grade(session, make_task(fail_to_pass=(LONG_NODE,)), GOLD)
+    cause = result.error.split("collect: ", 1)[1].split("; ERROR: not found: ", 1)[0]
+    assert len(cause) == COLLECT_CAUSE_CHARS and cause.endswith("...")
+    assert result.error.startswith("pytest exited 4: collect: E   ModuleNotFoundError")
+    assert result.error.endswith(f"; ERROR: not found: {LONG_NODE}")
+    assert "ModuleNotFoundError" in error_line(result.error)
+
+
+def test_collection_rerun_output_is_one_line_with_host_paths_hidden():
+    stderr = (
+        "ERROR collecting tests/test_x.py\nE   ModuleNotFoundError: No module named '/root/venv/lib/foo'\n"
+    )
+    session = FakeSession(
+        [
+            ("--collect-only", Result(2, "", stderr, 0.1)),
+            ("pytest", Result(4, "ERROR: not found: tests/test_x.py::test_new\n", "", 0.1)),
+        ]
+    )
+    result = grade(session, make_task(), GOLD)
+    assert result.error == (
+        "pytest exited 4: collect: E   ModuleNotFoundError: No module named '<path>'"
+        "; ERROR: not found: tests/test_x.py::test_new"
+    )
+    assert "\n" not in result.error and "/root" not in result.error
+
+
+def test_reset_during_the_deferred_collection_rerun_keeps_every_batch_result():
+    # 202 node ids make two batches. Batch 1 holds the missing node and exits 4; batch 2 still runs and passes. The
+    # rerun runs after both batches, and its timeout resets the sandbox: batch 2's results stay and the error says so.
+    p2p = tuple(f"tests/test_x.py::test_{n}" for n in range(MAX_BATCH_NODES + 1))
+
+    def missing_in_batch_one(session, cmd):
+        if F2P in pytest_nodes(cmd):
+            return Result(4, f"ERROR: not found: {F2P}\n", "", 0.1)
+        return all_pass(session, cmd)
+
+    timed_out = Result(124, "", "", 1.0, timed_out=True, reset=True)
+    session = FakeSession([("--collect-only", timed_out), ("pytest", missing_in_batch_one)])
+    result = grade(session, make_task(pass_to_pass=p2p), GOLD)
+    assert len(session.cmds("-rA")) == 2
+    assert result.p2p_passed == 2 and result.p2p_total == len(
+        p2p
+    )  # batch 2's two nodes pass; batch 1 exited 4
+    assert result.passed is False
+    assert result.error == f"pytest exited 4: ERROR: not found: {F2P}; collect rerun: sandbox reset"
+
+
+def test_not_found_node_in_a_later_batch_collects_its_own_file():
+    late = "tests/test_late.py::test_missing"
+    p2p = tuple(f"tests/test_x.py::test_{n}" for n in range(MAX_BATCH_NODES - 1)) + (late,)
+
+    def missing_late(session, cmd):
+        if late in pytest_nodes(cmd):
+            return Result(4, f"ERROR: not found: {late}\n", "", 0.1)
+        return all_pass(session, cmd)
+
+    collect = Result(2, "", "E   ModuleNotFoundError: No module named 'foo'\n", 0.1)
+    session = FakeSession([("--collect-only", collect), ("pytest", missing_late)])
+    result = grade(session, make_task(pass_to_pass=p2p), GOLD)
+    reruns = session.cmds("--collect-only")
+    assert len(reruns) == 1 and reruns[0].endswith(" tests/test_late.py")
+    assert result.f2p_passed == 1  # the first batch ran and passed before the later one exited 4
+    assert result.error == (
+        f"pytest exited 4: collect: E   ModuleNotFoundError: No module named 'foo'; ERROR: not found: {late}"
+    )
+
+
+def test_not_found_file_matches_the_whole_line_and_needs_a_file_part():
+    assert _not_found_file((F2P, P2P), "/testbed", f"x\nERROR: not found: {P2P}\n") == TEST_FILE
+    assert _not_found_file((F2P,), "/testbed", f"mentions not found: {F2P} inside a line\n") == ""
+    assert _not_found_file(("::test_new",), "/testbed", "ERROR: not found: ::test_new\n") == ""
+
+
+REAL_SCHEMA_NODE = "tests/test_schemas.py::test_free_form_object"
+REAL_SCHEMA_LINE = "ERROR: not found: /testbed/tests/test_schemas.py::test_free_form_object"
+
+
+def test_not_found_file_accepts_the_absolute_path_pytest_really_prints():
+    # The T28 live rerun: pytest prints the node under the run's directory, and the batch node is relative.
+    out = f"{REAL_SCHEMA_LINE}\n(no match in any of [<Module test_schemas.py>])\n"
+    assert _not_found_file((REAL_SCHEMA_NODE,), "/testbed", out) == "tests/test_schemas.py"
+    assert _not_found_file((REAL_SCHEMA_NODE,), "/testbed/", out) == "tests/test_schemas.py"
+
+
+def test_not_found_file_accepts_the_no_match_note_on_the_same_line():
+    same = f"ERROR: not found: {REAL_SCHEMA_NODE} (no match in any of [<Module test_schemas.py>])\n"
+    assert _not_found_file((REAL_SCHEMA_NODE,), "/testbed", same) == "tests/test_schemas.py"
+    absolute = same.replace(REAL_SCHEMA_NODE, "/testbed/" + REAL_SCHEMA_NODE)
+    assert _not_found_file((REAL_SCHEMA_NODE,), "/testbed", absolute) == "tests/test_schemas.py"
+
+
+def test_not_found_file_stays_exact_for_other_paths_and_nodes():
+    other_dir = f"ERROR: not found: /other/{REAL_SCHEMA_NODE}\n"
+    other_node = f"ERROR: not found: {REAL_SCHEMA_NODE}_other (no match in any of [])\n"
+    assert _not_found_file((REAL_SCHEMA_NODE,), "/testbed", other_dir) == ""
+    assert _not_found_file((REAL_SCHEMA_NODE,), "/testbed", other_node) == ""
+
+
+def test_real_absolute_not_found_line_reruns_collection_for_the_relative_file():
+    collect = Result(2, "", "E   ModuleNotFoundError: No module named 'jsonschema'\n", 0.1)
+    out = f"{REAL_SCHEMA_LINE}\n(no match in any of [<Module test_schemas.py>])\n"
+    session = FakeSession([("--collect-only", collect), ("pytest", Result(4, out, "", 0.1))])
+    result = grade(session, make_task(fail_to_pass=(REAL_SCHEMA_NODE,)), GOLD)
+    reruns = session.cmds("--collect-only")
+    assert len(reruns) == 1 and reruns[0].endswith(" tests/test_schemas.py")
+    assert result.error == (
+        "pytest exited 4: collect: E   ModuleNotFoundError: No module named 'jsonschema'"
+        f"; ERROR: not found: /testbed/{REAL_SCHEMA_NODE}"
+    )
 
 
 def test_non_4_exit_keeps_the_e_line_over_a_bare_error_summary_line():
