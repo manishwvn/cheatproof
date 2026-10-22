@@ -340,7 +340,7 @@ round trip. (low) one shared helper in grader and harden; scrub `/root` and `/tm
 
 Routine 2026-10-22 03:40 (#35): merged. Gold-gate rerun of Algebra8__pyopenapi3-83 on Sandboxes (1 run, $0.0084 sandbox cost): `pytest exited 4: ERROR: not found: /testbed/tests/test_schemas.py::test_free_form_object`. Pytest could not collect the node; `--tb=no` hides the reason (likely an import error at collection, uncertain). Follow-up: T29.
 
-### T29 Show why pytest cannot collect a gold-gate node — size S — todo
+### T29 Show why pytest cannot collect a gold-gate node — size S — in-progress (cycle 2026-10-22T04:23:55-05:00)
 The gold gate for Algebra8__pyopenapi3-83 fails with `pytest exited 4: ERROR: not found: .../tests/test_schemas.py::test_free_form_object` (T28 rerun, 2026-10-22). The grader runs pytest with `--tb=no`, so a collection error (for example an ImportError in the test module) is hidden. When pytest exits 4 with `not found:`, rerun the collection once for that file with `--collect-only -q --tb=short` in the same session and keep one sanitized line of the cause via `grader.error_line` (no new raw text in certificates). Test with fakes near tests/test_grader.py. Then rerun the gold gate for Algebra8__pyopenapi3-83 and DRMacIver__shrinkray-7 on Sandboxes (cents) and record the cause in T08. If the cause is the image (package not installed), mark both tasks as `env-broken` in the batch with raw counts, never as attacker results.
 
 ### T27 Budget hardening from PR #32 review — size S — todo — needs T08
