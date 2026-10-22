@@ -836,19 +836,35 @@ def _collect_cause(
     return cause, False
 
 
-def _not_found_file(batch: Sequence[str], *outputs: str) -> str:
-    """The file part of the batch node that pytest reports as `not found: <node>` on a line of its own.
+NOT_FOUND = "not found: "
 
-    Only an exact line counts: "ERROR: " may prefix it, but the node must match in full. "" when no batch node is
-    reported that way, or when the node has no file part, so the caller skips the collection rerun.
+
+def _reported_not_found(*outputs: str) -> set[str]:
+    """The node ids that pytest reports as `not found: <node>`, one per line.
+
+    A line may carry pytest's "(no match in any of [...])" note after the node, on the same line. "ERROR: " may
+    prefix the line. Any other text on the line makes the node no match.
     """
-    lines = {
-        ANSI_ESCAPE.sub("", line).strip().removeprefix("ERROR: ")
-        for output in outputs
-        for line in output.splitlines()
-    }
+    reported: set[str] = set()
+    for output in outputs:
+        for line in ANSI_ESCAPE.sub("", output).splitlines():
+            text = line.strip().removeprefix("ERROR: ")
+            if text.startswith(NOT_FOUND):
+                reported.add(text[len(NOT_FOUND) :].partition(" (no match")[0].strip())
+    return reported
+
+
+def _not_found_file(batch: Sequence[str], workdir: str, *outputs: str) -> str:
+    """The file part of the batch node that pytest reports as not found.
+
+    pytest reports the node bare or under the run's directory: `not found: <node>` or `not found: <workdir>/<node>`.
+    Both must match in full. "" when no batch node is reported that way, or when the node has no file part, so the
+    caller skips the collection rerun.
+    """
+    reported = _reported_not_found(*outputs)
+    prefix = f"{workdir.rstrip('/')}/"
     for node in batch:
-        if f"not found: {node}" in lines:
+        if node in reported or f"{prefix}{node}" in reported:
             return node_file(node)
     return ""
 
@@ -889,7 +905,7 @@ def _run_tests(
             if res.exit_code == 4:
                 # --tb=no hides a collection error, such as an ImportError in the test module. The collection rerun waits
                 # until every batch has run, so a reset in it cannot drop a later batch.
-                collect_file = _not_found_file(batch, res.stdout, res.stderr)
+                collect_file = _not_found_file(batch, workdir, res.stdout, res.stderr)
         if error is None and _summary_lines(res.stdout) is None:
             error = "pytest printed no final summary line"
     if collect_file:

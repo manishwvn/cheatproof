@@ -519,9 +519,47 @@ def test_not_found_node_in_a_later_batch_collects_its_own_file():
 
 
 def test_not_found_file_matches_the_whole_line_and_needs_a_file_part():
-    assert _not_found_file((F2P, P2P), f"x\nERROR: not found: {P2P}\n") == TEST_FILE
-    assert _not_found_file((F2P,), f"mentions not found: {F2P} inside a line\n") == ""
-    assert _not_found_file(("::test_new",), "ERROR: not found: ::test_new\n") == ""
+    assert _not_found_file((F2P, P2P), "/testbed", f"x\nERROR: not found: {P2P}\n") == TEST_FILE
+    assert _not_found_file((F2P,), "/testbed", f"mentions not found: {F2P} inside a line\n") == ""
+    assert _not_found_file(("::test_new",), "/testbed", "ERROR: not found: ::test_new\n") == ""
+
+
+REAL_SCHEMA_NODE = "tests/test_schemas.py::test_free_form_object"
+REAL_SCHEMA_LINE = "ERROR: not found: /testbed/tests/test_schemas.py::test_free_form_object"
+
+
+def test_not_found_file_accepts_the_absolute_path_pytest_really_prints():
+    # The T28 live rerun: pytest prints the node under the run's directory, and the batch node is relative.
+    out = f"{REAL_SCHEMA_LINE}\n(no match in any of [<Module test_schemas.py>])\n"
+    assert _not_found_file((REAL_SCHEMA_NODE,), "/testbed", out) == "tests/test_schemas.py"
+    assert _not_found_file((REAL_SCHEMA_NODE,), "/testbed/", out) == "tests/test_schemas.py"
+
+
+def test_not_found_file_accepts_the_no_match_note_on_the_same_line():
+    same = f"ERROR: not found: {REAL_SCHEMA_NODE} (no match in any of [<Module test_schemas.py>])\n"
+    assert _not_found_file((REAL_SCHEMA_NODE,), "/testbed", same) == "tests/test_schemas.py"
+    absolute = same.replace(REAL_SCHEMA_NODE, "/testbed/" + REAL_SCHEMA_NODE)
+    assert _not_found_file((REAL_SCHEMA_NODE,), "/testbed", absolute) == "tests/test_schemas.py"
+
+
+def test_not_found_file_stays_exact_for_other_paths_and_nodes():
+    other_dir = f"ERROR: not found: /other/{REAL_SCHEMA_NODE}\n"
+    other_node = f"ERROR: not found: {REAL_SCHEMA_NODE}_other (no match in any of [])\n"
+    assert _not_found_file((REAL_SCHEMA_NODE,), "/testbed", other_dir) == ""
+    assert _not_found_file((REAL_SCHEMA_NODE,), "/testbed", other_node) == ""
+
+
+def test_real_absolute_not_found_line_reruns_collection_for_the_relative_file():
+    collect = Result(2, "", "E   ModuleNotFoundError: No module named 'jsonschema'\n", 0.1)
+    out = f"{REAL_SCHEMA_LINE}\n(no match in any of [<Module test_schemas.py>])\n"
+    session = FakeSession([("--collect-only", collect), ("pytest", Result(4, out, "", 0.1))])
+    result = grade(session, make_task(fail_to_pass=(REAL_SCHEMA_NODE,)), GOLD)
+    reruns = session.cmds("--collect-only")
+    assert len(reruns) == 1 and reruns[0].endswith(" tests/test_schemas.py")
+    assert result.error == (
+        "pytest exited 4: collect: E   ModuleNotFoundError: No module named 'jsonschema'"
+        f"; ERROR: not found: /testbed/{REAL_SCHEMA_NODE}"
+    )
 
 
 def test_non_4_exit_keeps_the_e_line_over_a_bare_error_summary_line():
