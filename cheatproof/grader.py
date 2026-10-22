@@ -39,8 +39,10 @@ if TYPE_CHECKING:
 
 DEFAULT_WORKDIR = "/testbed"
 LOG_TAIL_CHARS = 4000
-# The one error line a gate error or a certificate's log_tail digest keeps from the output.
+# error_line() keeps one line of pytest output, at most ERROR_LINE_CHARS long,
+# and searches the last ERROR_LINE_WINDOW lines of each output.
 ERROR_LINE_CHARS = 200
+ERROR_LINE_WINDOW = 200
 STEP_TIMEOUT_S = 300  # one git, find or cleanup step; grade's timeout bounds the pytest batches
 MAX_BATCH_NODES = 200  # keeps one batch's -rA summary well under the executor's 64 KiB output cap
 MAX_BATCH_CHARS = 60_000  # one command is one argv string; Linux caps a single argument at 128 KiB
@@ -164,19 +166,38 @@ def error_tail(res: Result) -> str:
     return (res.stderr or res.stdout).strip()[-300:]
 
 
-def sanitized_line(line: str) -> str:
-    """One printable line through sanitize(), at most ERROR_LINE_CHARS chars. A secret-like line becomes REDACTED."""
-    text = sanitize("".join(ch for ch in line.strip() if ch.isprintable()))
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+# An absolute path under /root or /tmp, which a sandbox or host path may leak into pytest output.
+ROOT_OR_TMP_PATH = re.compile(r"(?<![\w.])/(?:root|tmp)\b[^\s'\"`]*")
+
+
+def _clean_line(line: str) -> str:
+    """One printable line, ANSI codes and /root or /tmp paths removed, through sanitize(), at most ERROR_LINE_CHARS."""
+    plain = "".join(ch for ch in ANSI_ESCAPE.sub("", line).strip() if ch.isprintable())
+    text = sanitize(ROOT_OR_TMP_PATH.sub("<path>", plain))
     return text if len(text) <= ERROR_LINE_CHARS else text[: ERROR_LINE_CHARS - 3] + "..."
 
 
-def error_line(text: str) -> str:
-    """The first line starting with ERROR or E, else the last non-empty line, as sanitized_line. Empty for blank text."""
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines:
-        return ""
-    hit = next((line for line in lines if line.lstrip().startswith(("ERROR", "E "))), lines[-1])
-    return sanitized_line(hit)
+def error_line(*outputs: str) -> str:
+    """The one line of pytest output a gate error or a certificate keeps. Empty when there is no output.
+
+    outputs are tried in order, stderr first then stdout. In each, the last ERROR_LINE_WINDOW non-empty lines are
+    searched for `pytest: error:` (pytest's usage error), then for a line starting with ERROR, then with `E ` (a
+    pytest assertion line). The first hit wins. With no hit, the last non-empty line of the first output that has one.
+    """
+    windows = []
+    for output in outputs:
+        plain = (ANSI_ESCAPE.sub("", line).strip() for line in output.splitlines())
+        windows.append([line for line in plain if line][-ERROR_LINE_WINDOW:])
+    for lines in windows:
+        for prefixes in (("pytest: error:",), ("ERROR",), ("E ",)):
+            hit = next((line for line in lines if line.startswith(prefixes)), None)
+            if hit is not None:
+                return _clean_line(hit)
+    for lines in windows:
+        if lines:
+            return _clean_line(lines[-1])
+    return ""
 
 
 def checked_node(node: str) -> str:
@@ -757,7 +778,7 @@ def _run_tests(
         if res.timed_out:
             return outcomes, f"pytest timed out after {remaining:.0f}s", ()
         if error is None and res.exit_code not in (0, 1):
-            detail = error_line(error_tail(res))  # one sanitized line of the output, never the raw log
+            detail = error_line(res.stderr, res.stdout)  # one sanitized line of the output, never the raw log
             error = f"pytest exited {res.exit_code}" + (f": {detail}" if detail else "")
         if error is None and _summary_lines(res.stdout) is None:
             error = "pytest printed no final summary line"

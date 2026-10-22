@@ -350,13 +350,29 @@ def test_no_summary_header_and_a_nonzero_exit_fails_without_the_forgery_label():
     assert result.labels == ()
 
 
-def test_pytest_usage_error_on_stderr_is_kept_in_the_gate_error_as_one_line():
+REAL_USAGE_STDERR = (
+    "ERROR: usage: pytest [options] [file_or_dir] [file_or_dir] [...]\n"
+    "pytest: error: unrecognized arguments: --cov=foo -n\n"
+    "  inifile: /testbed/setup.cfg\n"
+    "  rootdir: /testbed\n"
+)
+
+
+def test_pytest_usage_error_keeps_the_pytest_error_line_in_the_gate_error():
     # pytest exits 4 on a usage error and writes the reason to stderr, e.g. an addopts plugin that is not installed.
-    session = FakeSession([("pytest", Result(4, "", "ERROR: unrecognized arguments: --cov\n", 0.1))])
+    session = FakeSession([("pytest", Result(4, "", REAL_USAGE_STDERR, 0.1))])
     result = grade(session, make_task(), GOLD)
     assert result.passed is False
-    assert result.error == "pytest exited 4: ERROR: unrecognized arguments: --cov"
-    assert "\n" not in result.error
+    assert result.error == "pytest exited 4: pytest: error: unrecognized arguments: --cov=foo -n"
+    assert "unrecognized arguments" in result.error
+    assert "usage" not in result.error and "/testbed" not in result.error and "\n" not in result.error
+
+
+def test_pytest_exit_4_with_no_output_has_no_suffix():
+    session = FakeSession([("pytest", Result(4, "", "", 0.1))])
+    result = grade(session, make_task(), GOLD)
+    assert result.passed is False
+    assert result.error == "pytest exited 4"
 
 
 def test_a_normal_single_summary_run_carries_no_label():

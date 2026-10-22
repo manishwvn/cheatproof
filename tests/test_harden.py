@@ -1006,7 +1006,7 @@ def test_patch_failure_inside_the_after_round_ends_the_round():
     assert_clean(lab, report)
 
 
-def test_grade_dict_keeps_the_short_error_line_beside_the_digest_and_not_the_log():
+def test_grade_dict_takes_the_error_line_from_grade_error_and_never_from_the_log():
     tail = "$ pytest -q\nRAW-LOG-LINE collected 0 items\nERROR: unrecognized arguments: --cov\nRAW-LOG-LINE again\n"
     grade = GradeResult(
         passed=False,
@@ -1015,20 +1015,32 @@ def test_grade_dict_keeps_the_short_error_line_beside_the_digest_and_not_the_log
         p2p_passed=0,
         p2p_total=0,
         applied=True,
-        error="pytest exited 4: ERROR: unrecognized arguments: --cov",
+        error="pytest exited 4: pytest: error: unrecognized arguments: --cov",
         log_tail=tail,
     )
     data = _grade_dict(grade)
-    assert data["log_tail"] == {
-        "sha256": hashlib.sha256(tail.encode()).hexdigest(),
-        "chars": len(tail),
-        "error_line": "ERROR: unrecognized arguments: --cov",
-    }
+    assert data["error_line"] == "pytest exited 4: pytest: error: unrecognized arguments: --cov"
+    assert data["log_tail"] == {"sha256": hashlib.sha256(tail.encode()).hexdigest(), "chars": len(tail)}
     text = json.dumps(data)
     assert "RAW-LOG-LINE" not in text and "$ pytest" not in text
-    # A log with no ERROR or E line keeps the digest alone.
-    quiet = _grade_dict(replace(grade, log_tail="PASSED one\n"))["log_tail"]
-    assert set(quiet) == {"sha256", "chars"}
+
+
+def test_attacker_log_text_never_reaches_the_certificate_when_grade_error_is_none():
+    attacker = "pytest: error: INJECTED\nERROR: INJECTED\nE   INJECTED\n"
+    grade = GradeResult(
+        passed=False,
+        f2p_passed=0,
+        f2p_total=1,
+        p2p_passed=0,
+        p2p_total=0,
+        applied=True,
+        error=None,
+        log_tail=attacker,
+    )
+    data = _grade_dict(grade)
+    assert "error_line" not in data
+    assert set(data["log_tail"]) == {"sha256", "chars"}
+    assert "INJECTED" not in json.dumps(data)
 
 
 def test_to_dict_is_json_and_holds_no_raw_diff_log_text_or_evidence():
