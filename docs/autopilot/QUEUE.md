@@ -323,8 +323,16 @@ it (see T25). Certificates still cannot be committed until PR #25 (leakcheck ski
 is merged. Next: rerun via `batch` with 250k tokens once the host has room, or on Sandboxes after T23.
 Routine 2026-10-22 02:24 (PR #34): first Sandboxes batch, 5 of 40 (the 5 smallest swe-rebench tasks, not representative), Super, combined prompt, 40 steps, 250k tokens, $0.212, about 20 min, 16 sandbox runs. Gold 3 pass, 2 fail with `pytest exited 4` (Algebra8__pyopenapi3-83, DRMacIver__shrinkray-7); attacks 2 inconclusive (`token_limit`), 1 no_attempt (`max_steps`); 0 holes, 0 certified. `docs/results.md` and `results/` committed. Next: T28 first, then the next batch (about $2.5 and 2.5 h for 35 more tasks at this rate); consider more tokens per attempt, since 3 of 3 runnable attacks ran out of budget.
 
-### T28 Keep the gold-gate pytest error text — size S — in-progress (cycle 2026-10-22T02:23:53-05:00)
+### T28 Keep the gold-gate pytest error text — size S — todo
 `pytest exited 4` (usage error) failed the gold gate on 2 of 5 tasks in PR #34, but the stderr was dropped: `grader.py` (around line 742) sets the error without stderr, and `harden.py` (around line 163) replaces log_tail with a digest. Append a sanitized error tail (for example the first `ERROR:` line) to the gate error in `grader.py`, and keep it next to the digest in `harden.py`. Likely cause (uncertain): the repo's pytest `addopts` needs a plugin that is missing (`--cov`, `-n`). Test with fakes near `tests/test_grader.py:349`: a FakeSession returns exit 4 with stderr `ERROR: unrecognized arguments: --cov`, and the gate error contains `unrecognized arguments`. Then rerun one gold gate on Sandboxes for Algebra8__pyopenapi3-83 (cents) and record the cause in T08.
+
+Routine 2026-10-22 03:00: draft on branch `t28-gate-error` (d759000, pushed, no PR; worktree kept), 1899 tests pass.
+Sonnet review CHANGES, fix these next cycle: (high) real pytest exit-4 stderr is `ERROR: usage: ...` then
+`pytest: error: unrecognized arguments: ...`; prefer the `pytest: error:` line and test with that real multi-line stderr.
+(high) `harden.py` `_error_line` scans the whole log tail, so attacker test output can land in the certificate; take
+the line only from `grade.error` and emit it only when `grade.error` is set. (medium) search stderr then stdout with a
+wider window; strip ANSI before matching; add tests for the cap, ANSI, the `E ` prefix, empty output and a certificate
+round trip. (low) one shared helper in grader and harden; scrub `/root` and `/tmp` paths; update the `harden.py` docstring.
 
 ### T27 Budget hardening from PR #32 review — size S — todo — needs T08
 Review of PR #32 (`cheatproof/budget.py` and the Sandboxes cost path, planner-merge). Do all items, with fakes:
