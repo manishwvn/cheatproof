@@ -345,7 +345,7 @@ Routine 2026-10-22 03:40 (#35): merged. Gold-gate rerun of Algebra8__pyopenapi3-
 ### T29 Show why pytest cannot collect a gold-gate node — size S — done #37
 The gold gate for Algebra8__pyopenapi3-83 fails with `pytest exited 4: ERROR: not found: .../tests/test_schemas.py::test_free_form_object` (T28 rerun, 2026-10-22). The grader runs pytest with `--tb=no`, so a collection error (for example an ImportError in the test module) is hidden. When pytest exits 4 with `not found:`, rerun the collection once for that file with `--collect-only -q --tb=short` in the same session and keep one sanitized line of the cause via `grader.error_line` (no new raw text in certificates). Test with fakes near tests/test_grader.py. Then rerun the gold gate for Algebra8__pyopenapi3-83 and DRMacIver__shrinkray-7 on Sandboxes (cents) and record the cause in T08. If the cause is the image (package not installed), mark both tasks as `env-broken` in the batch with raw counts, never as attacker results.
 
-### T30 Collection cause for pytest "found no collectors" — size S — in-progress (cycle 2026-10-22T06:23:53-05:00)
+### T30 Collection cause for pytest "found no collectors" — size S — done #39
 DRMacIver__shrinkray-7's gold gate fails with `pytest exited 4: ERROR: found no collectors for /testbed/tests/test_main.py::test_kill_process` (2026-10-22 rerun). PR #37 runs the collection rerun only on `not found:`. Extend `_not_found_file` in cheatproof/grader.py to also accept `found no collectors for <node>` (bare or under workdir), with fakes-only tests in tests/test_grader.py. No live run needed until U25 is done.
 
 ### T27 Budget hardening from PR #32 review — size S — todo — needs T08

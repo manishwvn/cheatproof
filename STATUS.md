@@ -1,7 +1,7 @@
 # Status
 
 **2026-10-18: Cheatproof set up.** Coding & Agentic track; the owner submits 2026-10-28 (deadline 2026-10-30
-10:00 PDT). Progress: 81% (21/30 tasks done, 6 days to submit, 2026-10-22 05:15); `python3 docs/autopilot/progress.py`.
+10:00 PDT). Progress: 82% (21/30 tasks done, 6 days to submit, 2026-10-22 06:30); `python3 docs/autopilot/progress.py`.
 
 - **Built:** the spend cap (`cheatproof/budget.py`, `cheatproof/llm.py`; one $20 total cap; sandbox runs reserved
   under one lock), CI and security workflows, autopilot scripts (`next_run.py`, `progress.py`, `lock.py`) with tests,
@@ -24,7 +24,7 @@
 - **Next for the routine:** U21 closed: Sandboxes cost is logged, and the budget halts only past `SANDBOX_COST_CAP_USD`
   ($0.50). The planner clears the live ledger `halted` after merge. T23 (#30) and T25 (#31) are done; T01 and T08 are
   unblocked. Token Factory trial cap `TRIAL_CREDIT_CAP_USD` ($0.74 from now) is on. 2026-10-22: first Sandboxes batch
-  (5 of 40, PR #34, $0.21) is in `docs/results.md`; T28 (gold-gate error text) is done (#35). T01 (smoke sandbox fix) is in review (PR #36, planner merge). T29 done (#37). T08 batch 2 merged (#38, 8 of 40 so far, first hole: CycloneDX test-edit). Budget halted on the Sandboxes cost cap: U25. T30 queued.
+  (5 of 40, PR #34, $0.21) is in `docs/results.md`; T28 (gold-gate error text) is done (#35). T01 (smoke sandbox fix) is in review (PR #36, planner merge). T29 done (#37). T08 batch 2 merged (#38, 8 of 40 so far, first hole: CycloneDX test-edit). Budget halted on the Sandboxes cost cap: U25. T30 queued. T30 done (#39): the exit-4 collection rerun also covers "found no collectors". No runnable task until U25 (T08) or T12 (after 2026-10-27).
 - **Certificates:** schema 2 since #15; schema 1 files are refused (none are committed).
 - **Planner:** T22 (U11): Docker runs are booked at $0.05 each in `budget.py`, so the $4 daily cap would halt the
   40-task Docker run near task 16; plus `llm.py` timeout, workflow pins and git-ignoring `results/traces/`.

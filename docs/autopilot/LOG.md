@@ -334,3 +334,11 @@ progress 81% (21/30 tasks done, 6 days to submit)
 - Budget halted, alert sent, U25.
 - Spend: total $0.3676 to $0.5351, sandbox cost $0.2229 to $0.5022.
 - Lessons: measure one task's sandbox cost before sizing a batch, since hardening multiplies sandbox runs. A matcher for tool output must be tested on the exact real line (pytest prints absolute paths).
+
+## 2026-10-22 routine (cycle 2026-10-22T06:23:53-05:00)
+progress 82% (21/30 tasks done, 6 days to submit)
+- Task: T30 (#39) merged: `_reported_not_found` in `cheatproof/grader.py` also accepts pytest's `found no collectors for <node>`, so DRMacIver__shrinkray-7's exit 4 gets its collection cause. 4 fakes-only tests, 1946 pass.
+- Haiku build, Sonnet review APPROVE (low only: ANSI-wrapped and multi-node lines untested), Opus final approve. Cost $0, no live run (U25).
+- Learning notes for #39 added.
+- No other runnable task: T08 waits on U25, T24/T27/T10 need T08, T12 after 2026-10-27. Hand-back condition not met (T12 is date-gated, not owner-blocked).
+- Lessons: when a matcher keys on a tool's error wording, list every wording that tool uses for the same exit code before shipping.
