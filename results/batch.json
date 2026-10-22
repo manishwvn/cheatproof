@@ -1,16 +1,32 @@
 {
-  "already_certified": 0,
-  "not_run": [],
-  "run": 5,
+  "already_certified": 5,
+  "not_run": [
+    {
+      "cost_usd": 0.06057630000000003,
+      "error": "certificate.exposure_before.future_git_evidence[10] holds a secret-like value and is refused",
+      "instance_id": "Azure__autorest.python-475",
+      "reason": "certificate_write_failed"
+    },
+    {
+      "cost_usd": 0.0,
+      "error": "Sandboxes cost $0.5021 is above the $0.50 cap; the budget is halted",
+      "instance_id": "BoboTiG__ebook-reader-dict-2132",
+      "reason": "budget"
+    }
+  ],
+  "run": 1,
   "scanned": 1000,
   "schema_version": 1,
-  "selected": 5,
+  "selected": 8,
   "selected_ids": [
     "Algebra8__pyopenapi3-83",
     "DRMacIver__shrinkray-7",
     "BQSKit__bqskit-267",
     "Azure__msrest-for-python-55",
-    "DataBiosphere__toil-4805"
+    "DataBiosphere__toil-4805",
+    "CycloneDX__cyclonedx-python-348",
+    "Azure__autorest.python-475",
+    "BoboTiG__ebook-reader-dict-2132"
   ],
   "selection_rule": "per source, the n lowest by score: fail-to-pass plus pass-to-pass test count, plus gold patch size in KB, plus 1000 per non-.py file in the gold patch; ties by instance_id; repos on the deny list are left out (astropy/astropy, matplotlib/matplotlib, numpy/numpy, pandas-dev/pandas, scikit-learn/scikit-learn, scipy/scipy)",
   "skipped": {
@@ -20,7 +36,7 @@
   "source": [
     "swe-rebench"
   ],
-  "started": "2026-10-22T07:26:57.453434+00:00",
-  "updated": "2026-10-22T07:47:19.617451+00:00",
+  "started": "2026-10-22T09:43:42.099984+00:00",
+  "updated": "2026-10-22T09:59:57.268627+00:00",
   "valid": 243
 }
