@@ -324,3 +324,13 @@ progress 81% (20/29 tasks done, 6 days to submit)
 - Learning notes for #35 added.
 - Branch `t28-gate-rerun` (scratch, no commits) left behind: the branch delete was refused by permission; not retried.
 - Lessons: an SDK handle call that makes no network request (`images.use`) can only fail later; verify a fix live before calling it done. A per-word secret check keeps long test names readable.
+
+## 2026-10-22 routine (cycle 2026-10-22T04:23:55-05:00)
+progress 81% (21/30 tasks done, 6 days to submit)
+- Tasks: T29 and T08 batch 2.
+- T29 (#37) merged: exit-4 `not found:` gates rerun collection once after all batches and put the cause first. Haiku build, Sonnet CHANGES (2 medium), two Haiku fix rounds (second: real pytest prints the absolute /testbed path), Sonnet approve, Opus approve. 1942 tests.
+- Live gold-gate rerun (2 sandbox runs, $0.0236 sandbox): Algebra8 `ModuleNotFoundError: No module named 'pyopenapi3'`; shrinkray `found no collectors` (new T30).
+- T08 batch 2 (#38) merged: facts as in the T08 note above. Sonnet CHANGES on doc counts (4 medium), fixed; Opus approve.
+- Budget halted, alert sent, U25.
+- Spend: total $0.3676 to $0.5351, sandbox cost $0.2229 to $0.5022.
+- Lessons: measure one task's sandbox cost before sizing a batch, since hardening multiplies sandbox runs. A matcher for tool output must be tested on the exact real line (pytest prints absolute paths).

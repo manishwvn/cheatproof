@@ -254,7 +254,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — in-progress (cycle 2026-10-22T04:23:55-05:00) — needs T23, T07, T16, T17, T18, T19, T20, T22 [30%]
+### T08 Eval run and results with raw counts — size M — waiting: U25 — needs T23, T07, T16, T17, T18, T19, T20, T22 [30%]
 Unblocked 2026-10-21: U21 is closed and T23 is done (#30), so T08 has no U21 dependency left.
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
@@ -325,6 +325,8 @@ it (see T25). Certificates still cannot be committed until PR #25 (leakcheck ski
 is merged. Next: rerun via `batch` with 250k tokens once the host has room, or on Sandboxes after T23.
 Routine 2026-10-22 02:24 (PR #34): first Sandboxes batch, 5 of 40 (the 5 smallest swe-rebench tasks, not representative), Super, combined prompt, 40 steps, 250k tokens, $0.212, about 20 min, 16 sandbox runs. Gold 3 pass, 2 fail with `pytest exited 4` (Algebra8__pyopenapi3-83, DRMacIver__shrinkray-7); attacks 2 inconclusive (`token_limit`), 1 no_attempt (`max_steps`); 0 holes, 0 certified. `docs/results.md` and `results/` committed. Next: T28 first, then the next batch (about $2.5 and 2.5 h for 35 more tasks at this rate); consider more tokens per attempt, since 3 of 3 runnable attacks ran out of budget.
 
+Routine 2026-10-22 04:23 (PR #38): batch 2 ran 3 of 6 planned tasks (8 of 40 so far). CycloneDX__cyclonedx-python-348: first hole (`test-edit`), closed by `test-edit-guard`, re-attack inconclusive at token limit, not certified. Azure__autorest.python-475: no submission (max_steps), certificate refused by the leak guard (secret-like value in exposure evidence). BoboTiG-2132 not run. The budget halted: Sandboxes cost $0.5022 passed SANDBOX_COST_CAP_USD $0.50 (sandbox runs 28 to 46, cost $0.2464 to $0.5022; trial $0.2122 to $0.3796 of $0.74; total $0.5351). A task with hardening costs about $0.08-0.10 sandbox; measure one task before sizing a batch, and stop 0.05 below any cap. Algebra8 is env-broken (ModuleNotFoundError pyopenapi3, from the PR #37 rerun). Raw attack diffs kept outside the repo in the state folder.
+
 Routine 2026-10-22 03:40: T28 merged (#35); gate errors now carry the pytest line. Algebra8__pyopenapi3-83 gold fails at collection (node not found); see T29 before the next batch.
 
 ### T28 Keep the gold-gate pytest error text — size S — done #35
@@ -342,6 +344,9 @@ Routine 2026-10-22 03:40 (#35): merged. Gold-gate rerun of Algebra8__pyopenapi3-
 
 ### T29 Show why pytest cannot collect a gold-gate node — size S — done #37
 The gold gate for Algebra8__pyopenapi3-83 fails with `pytest exited 4: ERROR: not found: .../tests/test_schemas.py::test_free_form_object` (T28 rerun, 2026-10-22). The grader runs pytest with `--tb=no`, so a collection error (for example an ImportError in the test module) is hidden. When pytest exits 4 with `not found:`, rerun the collection once for that file with `--collect-only -q --tb=short` in the same session and keep one sanitized line of the cause via `grader.error_line` (no new raw text in certificates). Test with fakes near tests/test_grader.py. Then rerun the gold gate for Algebra8__pyopenapi3-83 and DRMacIver__shrinkray-7 on Sandboxes (cents) and record the cause in T08. If the cause is the image (package not installed), mark both tasks as `env-broken` in the batch with raw counts, never as attacker results.
+
+### T30 Collection cause for pytest "found no collectors" — size S — todo
+DRMacIver__shrinkray-7's gold gate fails with `pytest exited 4: ERROR: found no collectors for /testbed/tests/test_main.py::test_kill_process` (2026-10-22 rerun). PR #37 runs the collection rerun only on `not found:`. Extend `_not_found_file` in cheatproof/grader.py to also accept `found no collectors for <node>` (bare or under workdir), with fakes-only tests in tests/test_grader.py. No live run needed until U25 is done.
 
 ### T27 Budget hardening from PR #32 review — size S — todo — needs T08
 Review of PR #32 (`cheatproof/budget.py` and the Sandboxes cost path, planner-merge). Do all items, with fakes:
@@ -402,6 +407,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
+- **U25 Budget halted: Sandboxes cost cap** (alerted 2026-10-22): the ledger is halted because Sandboxes cost $0.5022 passed SANDBOX_COST_CAP_USD ($0.50). U21 found Sandboxes are not billed per the Nebius console, so the cap is a guard. Owner: clear the top-level `halted` field in the live ledger, and choose SANDBOX_COST_CAP_USD for the rest of T08 (about $0.09 per task, about $3 for the remaining 32 tasks); TRIAL_CREDIT_CAP_USD ($0.74, $0.38 used) covers about 6 more tasks at about $0.06 each. Then flip T08 to todo.
 - **U24 Merge PR #36** (T01 smoke sandbox fix): say `review` in an interactive session to merge PR #36 (touches `scripts/smoke.py`, a planner-merge path). CI green, Opus final review approve.
 - **U23 Merge PR #31** (T25, planner-merge paths, stacked on PR #30): after U22, say `review` in an interactive
   session to merge https://github.com/manishwvn/cheatproof/pull/31 (GitHub retargets it to `main` once #30 merges).
