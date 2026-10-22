@@ -549,6 +549,51 @@ def test_not_found_file_stays_exact_for_other_paths_and_nodes():
     assert _not_found_file((REAL_SCHEMA_NODE,), "/testbed", other_node) == ""
 
 
+NO_COLLECTORS_NODE = "tests/test_main.py::test_kill_process"
+NO_COLLECTORS_LINE = "ERROR: found no collectors for /testbed/tests/test_main.py::test_kill_process"
+
+
+def test_not_found_file_accepts_the_found_no_collectors_line_pytest_really_prints():
+    # The T30 live run: exit 4 with `found no collectors for <workdir>/<node>`, not `not found:`.
+    assert (
+        _not_found_file((NO_COLLECTORS_NODE,), "/testbed", NO_COLLECTORS_LINE + "\n") == "tests/test_main.py"
+    )
+    assert (
+        _not_found_file((NO_COLLECTORS_NODE,), "/testbed/", NO_COLLECTORS_LINE + "\n") == "tests/test_main.py"
+    )
+
+
+def test_not_found_file_accepts_the_bare_relative_found_no_collectors_node():
+    bare = f"found no collectors for {NO_COLLECTORS_NODE}\n"
+    assert _not_found_file((NO_COLLECTORS_NODE,), "/testbed", bare) == "tests/test_main.py"
+
+
+def test_not_found_file_found_no_collectors_is_exact_for_other_paths_and_text():
+    outside = f"ERROR: found no collectors for /other/{NO_COLLECTORS_NODE}\n"
+    inside_line = f"pytest said found no collectors for {NO_COLLECTORS_NODE} here\n"
+    assert _not_found_file((NO_COLLECTORS_NODE,), "/testbed", outside) == ""
+    assert _not_found_file((NO_COLLECTORS_NODE,), "/testbed", inside_line) == ""
+
+
+def test_exit_4_found_no_collectors_reruns_collection_and_adds_the_import_error():
+    collect = Result(
+        2, "ERROR collecting tests/test_main.py\nE   ModuleNotFoundError: No module named 'foo'\n", "", 0.1
+    )
+    session = FakeSession(
+        [
+            ("--collect-only", collect),
+            ("pytest", Result(4, NO_COLLECTORS_LINE + "\n", "", 0.1)),
+        ]
+    )
+    result = grade(session, make_task(fail_to_pass=(NO_COLLECTORS_NODE,)), GOLD)
+    reruns = session.cmds("--collect-only")
+    assert len(reruns) == 1 and reruns[0].endswith(" tests/test_main.py")
+    assert result.passed is False
+    assert result.error.startswith("pytest exited 4: collect: E   ModuleNotFoundError")
+    assert result.error.endswith("; " + NO_COLLECTORS_LINE)
+    assert "\n" not in result.error
+
+
 def test_real_absolute_not_found_line_reruns_collection_for_the_relative_file():
     collect = Result(2, "", "E   ModuleNotFoundError: No module named 'jsonschema'\n", 0.1)
     out = f"{REAL_SCHEMA_LINE}\n(no match in any of [<Module test_schemas.py>])\n"
