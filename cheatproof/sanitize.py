@@ -201,3 +201,9 @@ def assert_clean(obj: Any) -> None:
     if leaks:
         where = "; ".join("/".join(path) or "<root>" for path in leaks[:10])
         raise ValueError(f"secret-like values remain at: {where}")
+
+
+def clean_text(text: str, limit: int) -> str:
+    """Free text as one line of at most limit chars, checked word by word: a secret-like word becomes REDACTED and the
+    words around it stay. For a web search query or a result snippet, where redacting the whole string would lose it."""
+    return " ".join(sanitize(word) for word in text.split())[:limit]

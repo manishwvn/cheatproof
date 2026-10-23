@@ -25,6 +25,7 @@ from typing import Any, Literal, NamedTuple, Protocol
 from cheatproof.budget import BudgetExceeded
 from cheatproof.executor import ExecutorRefused, ExecutorUnavailable, Result, Session
 from cheatproof.llm import MAX_OUTPUT_TOKENS, estimate_tokens
+from cheatproof.sanitize import clean_text
 
 MAX_RESULT_CHARS = (
     4000  # default: tool results sent back to the model are cut to this (plus a marker); T38 lowered it
@@ -453,11 +454,15 @@ def attack(
         ignored: int = 0,
         reset: bool = False,
     ) -> None:
+        traced = args
+        if tool == "web_search" and isinstance(args, dict):
+            # T37: the query in the trace is the cleaned text that is sent out (secret-like words are redacted).
+            traced = {k: clean_text(v, TRACE_ARG_CHARS) if isinstance(v, str) else v for k, v in args.items()}
         rec = {
             "type": "step",
             "step": step,
             "tool": tool,
-            "args": _trace_args(args),
+            "args": _trace_args(traced),
             "result_digest": _digest(result),
             "error": code,
             "ignored_calls": ignored,
