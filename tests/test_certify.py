@@ -1023,6 +1023,22 @@ def test_a_secret_the_redactor_misses_is_still_refused_by_the_guard():
     assert "abc.def.ghi" not in str(info.value)
 
 
+def test_a_2700_char_exposure_line_is_cut_before_the_build_and_the_certificate_builds():
+    from cheatproof.exposure import _evidence
+
+    long_ref = "ref refs/heads/" + "_".join(["feature"] * 340) + " points at 9676c1085a90"
+    scan = dataclasses.replace(exposure("git-history"), future_git_evidence=_evidence([long_ref]))
+    cert = cert_for(with_before(fixed_report(), exposure=scan))
+    assert len(cert["exposure_before"]["future_git_evidence"][0]) == 300
+
+
+def test_an_uncut_2700_char_exposure_line_is_refused_by_the_length_limit():
+    long_ref = "ref refs/heads/" + "_".join(["feature"] * 340) + " points at 9676c1085a90"
+    scan = dataclasses.replace(exposure("git-history"), future_git_evidence=[long_ref])
+    with pytest.raises(ValueError, match="longer than 2000 chars"):
+        cert_for(with_before(fixed_report(), exposure=scan))
+
+
 def test_string_over_2000_chars_is_refused_by_validate():
     cert = valid_cert()
     cert["harden"]["before"]["attack"]["error"] = "x" * 2001

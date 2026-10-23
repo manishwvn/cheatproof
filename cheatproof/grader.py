@@ -204,9 +204,9 @@ def _word(word: str) -> str:
 
 
 def redact_text(text: str) -> str:
-    """One line of free text with each secret-like word replaced by REDACTED, as error_line does per word. Spacing and
-    the other words stay, so a path or finding type survives. A value this misses (a secret split over two words, say)
-    is still refused by the leak guard at certificate write."""
+    """Free text with each secret-like word replaced by REDACTED, as error_line does per word. Only the words change:
+    whitespace, newlines included, is kept as it is, and the other words stay, so a path or finding type survives. A
+    value this misses (a secret split over two words, say) is still refused by the leak guard at certificate write."""
     return re.sub(r"\S+", lambda match: _word(match.group()), text)
 
 
