@@ -19,6 +19,7 @@ render() prints labels and test path names only, never diff text.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -34,6 +35,8 @@ if TYPE_CHECKING:
 
 ROUND_NAMES = ("before", "after")
 SCHEMA = 1
+PRIVATE_DIR = 0o700
+PRIVATE_FILE = 0o600
 STEM = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 PATH_CHARS = 200
 
@@ -47,22 +50,51 @@ def valid_stem(stem: str) -> bool:
     return bool(STEM.match(stem)) and ".." not in stem
 
 
-def _write(folder: Path, name: str, text: str) -> Path:
-    """Write folder/name; an existing file is renamed aside first. A symbolic link is refused."""
+def _make_folder(folder: Path) -> None:
+    """Create the traces folder private (0700) when it is new. A symbolic link is refused."""
+    if folder.is_symlink():
+        raise OSError(f"refusing to write through a symbolic link: {folder.name}")
+    if not folder.exists():
+        folder.mkdir(parents=True, mode=PRIVATE_DIR)
+        os.chmod(folder, PRIVATE_DIR)  # the umask may have narrowed or widened the mode of mkdir
+
+
+def _aside(folder: Path, name: str) -> None:
+    """Rename folder/name to <name>.<UTC time>.old when it exists. Nothing is overwritten or deleted."""
     target = folder / name
-    if folder.is_symlink() or target.is_symlink():
+    if not (target.exists() or target.is_symlink()):
+        return
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    aside = folder / f"{name}.{stamp}.old"
+    number = 1
+    while aside.exists() or aside.is_symlink():
+        number += 1
+        aside = folder / f"{name}.{stamp}.{number}.old"
+    target.rename(aside)
+
+
+def _write(folder: Path, name: str, text: str) -> Path:
+    """Write folder/name with mode 0600; an existing file is renamed aside first. A symbolic link is refused."""
+    target = folder / name
+    if target.is_symlink():
         raise OSError(f"refusing to write through a symbolic link: {name}")
-    folder.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-        aside = folder / f"{name}.{stamp}.old"
-        number = 1
-        while aside.exists() or aside.is_symlink():
-            number += 1
-            aside = folder / f"{name}.{stamp}.{number}.old"
-        target.rename(aside)
-    target.write_text(text, encoding="utf-8", errors="replace")
+    _make_folder(folder)
+    _aside(folder, name)
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, PRIVATE_FILE)
+    with os.fdopen(fd, "w", encoding="utf-8", errors="replace") as out:
+        out.write(text)
+    os.chmod(target, PRIVATE_FILE)
     return target
+
+
+def secure_trace(folder: Path, stem: str) -> None:
+    """Make <stem>.jsonl private (0600). It is created empty first when the attacker has not written it yet."""
+    path = folder / f"{stem}.jsonl"
+    if path.is_symlink():
+        raise OSError(f"refusing to write through a symbolic link: {path.name}")
+    _make_folder(folder)
+    os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, PRIVATE_FILE))
+    os.chmod(path, PRIVATE_FILE)
 
 
 def _json(data: Any) -> str:
@@ -77,10 +109,24 @@ def restore_set(task: TaskSpec) -> list[str] | None:
         return None
 
 
-def write_restore(traces_dir: Path, stem: str, task: TaskSpec) -> None:
-    """Cache the task's restore set beside the trace. OSError propagates; the caller decides what a failure means."""
+RUN_FILES = (
+    "{stem}.restore.json",
+    "{stem}.rounds.json",
+    "{stem}.before.diff",
+    "{stem}.after.diff",
+    "{stem}.diff",
+)
+
+
+def start_run(traces_dir: Path, stem: str, task: TaskSpec) -> None:
+    """Before the paid run: set aside every kept file of an earlier run, cache the task's restore set, and make the
+    trace file private. OSError propagates; the caller refuses the run before any spend."""
+    _make_folder(traces_dir)
+    for pattern in RUN_FILES:
+        _aside(traces_dir, pattern.format(stem=stem))
     data = {"schema": SCHEMA, "instance_id": task.instance_id, "restore_paths": restore_set(task)}
     _write(traces_dir, f"{stem}.restore.json", _json(data))
+    secure_trace(traces_dir, stem)
 
 
 def _round_inputs(rnd: Any, result: Any) -> dict[str, Any]:
@@ -98,7 +144,6 @@ def _round_inputs(rnd: Any, result: Any) -> dict[str, Any]:
         visible = _visible_passed(rnd.gates.empty)
     recorded = rnd.holes
     return {
-        "has_diff": diff is not None,
         "hidden_passed": hidden,
         "visible_passed": visible,
         "grader_labels": forged,
@@ -114,34 +159,65 @@ def _round_inputs(rnd: Any, result: Any) -> dict[str, Any]:
     }
 
 
-def keep_raw(report: Any, stem: str, traces_dir: Path) -> list[str]:
-    """Keep the raw attack diffs and the per-round grade inputs. Never raises. Returns notes (no diff text)."""
+def _write_attacks(stem: str, traces_dir: Path, results: list[Any], inputs: list[Any | None]) -> list[str]:
+    """Write the raw diffs and rounds.json for attack results in order (before first). inputs[i] is the round report
+    of results[i], or None when the grade is unknown. Each round records the trace segment it owns (its attack
+    index), so a round whose inputs fail still maps to the right segment. Returns notes; may raise."""
     notes: list[str] = []
-    rounds = [
-        (name, rnd)
-        for name, rnd in (("before", report.before), ("after", report.after))
-        if rnd is not None and rnd.attack is not None
-    ]
-    results = list(report.attacks)
-    if len(results) != len(rounds):
-        return [f"{len(results)} attack results for {len(rounds)} attack rounds: raw diffs not kept"]
     meta: dict[str, Any] = {}
     last: str | None = None
-    for (name, rnd), result in zip(rounds, results):
-        try:
-            meta[name] = _round_inputs(rnd, result)
-            if result.final_diff is not None:
-                _write(traces_dir, f"{stem}.{name}.diff", result.final_diff)
-                last = result.final_diff
-        except (OSError, ValueError) as exc:
-            notes.append(f"the {name} raw diff was not kept: {type(exc).__name__}")
-    try:
-        if last is not None:
-            _write(traces_dir, f"{stem}.diff", last)
-        _write(traces_dir, f"{stem}.rounds.json", _json({"schema": SCHEMA, "rounds": meta}))
-    except OSError as exc:
-        notes.append(f"raw run files were not kept: {type(exc).__name__}")
+    for index, (name, result) in enumerate(zip(ROUND_NAMES, results)):
+        diff = getattr(result, "final_diff", None) if getattr(result, "diff_ok", False) else None
+        entry: dict[str, Any] = {
+            "segment": index,
+            "has_diff": diff is not None,
+            "hidden_passed": None,
+            "visible_passed": None,
+            "grader_labels": [],
+            "no_attempt": False,
+            "recorded": None,
+        }
+        rnd = inputs[index]
+        if rnd is not None:
+            try:
+                entry.update(_round_inputs(rnd, result))
+            except Exception as exc:  # noqa: BLE001 - the diff and trace are kept all the same
+                notes.append(f"the {name} grade inputs were not kept: {type(exc).__name__}")
+        meta[name] = entry
+        if diff is not None:
+            _write(traces_dir, f"{stem}.{name}.diff", diff)
+            last = diff
+    if last is not None:
+        _write(traces_dir, f"{stem}.diff", last)
+    _write(traces_dir, f"{stem}.rounds.json", _json({"schema": SCHEMA, "rounds": meta}))
     return notes
+
+
+def _finish(stem: str, traces_dir: Path, results: list[Any], inputs: list[Any | None]) -> list[str]:
+    try:
+        notes = _write_attacks(stem, traces_dir, results, inputs)
+        secure_trace(traces_dir, stem)
+        return notes
+    except Exception as exc:  # noqa: BLE001 - never raises after a paid run; the class name only, no text
+        return [f"raw run files were not kept: {type(exc).__name__}"]
+
+
+def keep_raw(report: Any, stem: str, traces_dir: Path) -> list[str]:
+    """Keep the raw attack diffs and the per-round grade inputs. Never raises. Returns notes (no diff text)."""
+    try:
+        rounds = [rnd for rnd in (report.before, report.after) if rnd is not None and rnd.attack is not None]
+        results = list(report.attacks)
+        if len(results) != len(rounds):
+            return [f"{len(results)} attack results for {len(rounds)} attack rounds: raw diffs not kept"]
+        return _finish(stem, traces_dir, results, list(rounds))
+    except Exception as exc:  # noqa: BLE001 - never raises after a paid run; the class name only, no text
+        return [f"raw run files were not kept: {type(exc).__name__}"]
+
+
+def keep_stopped(results: list[Any], stem: str, traces_dir: Path) -> list[str]:
+    """Keep the raw diffs of the attacks that finished before harden stopped (no report, so the grade is unknown).
+    Best effort, never raises."""
+    return _finish(stem, traces_dir, list(results), [None] * len(results))
 
 
 @dataclass(frozen=True)
@@ -216,13 +292,16 @@ def recheck(traces_dir: Path, stem: str, task: TaskSpec) -> list[RoundCheck]:
         raise KeepError(f"unreadable restore set: {stem}.restore.json")
     names = [name for name in ROUND_NAMES if name in rounds]
     segments = _segments(holes.load_trace(traces_dir / f"{stem}.jsonl").records)
-    if len(segments) < len(names):
-        raise KeepError(f"trace holds {len(segments)} attacks for {len(names)} recorded rounds: {stem}.jsonl")
     checks: list[RoundCheck] = []
-    for index, name in enumerate(names):
+    for name in names:
         rec = rounds[name]
-        if not isinstance(rec, dict):
+        index = rec.get("segment") if isinstance(rec, dict) else None
+        if type(index) is not int or index < 0:
             raise KeepError(f"unreadable round record: {stem}.rounds.json")
+        if index >= len(segments):
+            raise KeepError(
+                f"trace holds {len(segments)} attacks, round {name} is attack {index}: {stem}.jsonl"
+            )
         diff: str | None = None
         if rec.get("has_diff"):
             diff = (traces_dir / f"{stem}.{name}.diff").read_text(encoding="utf-8", errors="replace")

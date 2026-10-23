@@ -155,7 +155,8 @@ def _deps(task: TaskSpec, rounds: list[tuple[str, str]]) -> cli.Deps:
             for rec in attack_records[calls["n"]]:
                 out.write(json.dumps(rec) + "\n")
         calls["n"] += 1
-        return "attack-result"
+        diff, path = rounds[calls["n"] - 1]
+        return _result(diff, path)
 
     def harden(executor, env, task_, attack_fn, *, budget, **kwargs):
         for _ in rounds:
@@ -232,13 +233,6 @@ def test_harden_keeps_trace_raw_diffs_and_restore_set(tmp_path):
     assert rounds["before"]["hidden_passed"] is True and rounds["before"]["has_diff"] is True
 
 
-def test_traces_folder_and_its_raw_files_are_ignored_by_version_control():
-    root = Path(__file__).resolve().parent.parent
-    lines = (root / ".gitignore").read_text(encoding="utf-8").splitlines()
-    assert "results/traces/" in lines
-    assert keep.ROUND_NAMES == ("before", "after")
-
-
 def test_a_rerun_sets_old_files_aside_and_never_overwrites(tmp_path):
     task = make_task()
     _harden(tmp_path, task, [(SOURCE_FIX, "pkg/core.py")])
@@ -252,7 +246,7 @@ def test_a_rerun_sets_old_files_aside_and_never_overwrites(tmp_path):
 
 def test_unreadable_restore_set_is_cached_as_null(tmp_path):
     task = dataclasses.replace(make_task(), fail_to_pass=("-bad",))
-    keep.write_restore(tmp_path, "stem", task)
+    keep.start_run(tmp_path, "stem", task)
     data = json.loads((tmp_path / "stem.restore.json").read_text(encoding="utf-8"))
     assert data["restore_paths"] is None
 
@@ -364,3 +358,201 @@ def test_classify_restored_default_reads_the_task_and_none_fails_closed():
     assert closed.labels == ("test-edit",)
     other = holes.classify(records, RESTORED_EDIT, task, hidden_passed=True, restored=["pkg/other.py"])
     assert other.labels == ("test-edit",)
+
+
+# --- T42 review fixes -------------------------------------------------------------------------------------------
+
+
+def _argv(tmp_path: Path, task: TaskSpec) -> list[str]:
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("Strategy prompt.\n", encoding="utf-8")
+    return [
+        "harden",
+        task.instance_id,
+        "--system-prompt-file",
+        str(prompt),
+        "--attacker-model",
+        "m",
+        "--out",
+        str(tmp_path / "certs"),
+    ]
+
+
+def test_a_restore_write_failure_refuses_the_run_before_any_spend(tmp_path, monkeypatch, capsys):
+    task = make_task()
+    calls = []
+
+    def fail(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(keep, "start_run", fail)
+    deps = _deps(task, [(SOURCE_FIX, "pkg/core.py")])
+    deps = dataclasses.replace(deps, harden=lambda *a, **k: calls.append("harden"))
+    assert cli.main(_argv(tmp_path, task), deps=deps) == 1
+    assert calls == []  # harden (the paid run) never started
+    assert not (tmp_path / "certs").exists()
+
+
+def test_a_keep_raw_failure_does_not_block_the_certificate(tmp_path, monkeypatch, capsys):
+    task = make_task()
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("SECRET_MESSAGE_8c2d")
+
+    monkeypatch.setattr(keep, "_write_attacks", boom)
+    assert cli.main(_argv(tmp_path, task), deps=_deps(task, [(SOURCE_FIX, "pkg/core.py")])) == 0
+    captured = capsys.readouterr()
+    assert "certificate:" in captured.out
+    assert "RuntimeError" in captured.err and "SECRET_MESSAGE_8c2d" not in captured.err
+    assert (tmp_path / "certs" / "fixture__core-1.json").is_file()
+
+
+def test_keep_raw_never_raises_even_on_a_broken_report():
+    assert keep.keep_raw(object(), "stem", Path("/nonexistent/never")) == [
+        "raw run files were not kept: AttributeError"
+    ]
+
+
+def test_batch_keeps_the_same_files(tmp_path, capsys):
+    task = make_task()
+    from cheatproof.tasks import Loaded
+
+    selection = Loaded(source="swe-rebench", scanned=1, valid=1, skipped={}, selected=(task,))
+    deps = dataclasses.replace(
+        _deps(task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py")]),
+        load_selection=lambda source, n, cache_dir: selection,
+        disk_free_gb=lambda path: 100.0,
+    )
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("Strategy prompt.\n", encoding="utf-8")
+    argv = ["batch", "--system-prompt-file", str(prompt), "--attacker-model", "m"]
+    out = tmp_path / "results" / "certificates"
+    assert cli.main([*argv, "--out", str(out), "--source", "swe-rebench"], deps=deps) == 0
+    traces = tmp_path / "results" / "traces"
+    stem = cli._certificate_stem(task)
+    names = sorted(p.name for p in traces.iterdir())
+    assert names == sorted(
+        f"{stem}{suffix}" for suffix in (".jsonl", ".before.diff", ".diff", ".restore.json", ".rounds.json")
+    )
+    capsys.readouterr()
+    assert _recheck(traces, task) == 0
+    assert "before: labels=['test-edit']" in capsys.readouterr().out
+
+
+def test_kept_files_are_private(tmp_path):
+    task = make_task()
+    traces = _harden(
+        tmp_path, task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py"), (SOURCE_FIX, "pkg/core.py")]
+    )
+    assert traces.stat().st_mode & 0o777 == 0o700
+    files = list(traces.iterdir())
+    assert len(files) == 6
+    for path in files:
+        assert path.stat().st_mode & 0o777 == 0o600, path.name
+
+
+def test_a_harden_stop_keeps_the_raw_diffs_of_the_attacks_that_returned(tmp_path, capsys):
+    from cheatproof.budget import BudgetExceeded
+
+    task = make_task()
+    deps = _deps(task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py")])
+
+    def harden(executor, env, task_, attack_fn, *, budget, **kwargs):
+        attack_fn("session")
+        raise BudgetExceeded("cap reached")
+
+    deps = dataclasses.replace(deps, harden=harden)
+    assert cli.main(_argv(tmp_path, task), deps=deps) == 1
+    traces = tmp_path / "traces"
+    stem = cli._certificate_stem(task)
+    assert (traces / f"{stem}.before.diff").read_text(encoding="utf-8") == UNRESTORED_EDIT
+    assert (traces / f"{stem}.diff").is_file() and not (traces / f"{stem}.after.diff").exists()
+    capsys.readouterr()
+    assert _recheck(traces, task) == 0  # no grade was recorded, but the trace and diff still classify
+    assert "before: labels=" in capsys.readouterr().out
+
+
+def test_a_stale_after_round_from_an_earlier_run_is_set_aside(tmp_path):
+    task = make_task()
+    _harden(tmp_path, task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py"), (SOURCE_FIX, "pkg/core.py")])
+    traces = _harden(tmp_path, task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py")])
+    stem = cli._certificate_stem(task)
+    assert not (traces / f"{stem}.after.diff").exists()
+    assert (traces / f"{stem}.diff").read_text(
+        encoding="utf-8"
+    ) == UNRESTORED_EDIT  # the new run's final diff
+    (old_after,) = traces.glob(f"{stem}.after.diff.*.old")
+    assert old_after.read_text(encoding="utf-8") == SOURCE_FIX
+    rounds = json.loads((traces / f"{stem}.rounds.json").read_text(encoding="utf-8"))["rounds"]
+    assert list(rounds) == ["before"]
+
+
+def test_a_failed_round_input_does_not_shift_the_next_round_onto_the_first_segment(
+    tmp_path, monkeypatch, capsys
+):
+    task = make_task()
+    real = keep._round_inputs
+    seen = []
+
+    def flaky(rnd, result):
+        seen.append(1)
+        if len(seen) == 1:
+            raise ValueError("boom")
+        return real(rnd, result)
+
+    monkeypatch.setattr(keep, "_round_inputs", flaky)
+    traces = _harden(
+        tmp_path, task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py"), (SOURCE_FIX, "pkg/core.py")]
+    )
+    stem = cli._certificate_stem(task)
+    rounds = json.loads((traces / f"{stem}.rounds.json").read_text(encoding="utf-8"))["rounds"]
+    assert (rounds["before"]["segment"], rounds["after"]["segment"]) == (0, 1)
+    capsys.readouterr()
+    assert _recheck(traces, task) == 0
+    out = capsys.readouterr().out
+    assert "before: labels=" in out and "after: labels=['unclassified']" in out
+    assert "recorded labels: none kept" in out and "recorded labels: match ['unclassified']" in out
+
+
+def test_garbage_trace_lines_are_skipped_and_do_not_move_the_segments(tmp_path, capsys):
+    task = make_task()
+    traces = _harden(
+        tmp_path, task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py"), (SOURCE_FIX, "pkg/core.py")]
+    )
+    stem = cli._certificate_stem(task)
+    path = traces / f"{stem}.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    lines[1:1] = ["{not json", "[1, 2]", "\x00\x01garbage"]
+    lines.insert(len(lines) - 1, '{"type": "step"}')  # valid JSON, fails the step schema: skipped and counted
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    capsys.readouterr()
+    assert _recheck(traces, task) == 0
+    out = capsys.readouterr().out
+    assert "before: labels=['test-edit']" in out and out.count("recorded labels: match") == 2
+
+
+def test_a_round_record_without_a_segment_is_unreadable(tmp_path, capsys):
+    task = make_task()
+    traces = _harden(tmp_path, task, [(SOURCE_FIX, "pkg/core.py")])
+    stem = cli._certificate_stem(task)
+    path = traces / f"{stem}.rounds.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    del data["rounds"]["before"]["segment"]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    capsys.readouterr()
+    assert _recheck(traces, task) == 1
+    assert "unreadable round record" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["x.jsonl", "x.before.diff", "x.after.diff", "x.diff", "x.restore.json", "x.rounds.json", "x.diff.1.old"],
+)
+def test_version_control_ignores_the_kept_raw_files(name):
+    import subprocess
+
+    root = Path(__file__).resolve().parent.parent
+    probe = subprocess.run(
+        ["git", "check-ignore", "-q", f"results/traces/{name}"], cwd=root, capture_output=True, check=False
+    )
+    assert probe.returncode == 0, f"results/traces/{name} is not ignored"

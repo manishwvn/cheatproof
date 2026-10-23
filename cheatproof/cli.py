@@ -639,14 +639,20 @@ def _harden_one(
         # T42: the task's restore set is cached beside the trace before the paid run, for the offline recheck.
         from cheatproof import keep  # lazy: keep imports harden
 
-        keep.write_restore(plan.traces_dir, stem, plan.task)
+        keep.start_run(plan.traces_dir, stem, plan.task)
     except OSError as exc:
         raise _Unwritten("start", "certificate_write_failed", exc) from None
 
+    finished: list[
+        Any
+    ] = []  # the attacks that returned, for keep.keep_stopped when harden stops without a report
+
     def attack_fn(session: Any) -> Any:
-        return deps.attack(
+        result = deps.attack(
             llm, session, settings.system_prompt, plan.prompt, settings.config, trace_path=plan.trace_path
         )
+        finished.append(result)
+        return result
 
     spent_before = _ledger_total(budget)
     if spent_before is None or not math.isfinite(spent_before):
@@ -657,7 +663,10 @@ def _harden_one(
         report = deps.harden(executor, plan.env, plan.task, attack_fn, budget=budget, **settings.timeout_kw)
     except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
         # The attack may have spent before harden stopped (a reset after it, say): the ledger delta is kept, and the
-        # trace the attack wrote stays where it is.
+        # trace the attack wrote stays where it is. T42: the raw diffs of the attacks that returned are kept too, best
+        # effort and never masking this stop (harden raised, so no report exists and the grades are unknown).
+        for note in keep.keep_stopped(finished, stem, plan.traces_dir):
+            print(f"note: {note}", file=sys.stderr)
         raise _Unwritten("start", _stop_reason(exc), exc, _spent_since(budget, spent_before)) from None
     for note in keep.keep_raw(report, stem, plan.traces_dir):  # T42: raw diffs stay local, never raises
         print(f"note: {note}", file=sys.stderr)
