@@ -27,6 +27,7 @@
   unblocked. Token Factory trial cap `TRIAL_CREDIT_CAP_USD` ($0.74 from now) is on. 2026-10-22: first Sandboxes batch
   (5 of 40, PR #34, $0.21) is in `docs/results.md`; T28 (gold-gate error text) is done (#35). T01 (smoke sandbox fix) is in review (PR #36, planner merge). T29 done (#37). T08 batch 2 merged (#38, 8 of 40 so far, first hole: CycloneDX test-edit). Budget halted on the Sandboxes cost cap: U25. T30 queued. T30 done (#39): the exit-4 collection rerun also covers "found no collectors". No runnable task until U25 (T08) or T12 (after 2026-10-27).
 - **Certificates:** schema 2 since #15; schema 1 files are refused (none are committed).
+- **T41 (#48, open, not merged):** a certificate with certified=true is refused when a round hit max_steps without a submit and no grader-confirmed exploit (same rule as harden).
 - **Planner:** T22 (U11): Docker runs are booked at $0.05 each in `budget.py`, so the $4 daily cap would halt the
   40-task Docker run near task 16; plus `llm.py` timeout, workflow pins and git-ignoring `results/traces/`.
 - **Planner:** T16 (U9) attack strategy prompts and the Tavily budget counter; needed before live attacks (T08).
