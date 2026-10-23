@@ -22,6 +22,7 @@
   Cycle 2026-10-19 18:18: first live run on Docker (#21: grader uses the SWE-bench `testbed` env). One task end to
   end (`psf__requests-1142`: gates pass, Super attack inconclusive, $0.0146); batch stopped at 5.9 GB free disk (U14).
 - **T43 (2026-10-23):** `REAL_SPEND_CAP_USD` (default and hard ceiling $10) caps total real spend (trial + promo credit); the $26.65 balance is promo credit, not card money; the balance must never go negative; `trial_spend_usd` ledger field kept; `TRIAL_CREDIT_CAP_USD` is now only an extra stricter cap.
+- **T45 (PR #57, open, not merged):** `budget init` refuses a fresh ledger beside a backup named like the ledger unless `--force-fresh` (CLI flag wired; a run before init leaves no lock); a 402 from the LLM halts with fixed text; a missing `halted` key refuses as corrupt; `_http_status` reads `response.status_code`.
 - **T35 (PR #49, merged):** Fresh machine: run `python -m cheatproof.cli budget init` once; a lost halt is forgotten by a later init.
 - **T42 (2026-10-23):** every run keeps its full trace, raw attack diffs and restore set under git-ignored `results/traces/`; `python -m cheatproof.cli holes recheck <stem>` re-checks hole labels offline (#50).
 - **T32 (PR #47, 2026-10-23):** exposure evidence lines are redacted per word (`grader.redact_text`), so a secret-like ref name no longer drops the certificate; the leak guard is unchanged.
