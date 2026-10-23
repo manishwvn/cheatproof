@@ -259,12 +259,35 @@ def _write_new_file(path: Path, text: str) -> None:
             tmp.unlink()
 
 
-def create_ledger(path: Path) -> Path:
+def _lost_ledger_siblings(path: Path) -> list[str]:
+    """The kinds of leftover file beside path that mean a ledger existed and was lost: a stale lock file, or a backup
+    (*.bak). Returns kind names only, never file names, paths or contents."""
+    kinds = []
+    if path.with_suffix(".lock").exists():
+        kinds.append("a stale lock file")
+    if next(path.parent.glob("*.bak"), None) is not None:
+        kinds.append("a backup file (*.bak)")
+    return kinds
+
+
+def create_ledger(path: Path, *, force_fresh: bool = False) -> Path:
     """Create the zeroed ledger at path, the only way a ledger comes into being. An existing file is refused, never
-    overwritten. The ledger lock is held, so a concurrent writer cannot slip in between the check and the create."""
+    overwritten. The ledger lock is held, so a concurrent writer cannot slip in between the check and the create.
+
+    A stale lock file or a *.bak beside path means a ledger was lost there, so a fresh one is refused unless
+    force_fresh is passed (`budget init --force-fresh`). force_fresh never overwrites an existing ledger."""
     path = Path(path)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            raise BudgetExceeded(f"ledger {path} already exists; refusing to overwrite it")
+        if not force_fresh:
+            kinds = _lost_ledger_siblings(path)
+            if kinds:
+                raise BudgetExceeded(
+                    f"ledger directory holds {' and '.join(kinds)}, so a ledger may have been lost there; "
+                    "refusing to create a fresh one. Pass --force-fresh to create it anyway. Nothing was written"
+                )
         with open(path.with_suffix(".lock"), "a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             if path.exists():
@@ -275,9 +298,9 @@ def create_ledger(path: Path) -> Path:
     return path
 
 
-def init_ledger_from_env() -> Path:
+def init_ledger_from_env(*, force_fresh: bool = False) -> Path:
     """Create the zeroed ledger at SPEND_LEDGER (see create_ledger). Fails closed when SPEND_LEDGER is unset or relative."""
-    return create_ledger(_ledger_path())
+    return create_ledger(_ledger_path(), force_fresh=force_fresh)
 
 
 class Budget:
@@ -395,10 +418,12 @@ class Budget:
             state = json.loads(raw)
         except ValueError:
             raise BudgetExceeded(f"ledger {self.ledger} is not valid JSON; fix it by hand") from None
-        if not isinstance(state, dict) or not all(k in state for k in ("total_usd", "days", "sandbox_runs")):
+        if not isinstance(state, dict) or not all(
+            k in state for k in ("total_usd", "days", "sandbox_runs", "halted")
+        ):
             # A missing field would read as zero spend or zero runs, which would loosen a cap. Refuse instead.
             raise BudgetExceeded(
-                f"ledger {self.ledger} must hold total_usd, days and sandbox_runs; fix it by hand"
+                f"ledger {self.ledger} must hold total_usd, days, sandbox_runs and halted; fix it by hand"
             )
         days = state["days"]
         if not isinstance(days, dict):
@@ -456,7 +481,7 @@ class Budget:
         if not _is_spend(worst):
             raise BudgetExceeded(f"reserved amount must be a finite number of 0 or more, got {worst!r}")
         day = date.today().isoformat()
-        if s["halted"]:
+        if s.get("halted"):
             raise BudgetExceeded(f"budget halted: {s['halted']}")
         if s["total_usd"] + worst > self.total_cap_usd:
             raise BudgetExceeded(f"total cap ${self.total_cap_usd:.2f} reached (spent ${s['total_usd']:.4f})")

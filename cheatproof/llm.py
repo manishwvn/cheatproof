@@ -7,7 +7,7 @@ import os
 
 import openai
 
-from .budget import Budget
+from .budget import Budget, BudgetExceeded
 
 BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "4096"))
@@ -43,24 +43,44 @@ class GuardedLLM:
             raise ValueError(f"unsupported options: {sorted(kwargs.keys() - ALLOWED_KWARGS)}")
         est_input = estimate_tokens(messages, kwargs.get("tools"))
         hold = self.budget.reserve(model, est_input, max_tokens)
+        paid = None
         try:
             resp = self._client.chat.completions.create(
                 model=model, messages=messages, max_tokens=max_tokens, **kwargs
             )
         except openai.APIStatusError as err:
-            if err.status_code == 402:
-                self.budget.halt("HTTP 402 from Token Factory: balance exhausted")
-            if 400 <= err.status_code < 500:
-                # Rejected request: count the prompt only, never assume it was free.
-                self.budget.settle(hold, est_input, 0)
-            # 5xx: the server may have generated output, so keep the worst-case reservation.
-            raise
+            if err.status_code != 402:
+                if 400 <= err.status_code < 500:
+                    # Rejected request: count the prompt only, never assume it was free.
+                    self.budget.settle(hold, est_input, 0)
+                # 5xx: the server may have generated output, so keep the worst-case reservation.
+                raise
+            paid = self._halt_for_402(hold, est_input)
         except Exception:
             # Timeouts or dropped connections may still be billed: keep the worst-case reservation.
             raise
+        if paid is not None:
+            # Outside the except block: the SDK error never becomes __context__, and its text never leaves.
+            raise paid from None
         usage = resp.usage
         if usage is None:
             # No usage reported: keep the worst-case reservation.
             return resp
         self.budget.settle(hold, usage.prompt_tokens, usage.completion_tokens)
         return resp
+
+    def _halt_for_402(self, hold, est_input: int) -> BudgetExceeded:
+        """HTTP 402 halts every paid call. Returns the error to raise: fixed text, so the SDK error's URL, headers and
+        body never reach it. Same pattern as executor._halt_for_payment. The prompt is counted as in any 4xx."""
+        halted = True
+        try:
+            self.budget.halt("HTTP 402 from Token Factory: balance exhausted")
+        except BudgetExceeded:
+            halted = False  # the ledger's own error is dropped unread
+        try:
+            self.budget.settle(hold, est_input, 0)
+        except BudgetExceeded:
+            pass  # the hold stays at its worst case: conservative, never a refund past the reservation
+        if not halted:
+            return BudgetExceeded("HTTP 402 from Token Factory; ledger could not be halted")
+        return BudgetExceeded("HTTP 402 from Token Factory; the budget is halted")
