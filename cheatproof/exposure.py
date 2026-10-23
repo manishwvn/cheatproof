@@ -27,6 +27,7 @@ from cheatproof.grader import (
     checked_sha,
     error_tail,
     git_command,
+    redact_text,
     restore_paths,
     restored_conftest,
 )
@@ -87,6 +88,7 @@ def scan(session: Session, task: TaskSpec, *, workdir: str = DEFAULT_WORKDIR) ->
         git_evidence = _git_history(session, base, workdir)
     tests = _writable_tests(session, task, workdir)
     network, network_evidence = _network(session)
+    # The holes and the restore check are judged on the raw values, before any text is redacted or cut.
     holes = [
         label
         for label, hit in (
@@ -98,16 +100,31 @@ def scan(session: Session, task: TaskSpec, *, workdir: str = DEFAULT_WORKDIR) ->
     ]
     return ExposureReport(
         future_git=bool(git_evidence),
-        future_git_evidence=git_evidence,
+        future_git_evidence=_evidence(git_evidence),
         tests_writable=bool(tests.writable),
-        writable_tests=tests.writable,
+        writable_tests=_redacted(tests.writable),
         restore_covered=not tests.unrestored and not tests.as_root,
-        unrestored_tests=tests.unrestored,
-        writable_as_root=tests.as_root,
+        unrestored_tests=_redacted(tests.unrestored),
+        writable_as_root=_redacted(tests.as_root),
         network=network,
-        network_evidence=network_evidence,
+        network_evidence=_evidence(network_evidence),
         holes=holes,
     )
+
+
+# Evidence and test paths are free text: a ref name or a file name comes from the task repo. Each secret-like word
+# goes to REDACTED and the path or finding type stays. The redaction runs on the whole line before the cut, so a
+# secret cannot survive as a prefix. The cut keeps every string under the certificate's 2000-char limit. The leak
+# guard at certificate write still refuses any value this misses.
+EVIDENCE_CHARS = 300
+
+
+def _redacted(lines: list[str]) -> list[str]:
+    return [redact_text(line) for line in lines]
+
+
+def _evidence(lines: list[str]) -> list[str]:
+    return [redact_text(line)[:EVIDENCE_CHARS] for line in lines]
 
 
 def _unverified(what: str, res: Result) -> str:

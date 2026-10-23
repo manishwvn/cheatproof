@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 
 from cheatproof.executor import Result, Session
-from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, scan
+from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, _evidence, scan
+from cheatproof.grader import redact_text
 from cheatproof.tasks import TaskSpec
 
 BASE = "71fb12cefda5a3e1e223ed837bca468f8bdab874"
@@ -125,6 +126,68 @@ def test_a_ref_at_base_is_not_evidence():
 def test_git_evidence_names_what_was_found():
     report = scan(session_with(("rev-list", Result(0, "3\n", "", 0.0))), make_task())
     assert report.future_git_evidence == ["3 commit(s) past base reachable from refs"]
+
+
+# A ref name comes from the task repo, so it is free text: a secret-like word in it is redacted at scan time.
+SECRET_REF = "refs/heads/ghp_TESTVALUE123456789"
+
+
+def test_secret_like_ref_name_is_redacted_and_the_rest_of_the_line_is_kept():
+    report = scan(session_with(("for-each-ref", Result(0, f"{OTHER}||{SECRET_REF}\n", "", 0.0))), make_task())
+    assert report.holes == [HOLE_GIT_HISTORY]
+    assert report.future_git_evidence == [f"ref REDACTED points at {OTHER[:12]}"]
+    assert "ghp_TESTVALUE123456789" not in " ".join(report.future_git_evidence)
+
+
+def test_path_style_ref_name_is_not_redacted():
+    report = scan(
+        session_with(("for-each-ref", Result(0, f"{OTHER}||refs/heads/fix/tests/test_calc.py\n", "", 0.0))),
+        make_task(),
+    )
+    assert report.future_git_evidence == [f"ref refs/heads/fix/tests/test_calc.py points at {OTHER[:12]}"]
+
+
+def test_secret_like_test_path_is_redacted_and_the_hole_is_still_judged_on_the_raw_path():
+    report = scan(
+        session_with((PROBE, Result(0, "uncovered tests/ghp_TESTVALUE123456789/test_x.py\ndone\n", "", 0.0))),
+        make_task(),
+    )
+    assert report.holes == [HOLE_TEST_EDIT]
+    assert report.writable_tests == ["REDACTED"] and report.unrestored_tests == ["REDACTED"]
+    assert "ghp_TESTVALUE123456789" not in str(report)
+
+
+def test_secret_like_network_probe_output_is_redacted_and_the_hole_is_kept():
+    report = scan(
+        session_with(("python3 -c", Result(2, "", "boom ghp_TESTVALUE123456789 end", 0.0))), make_task()
+    )
+    assert report.network is True and report.holes == [HOLE_NETWORK]
+    assert len(report.network_evidence) == 1
+    assert "ghp_TESTVALUE123456789" not in report.network_evidence[0]
+    assert report.network_evidence[0].endswith("boom REDACTED end")
+
+
+def test_a_2700_char_ref_name_is_cut_to_300_chars_and_keeps_its_start():
+    long_ref = "refs/heads/" + "_".join(
+        ["feature"] * 340
+    )  # snake_case words: none is redacted, so the cut applies
+    report = scan(session_with(("for-each-ref", Result(0, f"{OTHER}||{long_ref}\n", "", 0.0))), make_task())
+    (line,) = report.future_git_evidence
+    assert len(line) == 300
+    assert line.startswith("ref refs/heads/feature_feature_")
+
+
+def test_redact_text_keeps_an_empty_line_and_its_spacing():
+    assert redact_text("") == ""
+    assert redact_text("  \t ") == "  \t "
+
+
+def test_redact_text_keeps_newlines_and_redacts_each_word_on_its_own_line():
+    assert redact_text("a ghp_TESTVALUE123456789\nb") == "a REDACTED\nb"
+
+
+def test_an_empty_evidence_line_survives_the_cut():
+    assert _evidence([""]) == [""]
 
 
 def test_all_three_holes_are_listed_in_order():
