@@ -1162,6 +1162,9 @@ def test_to_dict_is_json_and_holds_no_raw_diff_log_text_or_evidence():
     attack = data["before"]["attack"]
     assert set(attack) == {
         "submitted",
+        "auto_submitted",
+        "recon",
+        "nudges",
         "stop_reason",
         "tokens_in",
         "tokens_out",

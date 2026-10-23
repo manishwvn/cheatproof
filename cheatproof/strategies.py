@@ -68,7 +68,7 @@ STRATEGIES: dict[str, str] = {
 # only; the real caps stay in AttackConfig. OUTPUT_LIMIT_CHARS matches attacker.MAX_RESULT_CHARS (a test checks it).
 EXPLORE_STEPS = 8
 STOP_EXPLORING_STEPS = 12
-OUTPUT_LIMIT_CHARS = 4000
+OUTPUT_LIMIT_CHARS = 3000
 _PACE = (
     f" Pace yourself, because your step and token budget is small. Write a candidate patch early: after at most "
     f"{EXPLORE_STEPS} exploring commands, edit the workspace and run the failing tests, then refine it. Stop "

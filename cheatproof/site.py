@@ -78,6 +78,22 @@ BATCH_KEYS = frozenset(
         "updated",
     }
 )
+# Keys cli batch writes beyond the schema 1 core (T38, T37, T47). Optional, so an older record still loads.
+BATCH_OPTIONAL_KEYS = frozenset(
+    {
+        "chunk_size",
+        "network_fetch",
+        "network_fetch_done",
+        "rerun_ids",
+        "rerun_done",
+        "env_broken_ids",
+        "next_chunk_pending",
+        "finished",
+        "pending_ids",
+        "recon",
+        "runs",
+    }
+)
 NOT_RUN_KEYS = frozenset({"instance_id", "reason", "error"})  # always written by cli batch
 NOT_RUN_OPTIONAL_KEYS = frozenset({"cost_usd"})  # written only when a paid run's spend was measured
 BATCH_NOT_LOADED = "batch record not loaded"
@@ -350,7 +366,15 @@ def _check_batch(data: Any) -> None:
     """
     _want(isinstance(data, dict), "batch record must be a JSON object")
     _want(not BATCH_KEYS - set(data), "batch record is missing a key")
-    _want(not set(data) - BATCH_KEYS, "batch record has an unknown key")
+    _want(not set(data) - BATCH_KEYS - BATCH_OPTIONAL_KEYS, "batch record has an unknown key")
+    _want(data.get("recon") in ("exposure", None), "batch record field recon has the wrong type")
+    runs = data.get("runs", [])
+    _want(
+        isinstance(runs, list)
+        and all(isinstance(r, dict) and isinstance(r.get("instance_id"), str) for r in runs)
+        and all(r.get("recon") in ("exposure", None) for r in runs),
+        "batch record field runs has the wrong type",
+    )
     version = data["schema_version"]
     _want(_is_count(version) and version == BATCH_SCHEMA_VERSION, "batch record schema_version must be 1")
     types_ok = {
@@ -729,6 +753,14 @@ def _score_section(summary: Mapping[str, Any], excluded: int, batch: _Batch, loa
     )
 
 
+def _strategy_html(attacker: Any) -> str:
+    """The strategy label, then a visible recon=exposure tag when the attacker got the exposure scan (T47)."""
+    attacker = _map(attacker)
+    text = _cell(attacker.get("strategy") if attacker.get("strategy") is not None else "not recorded")
+    tag = ' <span class="label">recon=exposure</span>' if attacker.get("recon") == "exposure" else ""
+    return f"{text}{tag}"
+
+
 def _environments_section(entries: Sequence[_Entry]) -> str:
     rows = []
     for entry in entries:
@@ -739,6 +771,7 @@ def _environments_section(entries: Sequence[_Entry]) -> str:
                 _Raw(_link_html(f"env/{entry.name}.html", task["instance_id"])),
                 task["repo"],
                 task["source"],
+                _Raw(_strategy_html(cert["attacker"])),
                 cert["holes_found"],
                 cert["patches_applied"],
                 _gates_text(gates["before"]),
@@ -751,6 +784,7 @@ def _environments_section(entries: Sequence[_Entry]) -> str:
         "Instance",
         "Repo",
         "Source",
+        "Strategy",
         "Holes found",
         "Patches applied",
         "Gates before (gold, empty)",
@@ -965,6 +999,8 @@ def _round_block(label: str, rnd: Any, diff: str | None) -> str:
         attack_rows = [
             ("Stop reason", attack.get("stop_reason")),
             ("Submitted", attack.get("submitted")),
+            ("Auto-submitted by the harness", attack.get("auto_submitted", "not recorded")),
+            ("Recon", attack.get("recon") or "none"),
             ("Steps", attack.get("steps")),
             ("Tokens in", attack.get("tokens_in")),
             ("Tokens out", attack.get("tokens_out")),

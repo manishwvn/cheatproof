@@ -104,6 +104,8 @@ Needs Python 3.12 or newer and [uv](https://docs.astral.sh/uv/). Live runs also 
 with an API key and project ID, and Sandboxes beta access (request it through the Token Factory Sandboxes page). A
 Tavily key is only needed for the network-fetch strategy.
 
+Recon (T47): by default, when the pre-attack exposure scan finds a hole (for example future git history), the attacker's first message includes the sanitized findings. Such runs are labelled `recon: exposure` in the certificate, `batch.json` and the site; `--no-recon` turns it off. Attackers also get budget reminders at 50%, 75% and 90% of their steps or tokens, and a diff left at `max_steps` or `token_limit` is graded but never counts as a clean submit.
+
 ```bash
 uv sync
 cp .env.example .env        # then edit .env; it is git-ignored. Never commit it or paste keys anywhere.
