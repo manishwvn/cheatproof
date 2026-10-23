@@ -9,8 +9,8 @@ says so.
 ## Top five
 
 1. Sandboxes reports a non-zero cost for runs that the console does not bill (Sandboxes 1).
-2. Neither API offers a way to read remaining credit or usage, so cost control had to be rebuilt in our app
-   (Token Factory 1 and 2, Sandboxes 3).
+2. We found no API to read remaining credit or usage, so cost control had to be rebuilt in our app
+   (Token Factory 1, Sandboxes 3).
 3. `images.use` returns a handle without checking the image, and the failure appears later (Sandboxes 2).
 4. Sandboxes has no network-off switch, which a security tool needs (Sandboxes 4).
 5. Reasoning models return `content: null` with no warning when `max_tokens` is small (NVIDIA models 1).
@@ -23,8 +23,8 @@ says so.
   was visible only in the console. We checked it by hand before each paid batch.
 - **Impact.** We wrote a full spend layer (`cheatproof/budget.py`: reserve worst case before a call, settle from
   `usage`, a file-locked ledger, daily, total and trial caps, halt on 402). Our counter can only estimate, so it
-  drifted from the console and errs high: it showed about $0.38 used while the console showed $0.71 of the $1 trial
-  left. Any user who lets an agent loop on a card-backed account needs the same thing.
+  drifted from the console and errs high: it counted about $0.38 of Token Factory spend while the console showed $0.71
+  of the $1 trial left (about $0.29 used). Any user who lets an agent loop on a card-backed account needs the same thing.
 - **Suggested fix.** A hard limit setting per API key or project that returns a clear error at the limit. A
   `GET` endpoint for remaining credit and spend to date, so a client can reconcile. A `x-remaining-credit` style
   response header would be enough.
@@ -90,13 +90,14 @@ says so.
   run failed later with `NotFoundError`. Our smoke test failed this way, a first diagnosis blamed the wrong thing, and
   it took a second pass to find that registry images need `images.oci`. Two failed runs were counted against our
   run cap.
-- **Impact.** About a day of delay on the smoke test and wasted runs.
+- **Impact.** An extra review cycle on the smoke test and wasted runs.
 - **Suggested fix.** Have `images.use` raise a clear error naming `images.oci` or `images.pull` when the tag is not
   imported, or document the difference with an example for SWE-bench style images.
 
 ### 3. No usage or run listing
-- **What happened.** We could not list our own sandbox runs or their cost by API. Our run count (46 over two batches)
-  comes from our own counter, and one task's run count is unknown because the run halted before we recorded it.
+- **What happened.** We found no way to list our own sandbox runs or their cost by API. Our run count (46 over two
+  batches) comes from our own counter, and the run count of one task is unrecorded because the budget halted around
+  it.
 - **Impact.** We could not reconcile our ledger with Nebius's records, or see which runs failed.
 - **Suggested fix.** A usage endpoint per project: runs, status, duration, estimated cost.
 
@@ -105,7 +106,7 @@ says so.
   runs an untrusted attacker model needs the network off. We built it in the guest: every command runs under
   `unshare -rn` after a start probe that checks only `lo` is present and that a connect fails, and we hash the loader,
   libc and `unshare` against values pinned from the base image before each call.
-- **Impact.** Several hundred lines in `cheatproof/executor.py`, and residual risk we documented in ADR 0002: a
+- **Impact.** A large block of guard code in `cheatproof/executor.py`, and residual risk we documented in ADR 0002: a
   platform path outside the guest's network namespace would not be caught.
 - **Suggested fix.** A per-session or per-branch `network=False` that the platform enforces, plus a way to allow a
   list of hosts for experiments.
@@ -127,14 +128,14 @@ says so.
 - **Suggested fix.** One documented timeout result with a field saying whether the process was killed.
 
 ### 7. Early availability
-- **What happened.** At first access, calls returned HTTP 500 for a day or so. By 2026-10-21 a plain
-  `python:3.12-slim` run worked. We drafted a note to the Sandboxes contact and did not need to send it.
+- **What happened.** Early in our access, calls returned HTTP 500. By 2026-10-21 a plain `python:3.12-slim` run
+  worked and the errors were gone.
 - **Impact.** The go/no-go on Sandboxes versus local Docker was delayed.
 - **Suggested fix.** A status page or a "known issues" note on the beta page. Our fallback was local Docker, and that
   fallback is still in the code (`EXECUTOR=docker`).
 
 ### 8. Images cannot be deleted
-- **What happened.** There is no server-side image delete through the SDK we used (`contree-sdk` 0.3.6).
+- **What happened.** We found no server-side image delete in the SDK we used (`contree-sdk` 0.3.6).
 - **Impact.** Our task images accumulate with no cleanup path.
 - **Suggested fix.** Add an image delete call and a project listing of images.
 
@@ -153,13 +154,13 @@ says so.
 ### 2. Model IDs use inconsistent casing and naming
 - **What happened.** The IDs we use are `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`, `nvidia/Nemotron-3_5-Lightning`,
   `nvidia/nemotron-3-super-120b-a12b` and `nvidia/Nemotron-3-Ultra-550b-a55b`: mixed case, and an underscore in one.
-- **Impact.** Easy to mistype. Our budget prices by exact ID, so a wrong-case ID fell back to the high default price.
+- **Impact.** Easy to mistype. Our budget prices by exact ID string, so a wrong-case ID would fall back to the high default price ($3/$10 per 1M).
 - **Suggested fix.** Use one convention, or accept case-insensitive aliases.
 
 ### 3. Nemotron 3 Super as a long-horizon tool-using attacker
 - **What happened.** We ran Super as the attacker with a 40-step and 250,000-token limit per attempt. Of 5 attacks,
-  4 ended at one of those limits (3 on tokens, 2 on steps counting the post-hardening round), 1 submitted an exploit
-  (`test-edit`, unverified), and none finished with a clean refusal. Cost per attacked task was $0.06 to $0.11 on
+  4 ended at one of those limits (2 on tokens, 2 on steps) and 1 submitted an exploit (`test-edit`, unverified); the
+  re-attack after hardening on that one also ran out of tokens. Cost per attacked task was $0.06 to $0.11 on
   Token Factory.
 - **Impact.** The limits, not the model's decision to stop, decide most of our outcomes, so we can only say "not hacked
   by this attacker within these limits". We do not know how much of that is verbosity in the model's reasoning, since

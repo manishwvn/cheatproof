@@ -171,9 +171,12 @@ Token Factory has no documented hard spend limit and the balance can go negative
 (ADR 0001, `cheatproof/budget.py`):
 
 - Every paid call reserves its worst-case cost before it runs and settles the real cost from `usage` after.
-- A file-locked JSON ledger (`SPEND_LEDGER`) is shared by all processes. Caps: total $20 maximum in code
-  (`SPEND_CAP_USD`), daily (`DAILY_CAP_USD`), a trial-credit counter (`TRIAL_CREDIT_CAP_USD`), sandbox runs
-  (`SANDBOX_RUN_CAP`) and Tavily calls (`TAVILY_CALL_CAP`).
+- A file-locked JSON ledger (`SPEND_LEDGER`) is shared by all processes. Caps: total, at most $20 in code
+  (`SPEND_CAP_USD`); daily (`DAILY_CAP_USD`, $4 in `.env.example`); a real-spend cap on Token Factory spend
+  (`REAL_SPEND_CAP_USD`, default and ceiling $10); sandbox runs (`SANDBOX_RUN_CAP`); Tavily calls (`TAVILY_CALL_CAP`).
+- The project runs on free credit only (the $1 trial plus the hackathon promo credit), never card money. The code
+  does not itself stop a negative balance; it holds because the $10 cap is below the credit, so we check the console
+  between batches.
 - The money caps fail closed: a missing, zero, negative, nan or oversized value refuses to start. A ledger that does
   not match its schema is refused, not repaired.
 - Sandbox runs book no Token Factory money. Each cost the Sandboxes API reports is logged in a separate ledger section
