@@ -26,6 +26,13 @@ the caps before tasks 9-11 can run.
 - Planning error: the run was started with three new tasks before the cost of one sandbox task had been measured.
   `batch` has no stop before a run that would pass the cap, so the Sandboxes cost went from 0.2464 to 0.5022 in one
   batch and the budget halted. The next run should measure one task first.
+- Raw evidence stays local. Since T42 every `harden` and `batch` run keeps its full attacker trace
+  (`<stem>.jsonl`), the raw attack diffs (`<stem>.before.diff`, `<stem>.after.diff`, `<stem>.diff`) and the task's
+  restore set (`<stem>.restore.json`, plus `<stem>.rounds.json` with the grade inputs) under `results/traces/`, which is
+  git-ignored. None of it is committed or published; the committed diffs under `results/diffs/` are sanitized. Hole
+  labels can be re-checked offline from the kept files with `python -m cheatproof.cli holes recheck <stem>` (no
+  network, sandbox or budget; it prints labels and test path names, never diff text). Runs before T42 kept only
+  sha256 and character counts, so their raw diffs cannot be re-checked.
 - `results/batch.json` describes the last run only (per the CLI contract, a rerun rewrites it for that run): selected
   8, run 1, already certified 5, not run 2. The first run's batch rows are not in this file; its certificates are in
   `results/certificates/`.
