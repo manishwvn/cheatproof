@@ -351,6 +351,9 @@ class Budget:
                     f"ledger {self.ledger} does not exist; run `python -m cheatproof.cli budget init` once to create it"
                 )
             raw = self.ledger.read_text()
+        except UnicodeDecodeError:
+            # Not text at all: the same refusal as bad JSON, and no decode detail leaves.
+            raise BudgetExceeded(f"ledger {self.ledger} is not valid JSON; fix it by hand") from None
         except OSError as exc:
             raise _unwritable(exc) from None
         try:

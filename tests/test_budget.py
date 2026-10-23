@@ -1077,3 +1077,15 @@ def test_create_ledger_link_refusal_says_already_exists(tmp_path, monkeypatch):
     with pytest.raises(BudgetExceeded, match="already exists"):
         create_ledger(target)
     assert [p.name for p in (tmp_path / "new").iterdir()] == ["ledger.lock"]
+
+
+def test_a_non_utf8_ledger_is_refused_as_not_valid_json(tmp_path):
+    (tmp_path / "ledger.json").write_bytes(
+        b"\xff\xfe"
+    )  # not text, so the decode fails before any JSON is read
+    b = make_budget(tmp_path)
+    with pytest.raises(BudgetExceeded, match="not valid JSON") as err:
+        b.snapshot()
+    assert "codec" not in str(err.value)  # no decode detail leaves
+    with pytest.raises(BudgetExceeded, match="not valid JSON"):
+        b.reserve("m", 1, 1)

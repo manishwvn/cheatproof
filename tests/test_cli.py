@@ -1428,7 +1428,9 @@ def test_an_earlier_trace_is_set_aside_before_the_run_so_the_new_one_is_not_appe
     seen = []
 
     def attack(llm, session, system_prompt, task_prompt, config, trace_path=None):
-        seen.append(trace_path.exists())  # the earlier trace has already been renamed
+        seen.append(
+            trace_path.stat().st_size > 0
+        )  # the earlier trace is renamed; T42 leaves a private empty file
         with trace_path.open("a", encoding="utf-8") as handle:
             handle.write("NEW-TRACE\n")
         return "attack-result"

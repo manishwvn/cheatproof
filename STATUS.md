@@ -22,6 +22,7 @@
   Cycle 2026-10-19 18:18: first live run on Docker (#21: grader uses the SWE-bench `testbed` env). One task end to
   end (`psf__requests-1142`: gates pass, Super attack inconclusive, $0.0146); batch stopped at 5.9 GB free disk (U14).
 - **T35 (PR #49, not merged):** Fresh machine: run `python -m cheatproof.cli budget init` once; a lost halt is forgotten by a later init.
+- **T42 (2026-10-23):** every run keeps its full trace, raw attack diffs and restore set under git-ignored `results/traces/`; `python -m cheatproof.cli holes recheck <stem>` re-checks hole labels offline (#50).
 - **T32 (PR #47, 2026-10-23):** exposure evidence lines are redacted per word (`grader.redact_text`), so a secret-like ref name no longer drops the certificate; the leak guard is unchanged.
 - **Handoff 2026-10-23:** read `docs/autopilot/HANDOFF.md` first. T01 is done (#36); T08 batch 3 is queued, then the routine halts the budget (U26). T31 and T32 are new.
 - **Next for the routine:** U21 closed: Sandboxes cost is logged, and the budget halts only past `SANDBOX_COST_CAP_USD`
@@ -29,7 +30,7 @@
   unblocked. Token Factory trial cap `TRIAL_CREDIT_CAP_USD` ($0.74 from now) is on. 2026-10-22: first Sandboxes batch
   (5 of 40, PR #34, $0.21) is in `docs/results.md`; T28 (gold-gate error text) is done (#35). T01 (smoke sandbox fix) is in review (PR #36, planner merge). T29 done (#37). T08 batch 2 merged (#38, 8 of 40 so far, first hole: CycloneDX test-edit). Budget halted on the Sandboxes cost cap: U25. T30 queued. T30 done (#39): the exit-4 collection rerun also covers "found no collectors". No runnable task until U25 (T08) or T12 (after 2026-10-27).
 - **Certificates:** schema 2 since #15; schema 1 files are refused (none are committed).
-- **T41 (#48, open, not merged):** a certificate with certified=true is refused when a round hit max_steps without a submit and no grader-confirmed exploit (same rule as harden).
+- **T41 (#48, merged):** a certificate with certified=true is refused when a round hit max_steps without a submit and no grader-confirmed exploit (same rule as harden).
 - **Planner:** T22 (U11): Docker runs are booked at $0.05 each in `budget.py`, so the $4 daily cap would halt the
   40-task Docker run near task 16; plus `llm.py` timeout, workflow pins and git-ignoring `results/traces/`.
 - **Planner:** T16 (U9) attack strategy prompts and the Tavily budget counter; needed before live attacks (T08).
