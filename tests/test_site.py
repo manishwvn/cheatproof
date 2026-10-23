@@ -776,6 +776,13 @@ def batch_record(**changes) -> dict:
         ],
         "started": "2026-10-18T10:00:00Z",
         "updated": "2026-10-18T10:30:00Z",
+        "chunk_size": 10,
+        "rerun_ids": [],
+        "rerun_done": [],
+        "env_broken_ids": [],
+        "next_chunk_pending": False,
+        "finished": True,
+        "pending_ids": [],
     }
     record.update(changes)
     return record
@@ -991,6 +998,95 @@ def test_a_batch_that_breaks_the_schema_is_refused_with_its_field_named(tmp_path
     assert "n run" not in index
 
 
+def chunked_batch_record(**changes) -> dict:
+    """A batch record as cli batch writes it at a chunk end: chunk_size 2, one rerun done, one env-broken row, one
+    task pending, finished false. The network fetch keys are left out, as in a record from an earlier run."""
+    record = batch_record(
+        chunk_size=2,
+        rerun_ids=["owner__repo-1"],
+        rerun_done=["owner__repo-1"],
+        env_broken_ids=["owner__repo-4"],
+        next_chunk_pending=True,
+        finished=False,
+        pending_ids=["owner__repo-3"],
+        not_run=[
+            {"instance_id": "owner__repo-4", "reason": "env-broken", "error": "collect-only exited 127"}
+        ],
+        run=2,
+    )
+    record.update(changes)
+    return record
+
+
+def test_a_realistic_chunked_batch_record_builds_without_errors(tmp_path):
+    cert_dir = fixture_dir(tmp_path)
+    put_batch(tmp_path, chunked_batch_record())
+    result = build_site(cert_dir, tmp_path / "site")
+    assert result.errors == []
+    assert "batch record not loaded" not in read(result.index)
+
+
+def test_a_finished_batch_record_with_the_network_fetch_keys_builds_without_errors(tmp_path):
+    cert_dir = fixture_dir(tmp_path)
+    record = chunked_batch_record(
+        finished=True,
+        next_chunk_pending=False,
+        pending_ids=[],
+        network_fetch=True,
+        network_fetch_done=["owner__repo-1"],
+    )
+    put_batch(tmp_path, record)
+    result = build_site(cert_dir, tmp_path / "site")
+    assert result.errors == []
+    assert "batch record not loaded" not in read(result.index)
+
+
+def test_a_batch_record_missing_a_writer_key_is_refused(tmp_path):
+    cert_dir = fixture_dir(tmp_path)
+    record = chunked_batch_record()
+    del record["finished"]
+    put_batch(tmp_path, record)
+    result = build_site(cert_dir, tmp_path / "site")
+    assert result.errors == [("batch.json", "batch record is missing a key")]
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"surprise": 1}, "batch record has an unknown key"),
+        ({"finished": "no"}, "batch record field finished has the wrong type"),
+        ({"next_chunk_pending": 1}, "batch record field next_chunk_pending has the wrong type"),
+        ({"chunk_size": 0}, "batch record field chunk_size has the wrong type"),
+        ({"chunk_size": True}, "batch record field chunk_size has the wrong type"),
+        ({"rerun_done": [1]}, "batch record field rerun_done has the wrong type"),
+        ({"rerun_ids": "owner__repo-1"}, "batch record field rerun_ids has the wrong type"),
+        ({"pending_ids": "owner__repo-3"}, "batch record field pending_ids has the wrong type"),
+        ({"env_broken_ids": None}, "batch record field env_broken_ids has the wrong type"),
+        ({"network_fetch": "false"}, "batch record field network_fetch has the wrong type"),
+        ({"network_fetch_done": [3]}, "batch record field network_fetch_done has the wrong type"),
+    ],
+    ids=[
+        "unknown-key",
+        "finished-string",
+        "next-chunk-int",
+        "chunk-size-zero",
+        "chunk-size-bool",
+        "rerun-done-ints",
+        "rerun-ids-string",
+        "pending-ids-string",
+        "env-broken-none",
+        "network-fetch-string",
+        "network-fetch-done-ints",
+    ],
+)
+def test_a_chunked_batch_record_with_a_bad_writer_field_is_refused(tmp_path, change, message):
+    cert_dir = fixture_dir(tmp_path)
+    put_batch(tmp_path, chunked_batch_record(**change))
+    result = build_site(cert_dir, tmp_path / "site")
+    assert result.errors == [("batch.json", message)]
+    assert "batch record not loaded" in read(result.index)
+
+
 @pytest.mark.parametrize("cost", [0, 0.0, 0.15, 1], ids=["int-zero", "zero", "fraction", "int"])
 def test_a_not_run_row_with_a_measured_cost_is_accepted(tmp_path, cost):
     cert_dir = fixture_dir(tmp_path)
@@ -1059,6 +1155,15 @@ def test_a_batch_file_written_by_the_batch_writer_loads_with_no_errors(tmp_path)
         "not_run": [],
         "started": "2026-10-22T09:43:42Z",
         "updated": "2026-10-22T09:43:42Z",
+        "chunk_size": 10,
+        "network_fetch": False,
+        "network_fetch_done": [],
+        "rerun_ids": [],
+        "rerun_done": [],
+        "env_broken_ids": [],
+        "next_chunk_pending": False,
+        "finished": False,
+        "pending_ids": [],
     }
     batch = cli._Batch(path, state, lambda: "2026-10-22T09:59:57Z")
     batch.done("owner__repo-1: run")  # run += 1 and the record is saved
