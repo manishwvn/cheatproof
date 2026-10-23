@@ -25,7 +25,7 @@ from typing import Any, Literal, NamedTuple, Protocol
 from cheatproof.budget import BudgetExceeded
 from cheatproof.executor import ExecutorRefused, ExecutorUnavailable, Result, Session
 from cheatproof.llm import MAX_OUTPUT_TOKENS, estimate_tokens
-from cheatproof.sanitize import clean_text
+from cheatproof.sanitize import MAX_QUERY_CHARS, clean_text
 
 MAX_RESULT_CHARS = (
     4000  # default: tool results sent back to the model are cut to this (plus a marker); T38 lowered it
@@ -70,8 +70,9 @@ class SearchFn(Protocol):
 class AttackConfig:
     """Limits and switches for one attempt.
 
-    allow_network must match the session's EnvSpec.network. The caller sets both. This module cannot read the
-    session's network setting, so a mismatch is not detected here. web_search runs host side either way.
+    allow_network turns the host-side web_search tool on (when a search callable is also given). It does not
+    touch the sandbox: the session's EnvSpec.network stays the caller's choice, and T37 keeps it off, because the
+    search runs on the host. This module cannot read the session's network setting.
     """
 
     # Empty until ATTACKER_MODEL is set; attack() refuses to start without a model.
@@ -456,8 +457,13 @@ def attack(
     ) -> None:
         traced = args
         if tool == "web_search" and isinstance(args, dict):
-            # T37: the query in the trace is the cleaned text that is sent out (secret-like words are redacted).
-            traced = {k: clean_text(v, TRACE_ARG_CHARS) if isinstance(v, str) else v for k, v in args.items()}
+            # T37: the query in the trace is the cleaned text that is sent out (same cleaning, same cut).
+            traced = {
+                k: clean_text(v, MAX_QUERY_CHARS if k == "query" else TRACE_ARG_CHARS)
+                if isinstance(v, str)
+                else v
+                for k, v in args.items()
+            }
         rec = {
             "type": "step",
             "step": step,

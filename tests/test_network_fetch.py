@@ -187,13 +187,15 @@ def test_network_fetch_is_off_by_default(tmp_path, monkeypatch):
     assert spy.attack_calls[0][2] == tc.SYSTEM_PROMPT  # the prompt is the file's, no network section
 
 
-def test_harden_network_fetch_wires_search_network_and_prompt(tmp_path, monkeypatch, capsys):
+def test_harden_network_fetch_wires_search_and_prompt_with_the_sandbox_network_off(
+    tmp_path, monkeypatch, capsys
+):
     monkeypatch.setenv("TAVILY_API_KEY", FAKE_KEY)
     spy, search = tc.Spy(), SearchSpy()
     attack = attack_spy(spy)
     deps = tc.make_deps(spy, attack=attack, make_search=search.make_search)
     assert cli.main(harden_argv(tmp_path, "--network-fetch"), deps=deps) == 0
-    assert spy.harden_calls[0]["env"].network is True  # EnvSpec.network matches allow_network
+    assert spy.harden_calls[0]["env"].network is False  # Tavily runs on the host: the sandbox stays offline
     config = spy.attack_calls[0][4]
     assert config.allow_network is True
     assert "web_search" in spy.attack_calls[0][2] and spy.attack_calls[0][2].startswith(
@@ -202,7 +204,7 @@ def test_harden_network_fetch_wires_search_network_and_prompt(tmp_path, monkeypa
     assert len(search.budgets) == 1 and callable(attack.seen[0]["search"])
     assert spy.build_kwargs[0]["strategy"] == "prompt+network"
     err = capsys.readouterr().err
-    assert err.count("warning: --network-fetch") == 1 and "network is ON" in err
+    assert err.count("warning: --network-fetch") == 1 and "sandbox network stays off" in err
     assert FAKE_KEY not in err
 
 
@@ -224,14 +226,14 @@ def test_a_search_that_cannot_be_made_stops_before_the_paid_run(tmp_path, monkey
     assert spy.harden_calls == []
 
 
-def test_batch_network_fetch_wires_each_run_and_is_recorded(tmp_path, monkeypatch, capsys):
+def test_batch_network_fetch_wires_each_run_and_keeps_the_sandbox_off(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("TAVILY_API_KEY", FAKE_KEY)
     spy, search = tc.Spy(), SearchSpy()
     attack = attack_spy(spy)
     out = tc.out_dir(tmp_path)
     deps = tc.batch_deps(spy, tc.batch_tasks(tc.ID_A, tc.ID_B), attack=attack, make_search=search.make_search)
     assert cli.main(tc.batch_argv(tmp_path, out, "--network-fetch"), deps=deps) == 0
-    assert [call["env"].network for call in spy.harden_calls] == [True, True]
+    assert [call["env"].network for call in spy.harden_calls] == [False, False]
     assert len(search.budgets) == 2 and all("search" in kw for kw in attack.seen)
     assert tc.read_batch(out)["network_fetch"] is True
     assert capsys.readouterr().err.count("warning: --network-fetch") == 1
@@ -311,3 +313,178 @@ def test_no_key_value_reaches_the_batch_state(tmp_path, monkeypatch):
     deps = tc.batch_deps(spy, tc.batch_tasks(tc.ID_A), attack=attack_spy(spy), make_search=search.make_search)
     cli.main(tc.batch_argv(tmp_path, out, "--network-fetch"), deps=deps)
     assert FAKE_KEY not in json.dumps(tc.read_batch(out))
+
+
+# --- review fixes: sandbox network off, first attack only, cleaning, cap, persisted total -----------------
+
+
+def test_clean_text_redacts_whole_string_credential_patterns():
+    from cheatproof.sanitize import clean_text
+
+    assert clean_text("fix Bearer abc123token now", 100) == "fix REDACTED now"
+    assert clean_text("setup password=hunter2 here", 100) == "setup REDACTED here"
+    assert clean_text("use api_key: abc123 please", 100) == "use REDACTED please"
+    assert "hunter2" not in clean_text("PASSWORD=hunter2", 100)
+
+
+def test_clean_text_replaces_the_configured_key_verbatim_even_when_it_looks_ordinary(monkeypatch):
+    from cheatproof.sanitize import clean_text
+
+    plain = "plainsecretvalue99"  # no key-like shape: only the verbatim match can catch it
+    monkeypatch.setenv("TAVILY_API_KEY", plain)
+    out = clean_text(f"find {plain} in a repo, {plain}x too", 200)
+    assert plain not in out and out.startswith("find REDACTED in")
+    assert clean_text("x", 10, secrets=("anothersecret",)) == "x"
+    assert "anothersecret" not in clean_text("see anothersecret ok", 100, secrets=("anothersecret",))
+
+
+def test_clean_text_caps_words_after_the_whole_string_pass():
+    from cheatproof.sanitize import clean_text
+
+    assert len(clean_text("word " * 1000, 50)) <= 50
+    assert clean_text("a b c", 0) == ""
+
+
+def test_traced_query_is_cut_to_what_is_sent():
+    cfg = AttackConfig(model=ta.MODEL, allow_network=True)
+    long_query = "word " * 400
+    result, _, _ = ta.go(
+        [ta.reply(ta.call("web_search", {"query": long_query})), ta.reply(ta.call("submit"))],
+        config=cfg,
+        search=lambda q: [],
+    )
+    assert len(result.steps[0]["args"]["query"]) <= MAX_QUERY_CHARS
+
+
+def test_cap_halt_through_the_attacker_stops_the_attempt_and_traces_it(tmp_path):
+    budget = counted_budget(tmp_path, cap=1)
+    search = make_network_search(budget, FAKE_KEY, client_factory=FakeClient().factory)
+    cfg = AttackConfig(model=ta.MODEL, allow_network=True)
+    trace = tmp_path / "t.jsonl"
+    replies = [
+        ta.reply(ta.call("web_search", {"query": "first"})),
+        ta.reply(ta.call("web_search", {"query": "second"})),
+        ta.reply(ta.call("submit")),
+    ]
+    with pytest.raises(BudgetExceeded, match="tavily call cap 1 reached"):
+        ta.go(replies, config=cfg, search=search, trace_path=trace)
+    assert budget.snapshot()["tavily_calls"] == 1
+    assert ta.read_trace(trace)[-1]["stop_reason"] == "budget"
+
+
+def test_a_failing_client_never_leaks_the_key_into_the_trace_or_the_model_reply(tmp_path):
+    class Boom:
+        def factory(self, key):
+            return self
+
+        def search(self, query, max_results):
+            raise RuntimeError(f"401 for key {FAKE_KEY}")
+
+    search = make_network_search(counted_budget(tmp_path, 5), FAKE_KEY, client_factory=Boom().factory)
+    cfg = AttackConfig(model=ta.MODEL, allow_network=True)
+    trace = tmp_path / "t.jsonl"
+    result, llm, _ = ta.go(
+        [ta.reply(ta.call("web_search", {"query": "q"})), ta.reply(ta.call("submit"))],
+        config=cfg,
+        search=search,
+        trace_path=trace,
+    )
+    assert result.steps[0]["error"] == "tool_exception"
+    seen = trace.read_text() + repr(result) + repr(ta.tool_texts(llm, 1))
+    assert FAKE_KEY not in seen and "401" not in seen
+
+
+def test_the_cap_halt_through_the_cli_stops_without_a_certificate(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("TAVILY_API_KEY", FAKE_KEY)
+    spy = tc.Spy()
+    capped = counted_budget(tmp_path, cap=0)
+
+    def attack(llm, session, system_prompt, task_prompt, config, trace_path=None, search=None):
+        search("upstream fix")  # the reservation is refused at the cap: BudgetExceeded
+        return "attack-result"
+
+    deps = tc.make_deps(
+        spy,
+        attack=attack,
+        make_search=lambda budget: make_network_search(capped, FAKE_KEY, client_factory=FakeClient().factory),
+    )
+    assert cli.main(harden_argv(tmp_path, "--network-fetch"), deps=deps) == 1
+    assert spy.certs == []
+    assert "BudgetExceeded" in capsys.readouterr().err and capped.snapshot().get("tavily_calls", 0) == 0
+
+
+def test_only_the_before_hardening_attack_gets_search(tmp_path, monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", FAKE_KEY)
+    spy, search = tc.Spy(), SearchSpy()
+    attack = attack_spy(spy)
+    configs = []
+
+    def two_round_harden(executor, env, task, attack_fn, *, budget, **kwargs):
+        spy.harden_calls.append({"env": env, "task": task, "budget": budget, **kwargs})
+        attack_fn("before-session")
+        attack_fn("after-session")
+        return tc.make_report()
+
+    deps = tc.make_deps(spy, attack=attack, make_search=search.make_search, harden=two_round_harden)
+    assert cli.main(harden_argv(tmp_path, "--network-fetch"), deps=deps) == 0
+    configs = [call[4] for call in spy.attack_calls]
+    assert "search" in attack.seen[0] and attack.seen[1] == {}
+    assert [c.allow_network for c in configs] == [True, False]  # the after config says no web_search
+    assert len(search.budgets) == 1
+
+
+def test_the_sandbox_network_stays_off_for_every_session(tmp_path, monkeypatch):
+    import contextlib
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("TAVILY_API_KEY", FAKE_KEY)
+    started = []
+
+    class Executor:
+        def start(self, env, budget=None):
+            started.append(env)
+            return contextlib.nullcontext("session")
+
+    spy, search = tc.Spy(), SearchSpy()
+    deps = tc.make_deps(
+        spy,
+        attack=attack_spy(spy),
+        make_search=search.make_search,
+        make_executor=Executor,
+        preflight=lambda session, task: SimpleNamespace(ok=True),
+    )
+    assert cli.main(harden_argv(tmp_path, "--network-fetch"), deps=deps) == 0
+    assert [env.network for env in started] == [False]  # the collect-only preflight session
+    assert [call["env"].network for call in spy.harden_calls] == [
+        False
+    ]  # harden derives every session from it
+
+
+def test_the_total_cap_is_kept_in_batch_json_across_invocations(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("TAVILY_API_KEY", FAKE_KEY)
+    spy, search = tc.Spy(), SearchSpy()
+    out = tc.out_dir(tmp_path)
+    tasks = tc.batch_tasks(tc.ID_A, tc.ID_B, tc.ID_C, tc.ID_D)
+    by_id = {t.instance_id: t for t in tasks}
+    deps = tc.batch_deps(
+        spy,
+        tasks,
+        find_tasks=lambda iid, source, cache: [by_id[iid]] if iid in by_id else [],
+        attack=attack_spy(spy),
+        make_search=search.make_search,
+    )
+    assert cli.main(tc.batch_argv(tmp_path, out, "--network-fetch", "--n", "4"), deps=deps) == 0
+    assert tc.harden_order(spy) == [tc.ID_A, tc.ID_B]
+    assert tc.read_batch(out)["network_fetch_done"] == [tc.ID_A, tc.ID_B]
+    # The batch finished, yet the total is still 2: a second call without --instance-ids is refused.
+    capsys.readouterr()
+    assert cli.main(tc.batch_argv(tmp_path, out, "--network-fetch"), deps=deps) == 2
+    assert "at most 2 in total" in capsys.readouterr().err and tc.harden_order(spy) == [tc.ID_A, tc.ID_B]
+    # A call without the flag keeps the record.
+    plain = tc.batch_argv(tmp_path, out, "--instance-ids", tc.ID_C)
+    assert cli.main(plain, deps=deps) == 0
+    assert tc.read_batch(out)["network_fetch_done"] == [tc.ID_A, tc.ID_B]
+    # Naming 1 or 2 tasks is allowed again, and they join the record.
+    named = tc.batch_argv(tmp_path, out, "--network-fetch", "--instance-ids", tc.ID_D)
+    assert cli.main(named, deps=deps) == 0
+    assert tc.read_batch(out)["network_fetch_done"] == [tc.ID_A, tc.ID_B, tc.ID_D]

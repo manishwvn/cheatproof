@@ -14,6 +14,7 @@ read as "_".
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterator
 from typing import Any
@@ -203,7 +204,30 @@ def assert_clean(obj: Any) -> None:
         raise ValueError(f"secret-like values remain at: {where}")
 
 
-def clean_text(text: str, limit: int) -> str:
-    """Free text as one line of at most limit chars, checked word by word: a secret-like word becomes REDACTED and the
-    words around it stay. For a web search query or a result snippet, where redacting the whole string would lose it."""
-    return " ".join(sanitize(word) for word in text.split())[:limit]
+MAX_QUERY_CHARS = 300  # a web search query (sent and traced) is cut to this
+TAVILY_KEY_ENV = "TAVILY_API_KEY"
+_MIN_SECRET_CHARS = 4  # a shorter configured secret is not matched verbatim: it would shred ordinary text
+_PRECAP_CHARS = 64_000  # bounds the whole-string passes; far above any limit * 4 the callers use
+# `password=hunter2`, `api_key: abc`, `token=...`: a name with a credential word, a separator and a value. The value is
+# a whole word, so a space-separated secret after `password =` is still caught by the word pass only if secret-like.
+SECRET_ASSIGNMENT = re.compile(
+    r"[\w.\-]*(?:password|passwd|secret|token|api[_\-]?key|key|auth)[\w.\-]*\s*[=:]\s*\S+", re.IGNORECASE
+)
+
+
+def clean_text(text: str, limit: int, secrets: tuple[str, ...] = ()) -> str:
+    """Free text as one line of at most limit chars. For a web search query or a result snippet, where replacing the
+    whole string would lose it.
+
+    The whole string comes first: the TAVILY_API_KEY value (read from the environment here, never stored or printed)
+    and every value in secrets are replaced verbatim, then `Bearer <token>` and `name=value` credential patterns. Then
+    the text is cut at limit * 4, split into words, and each word is checked on its own (a secret-like word becomes
+    REDACTED and the words around it stay). The result is cut at limit."""
+    text = text[:_PRECAP_CHARS]
+    for value in (*secrets, os.environ.get(TAVILY_KEY_ENV, "")):
+        if len(value) >= _MIN_SECRET_CHARS:
+            text = text.replace(value, REDACTED)
+    text = BEARER.sub(REDACTED, text)
+    text = SECRET_ASSIGNMENT.sub(REDACTED, text)
+    words = text[: max(limit, 0) * 4].split()
+    return " ".join(sanitize(word) for word in words)[: max(limit, 0)]

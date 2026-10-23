@@ -1500,6 +1500,7 @@ BATCH_KEYS = {
     "already_certified",
     "chunk_size",
     "network_fetch",
+    "network_fetch_done",
     "rerun_ids",
     "rerun_done",
     "env_broken_ids",

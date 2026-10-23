@@ -654,7 +654,7 @@ def _harden_settings(args: argparse.Namespace) -> _Settings:
             raise _Usage(f"--timeout must be a positive number of seconds, got {args.timeout!r}")
         timeout_kw["timeout"] = args.timeout
 
-    # Network stays off unless --network-fetch: the task's EnvSpec network must match allow_network (see _plan).
+    # --network-fetch turns on the host-side web_search only. The sandbox network stays off (EnvSpec.network False).
     config = AttackConfig(model=model, allow_network=network_fetch, **limits)
     return _Settings(
         system_prompt=system_prompt,
@@ -669,17 +669,17 @@ def _harden_settings(args: argparse.Namespace) -> _Settings:
 
 def _network_warning() -> None:
     print(
-        "warning: --network-fetch: the sandbox network is ON for this run (EnvSpec.network=True, no network cut), "
-        "so attacker commands can reach the internet. Tavily calls are capped by TAVILY_CALL_CAP. "
-        f"At most {NETWORK_FETCH_MAX_TASKS} tasks.",
+        "warning: --network-fetch: web search enabled; sandbox network stays off. The search runs on the host "
+        "for the first (before-hardening) attack only, and each call is capped by TAVILY_CALL_CAP. "
+        f"At most {NETWORK_FETCH_MAX_TASKS} tasks in total.",
         file=sys.stderr,
     )
 
 
-def _plan(task: TaskSpec, out: Path, network: bool = False) -> _Plan:
+def _plan(task: TaskSpec, out: Path) -> _Plan:
     """The paid run's plan for one task: env, certificate stem, prompt and trace paths. _Usage before any paid call."""
     try:
-        env = EnvSpec(image=task.image, network=network)
+        env = EnvSpec(image=task.image)
         stem = _certificate_stem(task)  # checked before any paid run
     except ValueError as exc:
         raise _Usage(str(exc)) from None
@@ -759,15 +759,24 @@ def _harden_one(
         Any
     ] = []  # the attacks that returned, for keep.keep_stopped when harden stops without a report
 
+    attacks_started = [0]
+
     def attack_fn(session: Any) -> Any:
+        # T37: web_search is for the first (before-hardening) attack only. The after-hardening re-attack gets no
+        # search and a config that says so, because a patch is only certified against an attacker with no network.
+        first = attacks_started[0] == 0
+        attacks_started[0] += 1
+        config = settings.config
+        if settings.network_fetch and not first:
+            config = replace(config, allow_network=False)
         result = deps.attack(
             llm,
             session,
             settings.system_prompt,
             plan.prompt,
-            settings.config,
+            config,
             trace_path=plan.trace_path,
-            **search_kw,
+            **(search_kw if first else {}),
         )
         finished.append(result)
         return result
@@ -853,7 +862,7 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
     if len(matches) > 1:
         return _usage_error(f"{args.instance_id!r} is cached under more than one source: pass --source")
     try:
-        plan = _plan(matches[0], settings.out, settings.network_fetch)
+        plan = _plan(matches[0], settings.out)
     except _Usage as exc:
         return _usage_error(str(exc))
     if settings.network_fetch:
@@ -1026,8 +1035,13 @@ def _run_tasks(
         if iid in rerun:  # saved before the paid run: a resume never attacks this task again
             batch.state["rerun_done"].append(iid)
             batch.save()
+        if settings.network_fetch and iid not in batch.state["network_fetch_done"]:
+            batch.state["network_fetch_done"].append(
+                iid
+            )  # saved before the paid run: the total cap counts it
+            batch.save()
         try:
-            plan = _plan(task, out, settings.network_fetch)
+            plan = _plan(task, out)
         except _Usage as exc:
             batch.not_run(iid, "invalid_task", str(exc))
             continue
@@ -1098,6 +1112,9 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
     batch_path = out.parent / BATCH_FILE
     if (out.parent / TRACES_DIR).is_symlink() or batch_path.is_symlink():
         return _usage_error(f"refusing to write through a symbolic link: {TRACES_DIR}/ or {BATCH_FILE}")
+    # T37: the tasks that already used --network-fetch, kept in batch.json across invocations (also across a finished
+    # batch and across calls without the flag).
+    network_done = _network_fetch_done(batch_path)
 
     selections = []
     try:
@@ -1134,7 +1151,17 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
     if network_fetch:
         # T37: a hard cap, so the Tavily and attacker cost stay tiny. The first tasks that would really run are kept.
         tasks = [t for t in tasks if t.instance_id in ordered.rerun or not _certified_before(t, out)]
-        tasks = tasks[:NETWORK_FETCH_MAX_TASKS]
+        if args.instance_ids:  # the owner named 1 or 2 tasks: allowed again, whatever ran before
+            tasks = tasks[:NETWORK_FETCH_MAX_TASKS]
+        else:
+            left = NETWORK_FETCH_MAX_TASKS - len(network_done)
+            if left <= 0:
+                return _usage_error(
+                    f"--network-fetch already ran {len(network_done)} tasks (network_fetch_done in {BATCH_FILE}); "
+                    f"at most {NETWORK_FETCH_MAX_TASKS} in total. Name up to {NETWORK_FETCH_MAX_TASKS} with "
+                    "--instance-ids to run others"
+                )
+            tasks = tasks[:left]
     # A previous call that stopped at its chunk size hands over what it did: a resume never attacks a rerun task
     # again and never retries an env-broken one, whatever flags are given.
     done, broken_rows = _resume_state(batch_path)
@@ -1143,7 +1170,8 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
     if settings is None:  # --dry-run: print the plan from the cache and the certificates; no calls, no files
         if network_fetch:
             print(
-                f"--network-fetch: at most {NETWORK_FETCH_MAX_TASKS} tasks, sandbox network on, Tavily search wired"
+                f"--network-fetch: at most {NETWORK_FETCH_MAX_TASKS} tasks in total, web search on, "
+                "sandbox network stays off"
             )
         certified = {t.instance_id for t in tasks if _certified_before(t, out)}
         caps = batch_plan.read_caps(os.environ, _env_file_values())
@@ -1167,6 +1195,7 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
         "selected_ids": [task.instance_id for task in tasks],
         "chunk_size": chunk_size,
         "network_fetch": network_fetch,
+        "network_fetch_done": network_done,  # tasks attacked with --network-fetch; saved before each such run
         "rerun_ids": sorted(ordered.rerun),  # asked for in this call
         "rerun_done": done,  # attacked again already (this call or an earlier chunk): never again
         "env_broken_ids": broken_ids,  # failed the preflight in this batch: not retried by a later chunk
@@ -1217,6 +1246,17 @@ def _resume_state(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
         and isinstance(row.get("instance_id"), str)
     ]
     return done, rows
+
+
+def _network_fetch_done(path: Path) -> list[str]:
+    """The ids an earlier call attacked with --network-fetch, from the batch.json it left (finished or not). A missing
+    or odd file carries nothing."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    done = data.get("network_fetch_done") if isinstance(data, dict) else None
+    return list(dict.fromkeys(i for i in done if isinstance(i, str))) if isinstance(done, list) else []
 
 
 def _env_file_values() -> dict[str, str | None]:
@@ -1482,8 +1522,8 @@ def cmd_holes_recheck(args: argparse.Namespace, deps: Deps) -> int:
 
 
 NETWORK_FETCH_HELP = (
-    "T37: give the attacker a capped Tavily web_search and turn the sandbox network on for this run only; "
-    f"needs TAVILY_API_KEY; at most {NETWORK_FETCH_MAX_TASKS} tasks (default off)"
+    "T37: give the first (before-hardening) attack a capped host-side Tavily web_search; the sandbox network "
+    f"stays off; needs TAVILY_API_KEY; at most {NETWORK_FETCH_MAX_TASKS} tasks in total (default off)"
 )
 
 
