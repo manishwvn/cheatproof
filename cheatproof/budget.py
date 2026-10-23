@@ -16,7 +16,9 @@ The real-spend cap (REAL_SPEND_CAP_USD, default and hard ceiling $10) limits TOT
 credit plus the hackathon promo credit), counted in the ledger's trial_spend_usd field (the name is kept so the live
 ledger keeps counting). A set value above the ceiling, or invalid, zero or negative, raises: it never falls back to a
 higher cap. The old TRIAL_CREDIT_CAP_USD, if set, still applies as an additional, stricter cap. The account balance
-must never go negative, because a negative balance charges the card. Local Docker
+must never go negative, because a negative balance charges the card. The code does NOT enforce that: it holds only because
+$10 is below the $26.65 balance, so check the console between batch chunks. The counter counts Token Factory spend only since
+it was set (about $0.155 of earlier spend is not counted), so real spend can reach about $10.16. Local Docker
 runs and Tavily calls book no money; they only count against their caps. A ledger that does not match
 this shape is refused the same way, never repaired. A missing ledger is refused too: only create_ledger (the
 `budget init` CLI command) creates one, so a run never starts on a ledger nobody made. snapshot() only reads the

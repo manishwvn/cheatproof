@@ -259,7 +259,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ### T08 Eval run and results with raw counts — size M — todo — needs T33, T34, T35, T32, T36, T38, T23, T07, T16, T17, T18, T19, T20, T22 [30%]
 Unblocked 2026-10-21: U21 is closed and T23 is done (#30), so T08 has no U21 dependency left.
-Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
+Run the full loop on the 40 tasks within the $10 real-spend cap (`REAL_SPEND_CAP_USD`, T43) and the $4 daily cap (check the ledger before starting; stop at either cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
 sanitized traces needed for replay. Committed certificates and replay traces go in a tracked `results/` folder (`runs/` stays a
@@ -366,7 +366,7 @@ The gold gate for Algebra8__pyopenapi3-83 fails with `pytest exited 4: ERROR: no
 ### T30 Collection cause for pytest "found no collectors" — size S — done #39
 DRMacIver__shrinkray-7's gold gate fails with `pytest exited 4: ERROR: found no collectors for /testbed/tests/test_main.py::test_kill_process` (2026-10-22 rerun). PR #37 runs the collection rerun only on `not found:`. Extend `_not_found_file` in cheatproof/grader.py to also accept `found no collectors for <node>` (bare or under workdir), with fakes-only tests in tests/test_grader.py. No live run needed until U25 is done.
 
-## Orchestrator brief 2026-10-23 (mock judge 19/40, Opus audit). Priority order P0 > P1 > P2. Routing: Haiku mechanical, Sonnet writing/review/logic. No Opus subagents. Spend no money; keep every cap.
+## Orchestrator brief 2026-10-23 (mock judge 19/40, Opus audit). Priority order P0 > P1 > P2. Routing: Haiku mechanical, Sonnet writing/review/logic. No Opus subagents. Spend no card money; keep every cap (real spend $10 total, $4 daily, T43).
 
 ### T33 Give `test-edit` only for unrestored paths — size S — todo (P0, sonnet)
 `cheatproof/holes.py:389-393` labels any test path in the final diff `test-edit`, but the grader restores the F2P/P2P files and conftests before grading. Label `test-edit` only for paths the grade does NOT restore (pytest config, unrestored test files), or when a regrade with the test edits stripped fails. Tests in `tests/test_holes.py`. Then re-check CycloneDX__cyclonedx-python-348 offline from the saved diff (state folder or results/diffs) if possible and correct the "Holes found: 1" line and counts in `docs/results.md` if the hole does not hold. Its exposure shows a real git-history leak (378 future commits reachable from refs): record it as the targeted attack and headline candidate for T38.

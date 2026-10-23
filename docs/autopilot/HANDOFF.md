@@ -15,7 +15,7 @@ Read this, then `STATUS.md`, then `docs/autopilot/QUEUE.md`, before doing anythi
 - `halted` is null (cleared 2026-10-23). Backups: `ledger.pre-u21.bak`, `ledger.pre-u25.bak`.
 - Counters at handoff: total $0.535, trial spend $0.3796, Sandboxes cost $0.5022, 46 sandbox runs.
 - Caps: total $20, daily $4; `REAL_SPEND_CAP_USD` default and hard ceiling $10 (T43, replaces the trial-only 0.74 cap; total real spend = trial + promo, counted in the ledger's `trial_spend_usd`); `SANDBOX_COST_CAP_USD` 1.50 in `.env`.
-- The $26.65 balance is hackathon promo credit (Token Factory > Transactions: "Adjustment: AI Builder Program Credits", +$26.65, Oct 18), not card money. The $0.71 trial is used first, then the promo. Owner 2026-10-23: promo spend is allowed up to $10 total real spend for now. The balance must never go negative (a negative balance charges the card).
+- The $26.65 balance is hackathon promo credit (Token Factory > Transactions: "Adjustment: AI Builder Program Credits", +$26.65, Oct 18), not card money. The $0.71 trial is used first, then the promo. Owner 2026-10-23: promo spend is allowed up to $10 total real spend for now. The balance must never go negative (a negative balance charges the card). Code does NOT enforce that: it holds only because $10 is below the $26.65 balance, so check the console between chunks. The counter counts only Token Factory spend since it was set (about $0.155 of earlier spend is not counted), so real spend can reach about $10.16.
 - HTTP 402 or a malformed cost still halts.
 - Fresh machine: run `python -m cheatproof.cli budget init` once; a lost halt is forgotten by a later init.
 
