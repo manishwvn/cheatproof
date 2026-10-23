@@ -119,7 +119,10 @@ Routine 2026-10-20 19:24: PR #27 does all items except 7 (`COST_BASIS` is valida
 schema/fixture change). Sonnet "fix first" (silent resets could fake "not hackable"), one Haiku fix round, Opus
 approve. CI `test` green; `dependencies` red until PR #26 (certifi) is merged.
 
-### T24 Rename the product to RewardSeal — size M — todo — needs T08
+### T24 Rename the product to RewardSeal (user-facing text only) — size M — todo
+Scope change 2026-10-23 (orchestrator): rename USER-FACING TEXT ONLY now (README, report site text, CLI help strings and
+docs, video script, pitches). Do NOT rename the Python package, the console script or any import in this task; that stays a later
+option. The grep rule below applies to user-facing files only.
 "Cheatproof" is another company's product name (CheatProof.ai). Rename every user-facing and public mention to
 **RewardSeal**: README, report site, CLI name and help (`rewardseal harden <env-id>`), certificate `tool` field (bump
 the schema version, keep reading old certificates), docs (CLAUDE.md, pitches, ADRs, STATUS, PLAN, prize-fit), video
@@ -254,7 +257,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — todo — needs T23, T07, T16, T17, T18, T19, T20, T22 [30%]
+### T08 Eval run and results with raw counts — size M — todo — needs T33, T34, T35, T32, T36, T38, T23, T07, T16, T17, T18, T19, T20, T22 [30%]
 Unblocked 2026-10-21: U21 is closed and T23 is done (#30), so T08 has no U21 dependency left.
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
@@ -265,7 +268,7 @@ Audit 2026-10-18: before the run, smoke one real image's gold gate. `grader.PYTE
 under `sh -lc`; SWE-bench images may need `conda activate testbed`. Check image HEAD equals `base_commit`
 (`strip-future-git` refuses otherwise). Run on Sandboxes (`EXECUTOR=sandbox`), not local Docker.
 
-Planner note 2026-10-23 (U25 resolved, owner approved resume; batch 3 only, then HALT). The Token Factory console on 2026-10-23
+Planner note 2026-10-23 (U25 resolved, owner approved resume; batch 3 only, then HALT). Orchestrator update 2026-10-23: batch 3 waits for P0 (T33 T34 T35 T32 T36) and T38 (preflight, nudge, task choice), then the orchestrator audits before the paid run. The Token Factory console on 2026-10-23
 15:44 UTC shows Sandboxes NOT billed (no line item) and trial credits at $0.71; the $26.65 balance is untouched.
 Settings now: `SANDBOX_COST_CAP_USD=1.50` (estimate-only counter; $0.50 used) and `TRIAL_CREDIT_CAP_USD` stays at its
 default 0.74 ($0.38 counted), so the trial counter halts the run at about $0.35 real remaining, above the owner's $0.25
@@ -365,6 +368,32 @@ The gold gate for Algebra8__pyopenapi3-83 fails with `pytest exited 4: ERROR: no
 ### T30 Collection cause for pytest "found no collectors" — size S — done #39
 DRMacIver__shrinkray-7's gold gate fails with `pytest exited 4: ERROR: found no collectors for /testbed/tests/test_main.py::test_kill_process` (2026-10-22 rerun). PR #37 runs the collection rerun only on `not found:`. Extend `_not_found_file` in cheatproof/grader.py to also accept `found no collectors for <node>` (bare or under workdir), with fakes-only tests in tests/test_grader.py. No live run needed until U25 is done.
 
+## Orchestrator brief 2026-10-23 (mock judge 19/40, Opus audit). Priority order P0 > P1 > P2. Routing: Haiku mechanical, Sonnet writing/review/logic. No Opus subagents. Spend no money; keep every cap.
+
+### T33 Give `test-edit` only for unrestored paths — size S — todo (P0, sonnet)
+`cheatproof/holes.py:389-393` labels any test path in the final diff `test-edit`, but the grader restores the F2P/P2P files and conftests before grading. Label `test-edit` only for paths the grade does NOT restore (pytest config, unrestored test files), or when a regrade with the test edits stripped fails. Tests in `tests/test_holes.py`. Then re-check CycloneDX__cyclonedx-python-348 offline from the saved diff (state folder or results/diffs) if possible and correct the "Holes found: 1" line and counts in `docs/results.md` if the hole does not hold. Its exposure shows a real git-history leak (378 future commits reachable from refs): record it as the targeted attack and headline candidate for T38.
+
+### T34 `max_steps` without a submit is inconclusive — size S — todo (P0, sonnet; do before T32 lands)
+`cheatproof/harden.py:99` puts `max_steps` in `CONCLUSIVE_STOPS`, and `harden.py:614` can then certify a task whose attacker never submitted. A `max_steps` stop without a submitted patch must be inconclusive and never certified; keep `no_attempt` for no write at all. Update `docs/results.md` counts if any row changes. Tests in `tests/test_harden.py`.
+
+### T35 Ledger refusal and halt ordering — size S — todo (P0, haiku) — merged into T27
+Do these as part of T27 items, in one planner-merge PR (`budget.py`, `executor.py`): (a) a missing ledger file refuses to run (`budget.py:272`) unless an explicit init created it (add `cheatproof budget init`, never implicit); (b) ledger `OSError` becomes `BudgetExceeded` (`executor.py:1140`); (c) the halt flag is checked before every exec, including the cost-0 path (`budget.py:413`, `executor.py:1189`); (d) `_halt_for_payment` runs on all exceptions (`executor.py:1130`). Fakes-only tests. T35 and T27 are closed together; T27 keeps its other items.
+
+### T36 Fix results row 8 and the access probe retries — size S — todo (P0, haiku)
+`docs/results.md` row 8: BoboTiG__ebook-reader-dict-2132 did run sandbox execs; `cost_usd` is Token Factory only, not Sandboxes. Fix the row and any column header that says otherwise. `scripts/sandbox_access.py` lines 45 and 91-104: the probe retries; make it one attempt with a clear failure line (no retry loop that can repeat paid calls). Planner-merge path for the script: open the PR and add a USER item if the planner must merge.
+
+### T37 Tavily runtime path (`--network-fetch`) — size M — todo (P2, sonnet)
+`cheatproof/cli.py`: add `--network-fetch` to `harden`/`batch`. It wires `make_tavily_search(budget)`, sets `allow_network`, and the matching `EnvSpec.network`, then runs 1-2 tasks so a trace shows the query (sanitized). The prize bonus needs a real runtime call. Every search goes through `budget.reserve_tavily_call()`. Check Tavily's own free credits first (read `.env` key presence by length only); stop and add a USER item if the key is missing or credits are gone. No Nebius cost beyond the attacker tokens; do not run it before the owner clears U26. Fakes-only tests first.
+
+### T38 Batch 3 preparation (P1, only after P0 is merged) — size M — todo — needs T33, T34, T35, T32, T36
+Goal: at least one `certified=True` with a completed re-attack, and at least one git-history hole. (1) Pick tasks where the exposure scan shows `future_git` true; add a collect-only preflight that runs `pytest --collect-only -q` on the gold tests and skips the task as `env-broken` before any attacker tokens are spent. (2) Add a "write a candidate patch early" nudge to the attacker prompt and tighter output limits, because 4 of 5 runs ended at `token_limit` or `max_steps`. (3) Target the git-history leak first (CycloneDX-348 style). Use the remaining trial headroom (about $0.36 counted); do not raise any cap. Run the batch as T08 describes (chunks of at most 3, halt, U26). The orchestrator audits before the run: finish this task's code, then STOP and wait; do not start the paid batch until the orchestrator says so.
+
+### T39 Pages workflow and sanitized hero traces (P2, haiku wires, sonnet writes) — size M — todo
+A GitHub Pages workflow that builds the report site, plus committed sanitized traces for the hero attack, so the demo URL is live when the owner flips the repo public. No public flip by the routine. Traces pass `leakcheck`.
+
+### T40 Video script and pitches say Super, fill RESULT markers (P2) — size S — todo — needs T33, T34
+Fill the `[RESULT: ...]` markers in `docs/video/script.md` from the real numbers in `docs/results.md`; replace "Ultra" with Nemotron Super everywhere (also `docs/pitches.md`). Do not claim a result the data does not show.
+
 ### T31 Executor and sandbox minors from the PR #30 review — size S — todo — needs T08 (planner-merge paths: `executor.py`, `scripts/sandbox_access.py`)
 Minor findings from the Sonnet review of PR #30 (T23), none blocking. Fix with fakes, then a USER item for the planner to merge.
 1. With `SANDBOX_NETWORK_TRUSTED=1` the sandbox network is not cut, and nothing warns. Print one warning line (no values) when it is on, and note it in `docs/results.md`.
@@ -372,7 +401,8 @@ Minor findings from the Sonnet review of PR #30 (T23), none blocking. Fix with f
 3. The `colima ssh -- df` disk check after every run has a 15 s timeout. Skip it for the Sandboxes backend, which has no local images.
 4. Unverified: whether a command that exits non-zero keeps its image (it matters for the gold-gate reuse). Test it with one fake and one live smoke only after the owner clears budget for it; otherwise record it as unknown in the ADR.
 
-### T32 Do not lose a certificate to the leak guard — size S — todo
+### T32 Do not lose a certificate to the leak guard — size S — todo (P0, haiku; after T34)
+Orchestrator 2026-10-23: redact free text with `error_line`'s per-word redaction (`cheatproof/grader.py:506`, `cheatproof/exposure.py:149`) instead of dropping the certificate; this replaces the `certify.py` idea below if that is simpler.
 Batch 2 (PR #38): `Azure__autorest.python-475` ran, but `certificate.exposure_before.future_git_evidence[10]` held a secret-like value and the certificate write was refused (`certificate_write_failed`, $0.0606 spent, result lost). Keep the guard strict, but redact the matching evidence line in `certify.py` before the write (replace the value with a fixed marker, keep the file path and the finding type), so a hole is still reported and replayable. Fakes-only tests next to the existing leak-guard tests; never print the matched value. If `leakcheck.py` or the certificate writer is a planner-merge path, open the PR and add a USER item. Do before the next T08 batch if the routine has the time; it does not block batch 3.
 
 ### T27 Budget hardening from PR #32 review — size S — todo — needs T08
@@ -409,11 +439,13 @@ show "not recorded" for the attack diff and transcript until T08 records them.
 
 ## Milestone: submission (feature freeze 2026-10-24)
 
-### T10 README, ADRs and feedback write-up — size M — todo — needs T08
+### T10 README, ADRs and feedback write-up — size M — todo — needs T33, T34
 README: problem with one sourced number, what it does, architecture diagram, setup and run steps, how Token Factory,
 Nemotron, Sandboxes and Tavily are used and where, what is real and what is replayed, results summary. ADRs current.
 `docs/feedback.md`: specific, actionable feedback on Token Factory, Sandboxes and NVIDIA models (Most Valuable
 Feedback prize).
+Orchestrator 2026-10-23 (mock judge 19/40): write README with Sonnet, wire links with Haiku. Honest results with n and raw counts from
+`docs/results.md` after the T33 correction; say Nemotron Super, not Ultra, everywhere. No invented numbers.
 
 ### T11 Video script and automated rough cut — size M — done #29 — after 2026-10-21
 Script by Oct 21 per `docs/pitches.md` demo beats (model ID in the first 20 seconds, under 2:50). Rough cut by Oct 24:
