@@ -1193,47 +1193,60 @@ def test_a_non_utf8_ledger_is_refused_as_not_valid_json(tmp_path):
 
 
 def _lost_ledger_dir(tmp_path):
-    """A directory where a ledger was created, then lost: the ledger file is gone and its lock file is left behind.
+    """A directory where a ledger existed and was lost: a backup named like the ledger is left behind.
     The module's autouse ledger lives in tmp_path itself, so these tests use a subdirectory."""
     lost = tmp_path / "lost"
-    create_ledger(lost / "ledger.json")
-    (lost / "ledger.json").unlink()
-    assert (lost / "ledger.lock").exists()
+    lost.mkdir()
+    (lost / "ledger.json.bak").write_text("old spend")
     return lost
 
 
-def test_create_ledger_refuses_a_stale_lock_and_writes_nothing(tmp_path):
-    lost = _lost_ledger_dir(tmp_path)
-    with pytest.raises(BudgetExceeded, match="stale lock file") as err:
-        create_ledger(lost / "ledger.json")
-    assert not (lost / "ledger.json").exists()
-    assert str(tmp_path) not in str(err.value)  # kind names only, no path
+def test_a_stale_lock_alone_does_not_block_init(tmp_path):
+    early = tmp_path / "stale"
+    create_ledger(early / "ledger.json")
+    (early / "ledger.json").unlink()  # the lock stays behind, but no backup: init still works
+    assert (early / "ledger.lock").exists()
+    assert create_ledger(early / "ledger.json") == early / "ledger.json"
 
 
-def test_create_ledger_refuses_a_backup_sibling_and_keeps_it(tmp_path):
-    fresh = tmp_path / "fresh"
-    fresh.mkdir()
-    (fresh / "ledger.json.bak").write_text("old spend")
-    with pytest.raises(BudgetExceeded, match=r"backup file \(\*\.bak\)") as err:
+def test_a_run_before_init_leaves_no_lock_and_init_then_works(tmp_path):
+    early = tmp_path / "early"
+    target = early / "ledger.json"
+    b = Budget(target, 1.0, 1.0, 1, prices={"m": PRICE}, sandbox_run_usd=0.01)
+    with pytest.raises(BudgetExceeded, match="budget init"):
+        b.reserve("m", 1, 1)
+    with pytest.raises(BudgetExceeded, match="budget init"):
+        b.snapshot()
+    with pytest.raises(BudgetExceeded, match="budget init"):
+        b.halt("x")
+    assert not (early / "ledger.lock").exists()  # no lock file blocks the later init
+    assert create_ledger(target) == target
+    assert b.reserve("m", 1, 1).usd >= 0
+
+
+def test_create_ledger_refuses_a_backup_named_like_the_ledger_and_keeps_it(tmp_path):
+    fresh = _lost_ledger_dir(tmp_path)
+    with pytest.raises(BudgetExceeded, match=r"backup named like the ledger \(\*\.bak\)") as err:
         create_ledger(fresh / "ledger.json")
     assert not (fresh / "ledger.json").exists()
     assert (fresh / "ledger.json.bak").read_text() == "old spend"
     assert "ledger.json.bak" not in str(err.value)  # kind names only, never file names
+    assert str(tmp_path) not in str(err.value)
 
 
-def test_create_ledger_names_both_kinds_when_both_siblings_exist(tmp_path):
+def test_a_backup_not_named_like_the_ledger_does_not_block_init(tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "unrelated.bak").write_text("not ours")
+    assert create_ledger(other / "ledger.json") == other / "ledger.json"
+    assert (other / "unrelated.bak").read_text() == "not ours"
+
+
+def test_force_fresh_creates_past_a_lost_ledger_backup_and_keeps_it(tmp_path):
     lost = _lost_ledger_dir(tmp_path)
-    (lost / "ledger.json.bak").write_text("old")
-    with pytest.raises(BudgetExceeded, match="stale lock file and a backup file"):
-        create_ledger(lost / "ledger.json")
-
-
-def test_force_fresh_creates_past_lost_ledger_siblings_and_keeps_them(tmp_path):
-    lost = _lost_ledger_dir(tmp_path)
-    (lost / "ledger.json.bak").write_text("old")
     create_ledger(lost / "ledger.json", force_fresh=True)
     assert json.loads((lost / "ledger.json").read_text())["total_usd"] == 0.0
-    assert (lost / "ledger.json.bak").read_text() == "old"
+    assert (lost / "ledger.json.bak").read_text() == "old spend"
 
 
 def test_force_fresh_never_overwrites_an_existing_ledger(tmp_path):
@@ -1249,7 +1262,7 @@ def test_init_ledger_from_env_refuses_lost_siblings_until_force_fresh(tmp_path, 
     target.parent.mkdir()
     (target.parent / "ledger.json.bak").write_text("old")
     monkeypatch.setenv("SPEND_LEDGER", str(target))
-    with pytest.raises(BudgetExceeded, match="backup file"):
+    with pytest.raises(BudgetExceeded, match="backup named like the ledger"):
         init_ledger_from_env()
     assert not target.exists()
     assert init_ledger_from_env(force_fresh=True) == target

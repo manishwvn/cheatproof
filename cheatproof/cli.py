@@ -1178,7 +1178,7 @@ def cmd_budget(args: argparse.Namespace, deps: Deps) -> int:
     """`budget init`: create the zeroed spend ledger at SPEND_LEDGER. The only way one is created: every run refuses a
     missing ledger. Refuses an existing file. Spends nothing."""
     try:
-        path = init_ledger_from_env()
+        path = init_ledger_from_env(force_fresh=args.force_fresh)
     except (BudgetExceeded, OSError) as exc:
         print(f"budget init: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
@@ -1283,8 +1283,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     budget = sub.add_parser("budget", help="spend ledger tools; no paid calls")
     budget_sub = budget.add_subparsers(dest="budget_command", required=True)
-    budget_sub.add_parser(
+    budget_init = budget_sub.add_parser(
         "init", help="create the zeroed spend ledger at SPEND_LEDGER; refuses an existing file"
+    )
+    budget_init.add_argument(
+        "--force-fresh",
+        action="store_true",
+        help="create it even when a backup of a lost ledger sits beside it",
     )
 
     holes = sub.add_parser("holes", help="offline checks of kept attack evidence; no paid calls")

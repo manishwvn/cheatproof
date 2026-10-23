@@ -233,6 +233,12 @@ def fresh_ledger() -> dict:
     }
 
 
+def _missing_ledger(path: Path) -> BudgetExceeded:
+    return BudgetExceeded(
+        f"ledger {path} does not exist; run `python -m cheatproof.cli budget init` once to create it"
+    )
+
+
 def _unwritable(exc: OSError) -> BudgetExceeded:
     """A ledger OSError as a refusal. Only the exception type name leaves: never the OS text or the path."""
     return BudgetExceeded(
@@ -259,35 +265,28 @@ def _write_new_file(path: Path, text: str) -> None:
             tmp.unlink()
 
 
-def _lost_ledger_siblings(path: Path) -> list[str]:
-    """The kinds of leftover file beside path that mean a ledger existed and was lost: a stale lock file, or a backup
-    (*.bak). Returns kind names only, never file names, paths or contents."""
-    kinds = []
-    if path.with_suffix(".lock").exists():
-        kinds.append("a stale lock file")
-    if next(path.parent.glob("*.bak"), None) is not None:
-        kinds.append("a backup file (*.bak)")
-    return kinds
+def _has_lost_ledger_backup(path: Path) -> bool:
+    """True when a backup named like the ledger (<stem>*.bak) sits beside path: a ledger existed and was lost there.
+    A lock file alone does not count: a run before init leaves one, and it must not block init."""
+    return any(p.name.startswith(path.stem) and p.name.endswith(".bak") for p in path.parent.iterdir())
 
 
 def create_ledger(path: Path, *, force_fresh: bool = False) -> Path:
     """Create the zeroed ledger at path, the only way a ledger comes into being. An existing file is refused, never
     overwritten. The ledger lock is held, so a concurrent writer cannot slip in between the check and the create.
 
-    A stale lock file or a *.bak beside path means a ledger was lost there, so a fresh one is refused unless
-    force_fresh is passed (`budget init --force-fresh`). force_fresh never overwrites an existing ledger."""
+    A backup named like the ledger (<stem>*.bak) beside path means a ledger was lost there, so a fresh one is refused
+    unless force_fresh is passed (`budget init --force-fresh`). force_fresh never overwrites an existing ledger."""
     path = Path(path)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
             raise BudgetExceeded(f"ledger {path} already exists; refusing to overwrite it")
-        if not force_fresh:
-            kinds = _lost_ledger_siblings(path)
-            if kinds:
-                raise BudgetExceeded(
-                    f"ledger directory holds {' and '.join(kinds)}, so a ledger may have been lost there; "
-                    "refusing to create a fresh one. Pass --force-fresh to create it anyway. Nothing was written"
-                )
+        if not force_fresh and _has_lost_ledger_backup(path):
+            raise BudgetExceeded(
+                "ledger directory holds a backup named like the ledger (*.bak), so a ledger may have been lost there; "
+                "refusing to create a fresh one. Pass --force-fresh to create it anyway. Nothing was written"
+            )
         with open(path.with_suffix(".lock"), "a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             if path.exists():
@@ -377,7 +376,9 @@ class Budget:
     def _lock(self):
         with ExitStack() as stack:
             try:
-                self.ledger.parent.mkdir(parents=True, exist_ok=True)
+                if not self.ledger.exists():
+                    # Refused before the lock file exists: a lock left by a run before init would block `budget init`.
+                    raise _missing_ledger(self.ledger)
                 # Append mode creates the lock file without truncating it.
                 lock = stack.enter_context(open(self.ledger.with_suffix(".lock"), "a"))
             except OSError as exc:
@@ -405,9 +406,7 @@ class Budget:
         try:
             if not self.ledger.exists():
                 # Never created implicitly: a missing ledger would read as zero spend and let a run start unbooked.
-                raise BudgetExceeded(
-                    f"ledger {self.ledger} does not exist; run `python -m cheatproof.cli budget init` once to create it"
-                )
+                raise _missing_ledger(self.ledger)
             raw = self.ledger.read_text()
         except UnicodeDecodeError:
             # Not text at all: the same refusal as bad JSON, and no decode detail leaves.
