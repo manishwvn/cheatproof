@@ -28,7 +28,7 @@ Full research is in `/Users/manish/Documents/Nebius_X_Nvidia/research/` (outside
 `ideas/discord-signals.md`, `HACKATHON_BRIEF.md`.
 
 ## Constraints
-- **Money:** about $25 of credits only (Builders Program is unreliable). In-app cap `SPEND_CAP_USD=20`. Every paid
+- **Money:** free credits only (the $1 trial, then the $26.65 hackathon promo credit; never card money). In-app caps `SPEND_CAP_USD=20`, `DAILY_CAP_USD=4`, `REAL_SPEND_CAP_USD=10` (total real spend, T43); the balance must never go negative. Every paid
   call goes through `twindiff/budget.py`; rename the package to `cheatproof/`.
 - Text Nemotron models only; no vision. Model IDs and prices: VERIFY with `scripts/smoke.py`.
 - Claude usage: weekly windows reset Oct 20 6:59 PM CT and Oct 27 6:59 PM CT. Playbook caps: W 80, F 80. Unused

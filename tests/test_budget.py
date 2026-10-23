@@ -3,6 +3,7 @@ import json
 import math
 import os
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -10,6 +11,7 @@ import openai
 import pytest
 
 from cheatproof.budget import (
+    MAX_REAL_SPEND_CAP_USD,
     MAX_TOTAL_CAP_USD,
     Budget,
     BudgetExceeded,
@@ -85,8 +87,8 @@ def test_ledger_is_shared_across_instances(tmp_path):
 
 
 def test_unknown_model_uses_conservative_default_price(tmp_path):
-    # The trial cap is lifted here: a $3 hold would otherwise hit the $0.74 trial cap, and this test is about price.
-    b = Budget(tmp_path / "ledger.json", 20, 20, 2, trial_credit_cap_usd=20)
+    # A $3 hold fits under the $10 real-spend cap, so this test is about price only.
+    b = Budget(tmp_path / "ledger.json", 20, 20, 2)
     hold = b.reserve("unknown", 1_000_000, 0)
     assert hold.usd == pytest.approx(3.0)
 
@@ -450,7 +452,6 @@ def cap_env(monkeypatch, tmp_path):
         "TAVILY_CALL_CAP": "200",
         "MODEL_PRICES_JSON": "{}",
         "SANDBOX_COST_CAP_USD": "0.5",
-        "TRIAL_CREDIT_CAP_USD": "0.74",
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
@@ -777,7 +778,7 @@ def test_invalid_counter_cap_env_fails_closed(cap_env, monkeypatch, name, value)
 # --- Sandboxes cost log and the Token Factory trial cap -------------------------------------------
 
 
-def make_capped(tmp_path, sandbox_cost=0.5, trial=0.74, total=20, daily=20):
+def make_capped(tmp_path, sandbox_cost=0.5, trial=0.74, total=20, daily=20, **extra):
     return Budget(
         tmp_path / "ledger.json",
         total,
@@ -786,6 +787,7 @@ def make_capped(tmp_path, sandbox_cost=0.5, trial=0.74, total=20, daily=20):
         prices={"m": PRICE},
         sandbox_cost_cap_usd=sandbox_cost,
         trial_credit_cap_usd=trial,
+        **extra,
     )
 
 
@@ -908,11 +910,13 @@ def test_constructor_refuses_bad_sandbox_and_trial_caps(tmp_path, bad):
         make_capped(tmp_path, trial=bad)
 
 
-def test_trial_and_sandbox_cost_caps_default_when_unset(cap_env, monkeypatch):
-    monkeypatch.delenv("TRIAL_CREDIT_CAP_USD")
+def test_caps_default_when_unset(cap_env, monkeypatch):
     monkeypatch.delenv("SANDBOX_COST_CAP_USD")
+    monkeypatch.delenv("REAL_SPEND_CAP_USD", raising=False)
+    monkeypatch.delenv("TRIAL_CREDIT_CAP_USD", raising=False)
     b = Budget.from_env()
-    assert b.trial_credit_cap_usd == pytest.approx(0.74)
+    assert b.real_spend_cap_usd == pytest.approx(10.0)
+    assert b.trial_credit_cap_usd is None  # the old trial cap is only an extra cap, off unless set
     assert b.sandbox_cost_cap_usd == pytest.approx(0.50)
 
 
@@ -933,6 +937,95 @@ def test_invalid_trial_cap_fails_closed(cap_env, monkeypatch, value):
     monkeypatch.setenv("TRIAL_CREDIT_CAP_USD", value)
     with pytest.raises(BudgetExceeded, match="TRIAL_CREDIT_CAP_USD"):
         Budget.from_env()
+
+
+# --- T43: total real-spend cap (trial + promo credit), hard ceiling $10 ---------------------------------------------
+
+
+def test_real_spend_cap_defaults_to_10_and_ceiling_is_10(cap_env, monkeypatch):
+    monkeypatch.delenv("REAL_SPEND_CAP_USD", raising=False)
+    assert Budget.from_env().real_spend_cap_usd == 10.0
+    assert MAX_REAL_SPEND_CAP_USD == 10.0
+    assert Budget(Path("x.json"), 20, 4, 1).real_spend_cap_usd == 10.0
+
+
+@pytest.mark.parametrize("value", ["7", "0.5", "10", "1e1"])
+def test_valid_real_spend_cap_env_is_read(cap_env, monkeypatch, value):
+    monkeypatch.setenv("REAL_SPEND_CAP_USD", value)
+    assert Budget.from_env().real_spend_cap_usd == pytest.approx(float(value))
+
+
+@pytest.mark.parametrize("value", ["11", "10.01", "20", "1e308", "0", "-1", "abc", "", "nan", "inf", "-inf"])
+def test_invalid_or_too_high_real_spend_cap_env_fails_closed(cap_env, monkeypatch, value):
+    monkeypatch.setenv("REAL_SPEND_CAP_USD", value)
+    with pytest.raises(BudgetExceeded, match="REAL_SPEND_CAP_USD"):
+        Budget.from_env()
+
+
+@pytest.mark.parametrize("bad", [11, 10.01, 0, -1, math.nan, math.inf, True, "x"])
+def test_constructor_refuses_a_bad_real_spend_cap(tmp_path, bad):
+    with pytest.raises(BudgetExceeded, match="REAL_SPEND_CAP_USD"):
+        make_capped(tmp_path, trial=None, real_spend_cap_usd=bad)
+
+
+def test_real_spend_cap_halts_exactly_at_the_cap_with_reserve_estimates(tmp_path):
+    b = make_capped(tmp_path, trial=None, real_spend_cap_usd=7)
+    b.reserve("m", 3_000_000, 0)  # $3
+    b.reserve("m", 4_000_000, 0)  # $4: exactly $7 is allowed
+    with pytest.raises(BudgetExceeded, match="REAL_SPEND_CAP_USD"):
+        b.reserve("m", 1, 0)  # one more token passes the cap
+    s = b.snapshot()
+    assert s["trial_spend_usd"] == pytest.approx(7.0)
+    assert s["total_usd"] == pytest.approx(7.0)  # the refused call booked nothing
+
+
+def test_default_cap_refuses_a_hold_that_would_pass_10(tmp_path):
+    b = make_capped(tmp_path, trial=None)
+    b.reserve("m", 9_000_000, 0)  # $9
+    with pytest.raises(BudgetExceeded, match="REAL_SPEND_CAP_USD"):
+        b.reserve("m", 2_000_000, 0)  # $11 in all
+
+
+def test_old_trial_spend_field_still_counts_toward_the_real_cap(tmp_path):
+    # The live ledger holds trial_spend_usd 0.3796; the field keeps its name and keeps counting.
+    write_ledger(tmp_path, total_usd=0.535, days={TODAY: 0.2}, trial_spend_usd=0.3796)
+    b = make_capped(tmp_path, trial=None)
+    with pytest.raises(BudgetExceeded, match="REAL_SPEND_CAP_USD"):
+        b.reserve("m", 9_700_000, 0)  # 0.3796 + 9.70 passes 10
+    b.reserve("m", 9_600_000, 0)  # 0.3796 + 9.60 = 9.9796 fits
+    assert b.snapshot()["trial_spend_usd"] == pytest.approx(9.9796)
+
+
+def test_ledger_without_the_counter_reads_as_zero_and_a_bad_counter_is_refused(tmp_path):
+    write_ledger(tmp_path)
+    make_capped(tmp_path, trial=None).reserve("m", 1_000_000, 0)
+    write_ledger(tmp_path, trial_spend_usd=-1)
+    with pytest.raises(BudgetExceeded, match="trial_spend_usd"):
+        make_capped(tmp_path, trial=None).reserve("m", 1, 0)
+
+
+def test_daily_cap_stops_first_when_it_is_lower_than_the_real_cap(tmp_path):
+    b = make_capped(tmp_path, trial=None, daily=4)
+    b.reserve("m", 4_000_000, 0)  # $4 today
+    with pytest.raises(BudgetExceeded, match="daily cap"):
+        b.reserve("m", 1, 0)
+    assert b.snapshot()["trial_spend_usd"] == pytest.approx(4.0)
+
+
+def test_old_trial_cap_env_still_applies_when_stricter(cap_env, monkeypatch, tmp_path):
+    monkeypatch.setenv("TRIAL_CREDIT_CAP_USD", "0.74")
+    monkeypatch.setenv("MODEL_PRICES_JSON", json.dumps({"m": [1.0, 2.0]}))
+    b = Budget.from_env()
+    assert b.real_spend_cap_usd == 10.0 and b.trial_credit_cap_usd == pytest.approx(0.74)
+    b.reserve("m", 700_000, 0)
+    with pytest.raises(BudgetExceeded, match="TRIAL_CREDIT_CAP_USD"):
+        b.reserve("m", 100_000, 0)  # 0.80 passes the stricter 0.74, though far under 10
+
+
+def test_old_trial_cap_above_the_real_cap_does_not_raise_it(tmp_path):
+    b = make_capped(tmp_path, trial=15)
+    with pytest.raises(BudgetExceeded, match="REAL_SPEND_CAP_USD"):
+        b.reserve("m", 11_000_000, 0)
 
 
 # --- T35: a missing ledger is refused; only `budget init` creates one; halt is checked before every call -------------
