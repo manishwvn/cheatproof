@@ -36,11 +36,17 @@ during public judging (Dec 1–15) when anyone can trigger runs.
 - Output size is bounded (`MAX_OUTPUT_TOKENS`).
 
 **Consequences.** Spend estimates err high, so the app may stop early; that is intended. Prices must be recorded from
-the console (`MODEL_PRICES_JSON`) to avoid stopping far too early. Sandbox cost is capped by run count until a
-per-run price is known. A ledger that fails these checks stops all paid calls until a person fixes it by hand.
+the console (`MODEL_PRICES_JSON`) to avoid stopping far too early. Sandbox runs are bounded by run count and by the
+logged-cost rule in the 2026-10-23 amendment below. A ledger that fails these checks stops all paid calls until a person fixes it by hand.
 
-## 2026-10-21 update
-Token Factory Sandboxes work, and they are the default executor (`EXECUTOR` unset means `sandbox`). Beta sandbox runs
-are count-only: `budget.reserve_sandbox_run()` books $0, so the money caps do not move, and each run counts against
-`SANDBOX_RUN_CAP`. `SANDBOX_RUN_USD` is still parsed and validated, but not charged. This amends the Decision and the
-Consequences above: sandbox cost is bounded by run count, and no per-run price is charged until one is documented.
+## 2026-10-21 update (amended 2026-10-23)
+Token Factory Sandboxes work, and they are the default executor (`EXECUTOR` unset means `sandbox`). A sandbox run books
+no Token Factory money: the money caps and the trial counter do not move. Each run counts against `SANDBOX_RUN_CAP`.
+`SANDBOX_RUN_USD` is still parsed and validated, but not charged.
+
+**Logged-cost rule (replaces the earlier "books $0, count-only" wording).** The Sandboxes API reports a non-zero
+`resources.cost` on `done.result.cost`. The budget logs each reported cost in a separate Sandboxes section of the ledger
+(`sandbox_cost_usd`, never added to the Token Factory totals) and halts once the logged sum passes
+`SANDBOX_COST_CAP_USD` (default $0.50; an invalid value falls back to $0.50, never to no cap). A malformed cost halts.
+HTTP 402 still halts. The reported cost is an estimate: on 2026-10-23 the Nebius console showed no Sandboxes billing
+line, so the cap is a guard, not a bill. The owner set the live cap to $1.50 on that day.
