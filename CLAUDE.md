@@ -19,9 +19,11 @@ Most Valuable Feedback: $100 (10 winners).
 - YouTube video under 3 min. Demo free and working through Dec 15 2026. Feedback section in the submission.
 
 ## Rules that never bend
-1. **No money.** Free credits only (about $25). Every paid call (LLM tokens, sandbox runs, Tavily) goes through
-   `cheatproof/budget.py`. The total cap is **$20** (`SPEND_CAP_USD`); only the owner changes caps. HTTP 402 halts
-   everything.
+1. **No card money.** Free credits only: the $1 trial and the hackathon promo credit (about $26.65, "AI Builder Program
+   Credits"). Every paid call (LLM tokens, sandbox runs, Tavily) goes through `cheatproof/budget.py`. The total cap is
+   **$20** (`SPEND_CAP_USD`), the daily cap $4, and total real Token Factory spend (trial + promo) is capped at **$10**
+   for now (`REAL_SPEND_CAP_USD`, hard ceiling in code). The balance must never go negative (that charges the card).
+   Only the owner changes caps. HTTP 402 halts everything.
 2. **No secrets** in chat, logs, fixtures or git. Keys live only in `.env` (git-ignored). Check presence by length.
 3. **No passwords; nothing public** (posts, visibility changes, submissions) without the owner.
 4. **Original work.** Never open other entrants' repos, sites or demos.

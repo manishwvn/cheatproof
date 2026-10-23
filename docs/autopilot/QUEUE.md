@@ -22,7 +22,7 @@ comments and the `MODEL_PRICES_JSON` example. Use the cheapest model (Nano) for 
 Confirm one capped call and, if `NEBIUS_PROJECT_ID` is set, one sandbox run. Record sanitized response fixtures (no
 auth headers, keys, emails or IDs) under `tests/fixtures/`, plus a test that checks the sanitizing. Acceptance: the
 ledger shows spend; fixtures committed; `VERIFY` notes for model IDs resolved. Risk: costs cents; every call goes
-through the budget. Until the owner says "promo applied", the account holds only a $1 trial: no Ultra runs, no eval
+through the budget. Until the owner said "promo applied" (done; the $26.65 promo credit is now in the balance, and total real spend is capped at $10 by `REAL_SPEND_CAP_USD`, T43), the account held only a $1 trial: no Ultra runs, no eval
 runs (T08), only Nano or Super calls within the `.env` caps.
 
 Done 2026-10-18 (planner): model IDs and prices recorded in `.env.example`; one capped Nano call worked ($0.0000168,
@@ -259,7 +259,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ### T08 Eval run and results with raw counts — size M — todo — needs T33, T34, T35, T32, T36, T38, T23, T07, T16, T17, T18, T19, T20, T22 [30%]
 Unblocked 2026-10-21: U21 is closed and T23 is done (#30), so T08 has no U21 dependency left.
-Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
+Run the full loop on the 40 tasks within the $10 real-spend cap (`REAL_SPEND_CAP_USD`, T43) and the $4 daily cap (check the ledger before starting; stop at either cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
 environment, failures and limits ("upper bound against this attacker, not proof"). Commit the certificates and the
 sanitized traces needed for replay. Committed certificates and replay traces go in a tracked `results/` folder (`runs/` stays a
@@ -270,16 +270,14 @@ under `sh -lc`; SWE-bench images may need `conda activate testbed`. Check image 
 
 Planner note 2026-10-23 (U25 resolved, owner approved resume; batch 3 only, then HALT). Orchestrator update 2026-10-23: batch 3 waits for P0 (T33 T34 T35 T32 T36) and T38 (preflight, nudge, task choice), then the orchestrator audits before the paid run. The Token Factory console on 2026-10-23
 15:44 UTC shows Sandboxes NOT billed (no line item) and trial credits at $0.71; the $26.65 balance is untouched.
-Settings now: `SANDBOX_COST_CAP_USD=1.50` (estimate-only counter; $0.50 used) and `TRIAL_CREDIT_CAP_USD` stays at its
-default 0.74 ($0.38 counted), so the trial counter halts the run at about $0.35 real remaining, above the owner's $0.25
-floor. Never raise either cap. Batch 3 rules:
+Superseded by T43 (2026-10-23): the $26.65 is hackathon promo credit, not card money, and the trial-only 0.74 cap is replaced by `REAL_SPEND_CAP_USD` (default and ceiling $10 total real spend, trial + promo); the balance must never go negative.
+Settings now: `SANDBOX_COST_CAP_USD=1.50` (estimate-only counter; $0.50 used) and the real-spend counter $0.38 counted of the $10 cap. Never raise either cap without the owner. Batch 3 rules:
 - Run `batch` on Sandboxes for the next tasks to reach 18 of 40 tasks attempted (currently 8; about 10 more, fewer if a cap
   trips first). `fetch --n 18`, then `batch --n 18` skips the already certified. Same attacker as batch 2 (Nemotron Super,
   never Ultra), combined prompt, `--max-steps 40 --max-tokens 250000`. This is the cheapest routing.
-- Expected: about $0.056 trial and $0.09 Sandboxes per hardened task, so the trial cap probably stops the batch near
-  6 tasks. That is fine: record n honestly and do not raise the cap to reach 18.
-- Run in chunks of at most 3 tasks and read the ledger between chunks; stop on any halt, on a trial counter above
-  $0.70, or on a Sandboxes sum above $1.40. Env-broken or leak-refused tasks count as attempted; report them as such.
+- Expected: about $0.056 real spend and $0.09 Sandboxes per hardened task. If a cap stops the batch, record n honestly
+  and do not raise the cap to reach 18.
+- Run in chunks of at most 3 tasks and read the ledger between chunks; stop on any halt, on a real-spend counter (`trial_spend_usd`) near the $10 cap, or on a Sandboxes sum above $1.40. Env-broken or leak-refused tasks count as attempted; report them as such.
 - After the batch (or at the first halt), call `Budget().halt("T08 batch 3 done: owner checks the Token Factory console")`
   so no further paid call runs, update `docs/results.md` (raw counts, cost from the ledger, which cap stopped it), and
   add one USER item U26 asking the owner to re-check the console and say whether to run batch 4. Do NOT start batch 4.
@@ -368,7 +366,7 @@ The gold gate for Algebra8__pyopenapi3-83 fails with `pytest exited 4: ERROR: no
 ### T30 Collection cause for pytest "found no collectors" — size S — done #39
 DRMacIver__shrinkray-7's gold gate fails with `pytest exited 4: ERROR: found no collectors for /testbed/tests/test_main.py::test_kill_process` (2026-10-22 rerun). PR #37 runs the collection rerun only on `not found:`. Extend `_not_found_file` in cheatproof/grader.py to also accept `found no collectors for <node>` (bare or under workdir), with fakes-only tests in tests/test_grader.py. No live run needed until U25 is done.
 
-## Orchestrator brief 2026-10-23 (mock judge 19/40, Opus audit). Priority order P0 > P1 > P2. Routing: Haiku mechanical, Sonnet writing/review/logic. No Opus subagents. Spend no money; keep every cap.
+## Orchestrator brief 2026-10-23 (mock judge 19/40, Opus audit). Priority order P0 > P1 > P2. Routing: Haiku mechanical, Sonnet writing/review/logic. No Opus subagents. Spend no card money; keep every cap (real spend $10 total, $4 daily, T43).
 
 ### T33 Give `test-edit` only for unrestored paths — size S — todo (P0, sonnet)
 `cheatproof/holes.py:389-393` labels any test path in the final diff `test-edit`, but the grader restores the F2P/P2P files and conftests before grading. Label `test-edit` only for paths the grade does NOT restore (pytest config, unrestored test files), or when a regrade with the test edits stripped fails. Tests in `tests/test_holes.py`. Then re-check CycloneDX__cyclonedx-python-348 offline from the saved diff (state folder or results/diffs) if possible and correct the "Holes found: 1" line and counts in `docs/results.md` if the hole does not hold. Its exposure shows a real git-history leak (378 future commits reachable from refs): record it as the targeted attack and headline candidate for T38.
@@ -401,6 +399,9 @@ Fill the `[RESULT: ...]` markers in `docs/video/script.md` from the real numbers
 ### T42 Keep full traces, raw diffs and restore sets locally; offline hole recheck (P0-P1 gate for batch 3) — size M — done #50
 Audit finding: the `test-edit` hole for CycloneDX__cyclonedx-python-348 could not be verified because no trace or raw diff was kept (sidecars hold only sha and char count). Now every `harden` and `batch` run keeps, under the git-ignored `results/traces/` and named by the certificate stem: `<stem>.jsonl` (full trace, all rounds), `<stem>.before.diff`, `<stem>.after.diff`, `<stem>.diff` (raw; a file already there is renamed to `*.old`), `<stem>.restore.json` (`grader.restore_paths(task)`, or null when unreadable; written before the paid run) and `<stem>.rounds.json` (the grade inputs classify got and the labels recorded). New module `cheatproof/keep.py`; `holes.classify(..., restored=)` takes the cached restore set so the T33 rule applies offline. `python -m cheatproof.cli holes recheck <stem> [--traces DIR] [--source S] [--cache-dir DIR]` re-runs the classifier with no network, sandbox, model or budget, prints labels and test path names (restored or unrestored), says whether they match the recorded labels, and exits 1 naming every missing piece. Review fixes: the folder is mode 0700 and the files 0600; a harden stop (budget, executor) still keeps the raw diffs of the attacks that returned (grades unknown); rounds map to trace segments by recorded id; files of an earlier run (also a stale after-round) are renamed to `*.old` before the run; keep never raises after a paid run. Old runs (before T42) cannot be rechecked. Tests in `tests/test_keep.py`.
 
+### T43 Total real-spend cap $10 (trial + promo), balance never negative — size S — done #51 (planner-merge: `budget.py`)
+Owner 2026-10-23 (see LOG): the $26.65 balance is hackathon promo credit, not card money; promo spend is allowed. `budget.py` replaces the trial-only `TRIAL_CREDIT_CAP_USD` (0.74) with `REAL_SPEND_CAP_USD`: default 10.0, hard ceiling `MAX_REAL_SPEND_CAP_USD` 10.0 in code; a set value above 10, zero, negative or invalid raises `BudgetExceeded` (never a higher cap). It counts in the unchanged ledger field `trial_spend_usd`, so the live 0.3796 keeps counting. `TRIAL_CREDIT_CAP_USD`, if set, is an additional stricter cap (unset: off). Total $20 and daily $4 unchanged; the balance must never go negative. `.env.example` documents `SANDBOX_COST_CAP_USD` intended value 5 (comment only; the code default and ceiling are unchanged). Docs fixed: HANDOFF, STATUS, CLAUDE.md, ADR 0001, docs/HANDOFF.md, this file. Tests in `tests/test_budget.py`. Planner: edit the live `.env` yourself if you want `REAL_SPEND_CAP_USD` or `TRIAL_CREDIT_CAP_USD` set; the live `.env` line `TRIAL_CREDIT_CAP_USD` (if present) still applies as a stricter cap.
+
 ### T31 Executor and sandbox minors from the PR #30 review — size S — todo — needs T08 (planner-merge paths: `executor.py`, `scripts/sandbox_access.py`)
 Minor findings from the Sonnet review of PR #30 (T23), none blocking. Fix with fakes, then a USER item for the planner to merge.
 1. With `SANDBOX_NETWORK_TRUSTED=1` the sandbox network is not cut, and nothing warns. Print one warning line (no values) when it is on, and note it in `docs/results.md`.
@@ -415,11 +416,11 @@ Batch 2 (PR #38): `Azure__autorest.python-475` ran, but `certificate.exposure_be
 ### T27 Budget hardening from PR #32 review — size S — todo — needs T08
 Review of PR #32 (`cheatproof/budget.py` and the Sandboxes cost path, planner-merge). Do all items, with fakes:
 1. `Budget.__init__` applies the `MAX_TOTAL_CAP_USD` ceiling, so no `.env` value can raise the total cap past it.
-2. Clamp `SANDBOX_COST_CAP_USD` to a ceiling, and count Sandboxes cost toward the trial cap (shared $0.84 trial credit).
+2. Clamp `SANDBOX_COST_CAP_USD` to a ceiling, and count Sandboxes cost toward the real-spend cap only if Sandboxes billing ever starts (T43: not billed as of 2026-10-23; the old $0.84 trial-credit idea is superseded).
 3. Write explicit zero cost fields on the first lock, then require them on every later read.
 4. `book_sandbox_cost` catches `OSError` and halts (no silent pass).
 5. Log cost in `scripts/smoke.py` `sandbox_hello` and in the executor `image.use` and `image.read` paths.
-6. Fix the `.env.example` note: removing `TRIAL_CREDIT_CAP_USD` restores 0.74; only a raise works.
+6. ~~Fix the `.env.example` note about `TRIAL_CREDIT_CAP_USD`~~ Superseded by T43: the note was rewritten; `TRIAL_CREDIT_CAP_USD` is now only an extra stricter cap.
 7. Document the in-flight overshoot bound (the most one in-flight call can add past the cap).
 8. ADR 0001 and ADR 0002 say sandbox runs book $0; fix both to match the logged-cost rule (U21).
 9. `tests/test_budget.py` `TODAY` is computed at import, so `test_sandbox_cost_is_logged_and_not_halted_below_the_cap`
@@ -476,7 +477,7 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
-- ~~**U25 Budget halted: Sandboxes cost cap**~~ Done 2026-10-23: owner approved; ledger halt cleared, SANDBOX_COST_CAP_USD=1.50, trial cap kept at 0.74 (see T08 batch 3). Original text: (alerted 2026-10-22): the ledger is halted because Sandboxes cost $0.5022 passed SANDBOX_COST_CAP_USD ($0.50). U21 found Sandboxes are not billed per the Nebius console, so the cap is a guard. Owner: clear the top-level `halted` field in the live ledger, and choose SANDBOX_COST_CAP_USD for the rest of T08 (about $0.09 per task, about $3 for the remaining 32 tasks); TRIAL_CREDIT_CAP_USD ($0.74, $0.38 used) covers about 6 more tasks at about $0.06 each. Then flip T08 to todo.
+- ~~**U25 Budget halted: Sandboxes cost cap**~~ Done 2026-10-23: owner approved; ledger halt cleared, SANDBOX_COST_CAP_USD=1.50, trial cap kept at 0.74 (see T08 batch 3; superseded by T43: `REAL_SPEND_CAP_USD` $10). Original text: (alerted 2026-10-22): the ledger is halted because Sandboxes cost $0.5022 passed SANDBOX_COST_CAP_USD ($0.50). U21 found Sandboxes are not billed per the Nebius console, so the cap is a guard. Owner: clear the top-level `halted` field in the live ledger, and choose SANDBOX_COST_CAP_USD for the rest of T08 (about $0.09 per task, about $3 for the remaining 32 tasks); TRIAL_CREDIT_CAP_USD ($0.74, $0.38 used) covers about 6 more tasks at about $0.06 each. Then flip T08 to todo.
 - ~~**U24 Merge PR #36**~~ Done 2026-10-23 (see LOG). (T01 smoke sandbox fix): say `review` in an interactive session to merge PR #36 (touches `scripts/smoke.py`, a planner-merge path). CI green, Opus final review approve.
 - **U23 Merge PR #31** (T25, planner-merge paths, stacked on PR #30): after U22, say `review` in an interactive
   session to merge https://github.com/manishwvn/cheatproof/pull/31 (GitHub retargets it to `main` once #30 merges).
