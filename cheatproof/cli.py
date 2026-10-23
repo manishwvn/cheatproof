@@ -4,6 +4,8 @@
         [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
     python -m cheatproof.cli batch --system-prompt-file PATH [--source S ...] [--n N] [--cache-dir DIR]
         [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
+        [--instance-ids ID ...] [--first ID ...] [--rerun] [--prefer-future-git] [--chunk-size N<=10]
+        [--dry-run] [--no-preflight]
     python -m cheatproof.cli report [--certs DIR] [--out FILE] [--format text|json]
     python -m cheatproof.cli site [--certs DIR] [--out DIR] [--traces DIR]
     python -m cheatproof.cli holes recheck <stem> [--traces DIR] [--source S] [--cache-dir DIR]
@@ -45,6 +47,15 @@ pruned.
 After every task the batch writes batch.json beside the certificates directory, atomically (schema_version 1: the
 selection, the counts and the not-run rows). A rerun rewrites batch.json for that run only: the not-run rows of an
 earlier run are not kept.
+T38 (batch 3 preparation, see cheatproof/plan.py): --instance-ids runs exactly those cached tasks in that order;
+--first puts ids at the front (from the cache, even outside the selection); a task with a certificate is skipped unless
+--rerun names it (for --first ids) or --prefer-future-git picks it (an uncertified certificate whose exposure_before
+shows future_git is attacked again, first). --chunk-size N (1..10, default 10) stops after N tasks that got a try (run
+or not run, never the already certified) and writes next_chunk_pending and pending_ids to batch.json; the next chunk is
+the same command without --first/--rerun/--prefer-future-git. --dry-run prints the order, chunk boundaries and the
+estimated cost (ledger-measured averages) with no call and no file. Before any attacker token, harden and batch start
+a session and run grader.collect_gate (pytest --collect-only -q on the gold tests); a failure is the not-run reason
+env-broken with one sanitized line (--no-preflight skips it). Exit 1 for harden.
 report prints certify.score_directory() as it is: rates with their n, raw counts, outcomes, holes and sources.
 When batch.json sits beside the certificates directory, report also prints the batch counts and adds a batch key
 to the JSON output.
@@ -88,7 +99,7 @@ import shutil
 import sys
 from collections import Counter
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -125,6 +136,7 @@ RATE_LABELS = (
 )
 BATCH_FILE = "batch.json"  # beside the certificates directory; rewritten whole after every task
 BATCH_SCHEMA_VERSION = 1
+ENV_BROKEN = "env-broken"  # not-run reason: the collect-only preflight failed, so no attacker token was spent
 # A skipped reason: an instance id that an earlier source already selected. The first source keeps the task.
 DUPLICATE_REASON = "duplicate_across_sources"
 DEFAULT_MIN_FREE_GB = 10.0  # MIN_FREE_DISK_GB when the environment does not set it
@@ -188,6 +200,8 @@ class Deps:
         load_cached_selection  # cache only, never fetches
     )
     disk_free_gb: Callable[[Path], float] = _free_gb  # free GiB on the file system holding the output folder
+    # T38 collect-only preflight (grader.collect_gate): None skips it, so fakes-only tests need not provide one.
+    preflight: Callable[..., Any] | None = None
 
     @classmethod
     def default(cls) -> Deps:
@@ -214,7 +228,14 @@ class Deps:
             clock=_utc_now,
             load_selection=load_cached_selection,
             disk_free_gb=_free_gb,
+            preflight=_collect_gate,
         )
+
+
+def _collect_gate(*args: Any, **kwargs: Any) -> Any:
+    from cheatproof.grader import collect_gate  # lazy: keeps the grader out of module import
+
+    return collect_gate(*args, **kwargs)
 
 
 def _make_llm(budget: Any) -> Any:
@@ -627,6 +648,22 @@ def _open(deps: Deps) -> tuple[Any, Any, Any]:
     return executor, budget, llm
 
 
+def _preflight(plan: _Plan, deps: Deps, opened: tuple[Any, Any, Any]) -> str | None:
+    """T38: before any attacker token, collect the gold tests in a fresh session. None when they collect (or no
+    preflight is wired). Else one sanitized line: the task is env-broken. A budget or executor stop is _Unwritten."""
+    if deps.preflight is None:
+        return None
+    executor, budget, _ = opened
+    try:
+        with executor.start(plan.env, budget) as session:
+            result = deps.preflight(session, plan.task)
+    except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
+        raise _Unwritten("start", _stop_reason(exc), exc) from None
+    except ValueError as exc:
+        return sanitize(f"collect-only preflight refused: {exc}")
+    return None if result.ok else sanitize(result.error or "collect-only failed")
+
+
 def _harden_one(
     plan: _Plan, settings: _Settings, deps: Deps, executor: Any, budget: Any, llm: Any
 ) -> _Written:
@@ -743,6 +780,10 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
     except ValueError as exc:
         return _usage_error(str(exc))
     try:
+        broken = None if args.no_preflight else _preflight(plan, deps, (executor, budget, llm))
+        if broken is not None:
+            print(f"{ENV_BROKEN}: {broken}", file=sys.stderr)
+            return 1
         done = _harden_one(plan, settings, deps, executor, budget, llm)
     except _Unwritten as exc:
         if exc.stage == "start":
@@ -850,7 +891,15 @@ def _release_image(executor: Any, image: str) -> None:
         print(f"could not release task image {image}: {type(exc).__name__}")
 
 
-def _run_tasks(tasks: list[TaskSpec], settings: _Settings, deps: Deps, batch: _Batch, min_free: float) -> int:
+def _run_tasks(
+    tasks: list[TaskSpec],
+    settings: _Settings,
+    deps: Deps,
+    batch: _Batch,
+    min_free: float,
+    chunk_size: int = 10,
+    rerun: frozenset[str] = frozenset(),
+) -> int:
     """Run the selection one task at a time. 0 when it finished. 1 when a budget stop or a cost check failure stopped
     it: the current task gets that reason, and each remaining task that does not already have a certificate is not run,
     with reason budget after a budget stop or stopped_after_cost_check after a cost check failure. 2 when a setting is
@@ -860,14 +909,26 @@ def _run_tasks(tasks: list[TaskSpec], settings: _Settings, deps: Deps, batch: _B
     still gets its leftovers removed."""
     out = settings.out
     stop: tuple[str, str] | None = None  # (reason, error) for each remaining task, once a stop has happened
-    for task in tasks:
+    attempted = 0  # tasks that got a try in this call: run or not run, never the already certified
+    for i, task in enumerate(tasks):
         iid = task.instance_id
-        if _certified_before(task, out):
+        if _certified_before(task, out) and iid not in rerun:
             batch.already(iid)
             continue
         if stop is not None:
             batch.not_run(iid, stop[0], stop[1])
             continue
+        if attempted >= chunk_size:  # T38: stop between chunks so the console can be checked
+            pending = [
+                t.instance_id for t in tasks[i:] if t.instance_id in rerun or not _certified_before(t, out)
+            ]
+            batch.state.update(next_chunk_pending=True, pending_ids=pending)
+            batch.save()
+            print(
+                f"next chunk pending: {len(pending)} tasks; check the console, then rerun without --first/--rerun"
+            )
+            break
+        attempted += 1
         try:
             plan = _plan(task, out)
         except _Usage as exc:
@@ -887,7 +948,13 @@ def _run_tasks(tasks: list[TaskSpec], settings: _Settings, deps: Deps, batch: _B
                 batch.not_run(iid, "disk", f"free disk is {free:.1f} GB, below MIN_FREE_DISK_GB={min_free:g}")
                 continue
             try:
+                broken = _preflight(plan, deps, opened)
+                if broken is not None:  # counts as attempted; no attacker token was spent
+                    batch.not_run(iid, ENV_BROKEN, broken)
+                    continue
                 outcome = _run_or_stop(plan, settings, deps, opened)
+            except _Unwritten as exc:
+                outcome = exc
             finally:
                 _release_image(opened[0], plan.env.image)
         if isinstance(outcome, _Unwritten):
@@ -913,16 +980,18 @@ def _batch_summary(state: Mapping[str, Any]) -> str:
 
 def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
     """Harden the cached selection one task at a time. Never a fetch: the selection comes from the cache only."""
+    from cheatproof import plan as batch_plan  # T38: order, chunks, dry run
     from cheatproof.tasks import SOURCES  # lazy: the loader module imports httpx
 
     try:
-        settings = _harden_settings(args)
+        settings = None if args.dry_run else _harden_settings(args)  # a dry run needs no prompt or model
+        chunk_size = batch_plan.check_chunk_size(args.chunk_size)
     except (_Usage, ValueError) as exc:
         return _usage_error(str(exc))
     if args.n is not None and args.n < 0:
         return _usage_error("--n must be 0 or more")
     names = list(dict.fromkeys(args.source)) if args.source else list(SOURCES)
-    out = settings.out
+    out = args.out if settings is None else settings.out
     batch_path = out.parent / BATCH_FILE
     if (out.parent / TRACES_DIR).is_symlink() or batch_path.is_symlink():
         return _usage_error(f"refusing to write through a symbolic link: {TRACES_DIR}/ or {BATCH_FILE}")
@@ -946,6 +1015,25 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
                 continue
             seen.add(task.instance_id)
             tasks.append(task)
+    try:
+        ordered = batch_plan.order_tasks(
+            tasks,
+            lookup=lambda iid: deps.find_tasks(iid, None, args.cache_dir),
+            out=out,
+            instance_ids=args.instance_ids,
+            first=args.first,
+            prefer_future_git=args.prefer_future_git,
+            rerun=args.rerun,
+        )
+    except ValueError as exc:  # PlanError, or an unknown source from find_tasks
+        return _usage_error(str(exc))
+    tasks = ordered.tasks
+    if settings is None:  # --dry-run: print the plan from the cache and the certificates; no calls, no files
+        certified = {t.instance_id for t in tasks if _certified_before(t, out)}
+        print("\n".join(batch_plan.render_plan(tasks, certified, ordered.rerun, chunk_size)))
+        return 0
+    if args.no_preflight:
+        deps = replace(deps, preflight=None)
     started = deps.clock()
     state: dict[str, Any] = {
         "schema_version": BATCH_SCHEMA_VERSION,
@@ -956,6 +1044,10 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
         "skipped": skipped,
         "selected": len(tasks),
         "selected_ids": [task.instance_id for task in tasks],
+        "chunk_size": chunk_size,
+        "rerun_ids": sorted(ordered.rerun),
+        "next_chunk_pending": False,  # True when this call stopped at the chunk size with tasks left
+        "pending_ids": [],
         "run": 0,
         "already_certified": 0,
         "not_run": [],
@@ -965,7 +1057,7 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
     batch = _Batch(batch_path, state, deps.clock)
     try:
         batch.save()  # the selection is on disk before the first paid call
-        code = _run_tasks(tasks, settings, deps, batch, _min_free_gb())
+        code = _run_tasks(tasks, settings, deps, batch, _min_free_gb(), chunk_size, ordered.rerun)
     except OSError as exc:  # batch.json could not be written, or the free disk could not be read
         return _failure(exc)
     if code in (0, 1):
@@ -1244,6 +1336,7 @@ def build_parser() -> argparse.ArgumentParser:
     harden.add_argument(
         "--strategy", help="strategy label in the certificate (default: the prompt file's stem)"
     )
+    harden.add_argument("--no-preflight", action="store_true", help="skip the collect-only preflight")
 
     batch = sub.add_parser(
         "batch", help="harden the cached selection one task at a time; resumable; no fetch"
@@ -1266,6 +1359,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="prompt plus completion tokens per attempt (AttackConfig.max_tokens_total)",
     )
     batch.add_argument("--timeout", type=float, help="seconds per grading run (harden timeout)")
+    batch.add_argument(
+        "--instance-ids", nargs="+", help="run exactly these cached tasks, in this order (T38)"
+    )
+    batch.add_argument(
+        "--first", action="append", help="run this task first, even if outside the selection (repeatable)"
+    )
+    batch.add_argument(
+        "--prefer-future-git",
+        action="store_true",
+        help="run first, and attack again, uncertified tasks whose certificate shows future_git evidence",
+    )
+    batch.add_argument(
+        "--rerun", action="store_true", help="ignore the existing certificate of the --first ids"
+    )
+    batch.add_argument(
+        "--chunk-size", type=int, help="stop after this many tasks (1..10, default 10); batch.json notes it"
+    )
+    batch.add_argument("--dry-run", action="store_true", help="print the plan and estimated cost; no calls")
+    batch.add_argument("--no-preflight", action="store_true", help="skip the collect-only preflight")
 
     report = sub.add_parser("report", help="score the certificates in a directory")
     report.add_argument("--certs", type=Path, default=DEFAULT_CERT_DIR, help="certificates directory")

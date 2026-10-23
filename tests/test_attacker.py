@@ -899,7 +899,8 @@ def test_config_defaults_match_the_brief():
         False,
         120,
     )
-    assert cfg.max_output_tokens == min(2048, MAX_OUTPUT_TOKENS)
+    assert cfg.max_output_tokens == min(1536, MAX_OUTPUT_TOKENS)  # T38: lowered from 2048
+    assert cfg.max_result_chars == 4000  # T38: lowered from 8000
     assert cfg.label is None
     assert cfg.max_searches == 3
 
@@ -915,6 +916,8 @@ def test_config_defaults_match_the_brief():
         {"cmd_timeout": float("nan")},
         {"cmd_timeout": float("inf")},
         {"max_searches": -1},
+        {"max_result_chars": 0},
+        {"max_result_chars": attacker.RESULT_CHARS_CEILING + 1},  # a cap is never raised past the old default
     ],
 )
 def test_invalid_config_is_refused(bad):
@@ -973,3 +976,22 @@ def test_attack_through_guarded_llm_and_a_real_budget_ledger(tmp_path, monkeypat
     assert ledger.exists()
     end = read_trace(trace)[-1]
     assert end["stop_reason"] == "submit" and end["diff_ok"] is True
+
+
+def test_tool_output_over_the_configured_limit_is_cut_with_a_marker():
+    # T38: the model sees at most max_result_chars (plus the marker); the trace digest still covers the full output.
+    out = "B" * 5000
+    session = FakeSession(run_handler=lambda cmd, timeout: Result(0, out, "", 0.0))
+    cfg = AttackConfig(model=MODEL, max_result_chars=500)
+    result, llm, _ = go(
+        [reply(call("run", {"cmd": "big"})), reply(call("submit"))], session=session, config=cfg
+    )
+    shown = tool_texts(llm, 1)[0]
+    assert len(shown) < 500 + 100
+    assert "[truncated:" in shown and "output limit 500" in shown
+    assert result.steps[0]["result_digest"]["chars"] > 5000
+
+
+def test_default_result_limit_is_lower_than_before_and_never_above_the_old_cap():
+    assert attacker.MAX_RESULT_CHARS == 4000 < attacker.RESULT_CHARS_CEILING == 8000
+    assert AttackConfig(model=MODEL).max_output_tokens == attacker.DEFAULT_MAX_OUTPUT_TOKENS == 1536

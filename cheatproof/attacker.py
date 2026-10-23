@@ -26,7 +26,11 @@ from cheatproof.budget import BudgetExceeded
 from cheatproof.executor import ExecutorRefused, ExecutorUnavailable, Result, Session
 from cheatproof.llm import MAX_OUTPUT_TOKENS, estimate_tokens
 
-MAX_RESULT_CHARS = 8000  # tool results sent back to the model are cut to this (plus a marker)
+MAX_RESULT_CHARS = (
+    4000  # default: tool results sent back to the model are cut to this (plus a marker); T38 lowered it
+)
+RESULT_CHARS_CEILING = 8000  # the old default; AttackConfig.max_result_chars may go lower, never above this
+DEFAULT_MAX_OUTPUT_TOKENS = 1536  # T38: the model's reply cap per step, lowered from 2048; never raised
 TRACE_ARG_CHARS = 2000  # string arguments are cut to this in the trace
 DIGEST_HEAD_CHARS = 300
 ERROR_DETAIL_CHARS = 300
@@ -72,11 +76,13 @@ class AttackConfig:
     max_steps: int = 15
     max_tokens_total: int = 50_000  # prompt plus completion tokens, summed over the calls
     # Nemotron spends output on reasoning, so a tool call needs room after it.
-    max_output_tokens: int = min(2048, MAX_OUTPUT_TOKENS)
+    max_output_tokens: int = min(DEFAULT_MAX_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS)
     label: str | None = None  # free-form tag recorded in the trace header (for example the strategy)
     allow_network: bool = False
     cmd_timeout: float = 120
     max_searches: int = 3  # web_search calls per attempt; the search callable is not called past this
+    # A tool result longer than this is cut (start and end kept) and marked "[truncated: ...]" before the model sees it.
+    max_result_chars: int = MAX_RESULT_CHARS
 
     def __post_init__(self) -> None:
         if self.max_steps < 1:
@@ -89,6 +95,10 @@ class AttackConfig:
             )
         if not (math.isfinite(self.cmd_timeout) and self.cmd_timeout > 0):
             raise ValueError(f"cmd_timeout must be a positive number, got {self.cmd_timeout!r}")
+        if not 0 < self.max_result_chars <= RESULT_CHARS_CEILING:
+            raise ValueError(
+                f"max_result_chars must be 1..{RESULT_CHARS_CEILING}, got {self.max_result_chars!r}"
+            )
         if self.max_searches < 0:
             raise ValueError(f"max_searches must be 0 or more, got {self.max_searches!r}")
 
@@ -179,7 +189,9 @@ def _clip(text: str, limit: int = MAX_RESULT_CHARS) -> str:
         return text
     head = limit * 2 // 3
     tail = limit - head
-    return f"{text[:head]}\n[truncated: {len(text) - limit} chars omitted]\n{text[-tail:]}"
+    return (
+        f"{text[:head]}\n[truncated: {len(text) - limit} chars omitted, output limit {limit}]\n{text[-tail:]}"
+    )
 
 
 def _digest(text: str) -> dict:
@@ -405,6 +417,7 @@ def attack(
             "max_tokens_total": config.max_tokens_total,
             "max_output_tokens": config.max_output_tokens,
             "max_searches": config.max_searches,
+            "max_result_chars": config.max_result_chars,
             "allow_network": config.allow_network,
             "cmd_timeout": config.cmd_timeout,
             "tools": tool_names,
@@ -543,7 +556,7 @@ def attack(
             code = "tool_exception"
 
         record(step, started, call.name, args, result, code, t_in, t_out, call.extra, reset)
-        shown = _clip(result)
+        shown = _clip(result, config.max_result_chars)
         if call.extra:
             shown += f"\n[only the first of {call.extra + 1} tool calls ran; send one tool call per step]"
         messages.append(
