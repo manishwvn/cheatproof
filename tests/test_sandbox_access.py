@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from contree_sdk.sdk.exceptions import ApiStatusCodeError, ForbiddenError
 
-from cheatproof.budget import Budget, BudgetExceeded
+from cheatproof.budget import Budget, BudgetExceeded, create_ledger
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "sandbox_access.py"
 spec = importlib.util.spec_from_file_location("sandbox_access", SCRIPT)
@@ -113,6 +113,10 @@ class FakeBudget:
     def book_sandbox_cost(self, usd):  # the real Budget logs and caps it; this fake only records it
         self.costs.append(usd)
 
+    def check_not_halted(self):  # the real Budget reads the ledger; this fake reads its own halt list
+        if self.halts:
+            raise BudgetExceeded(f"budget halted: {self.halts[-1]}")
+
     def halt(self, reason):
         if self.halt_error is not None:
             raise self.halt_error
@@ -211,6 +215,7 @@ def test_402_halts_budget_without_retry(capsys):
 
 
 def real_budget(tmp_path):
+    create_ledger(tmp_path / "ledger.json")  # a ledger exists only once created, as `budget init` does
     return Budget(tmp_path / "ledger.json", 20.0, 20.0, 250, sandbox_cost_cap_usd=0.5)
 
 

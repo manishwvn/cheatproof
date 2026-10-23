@@ -1,11 +1,13 @@
+import errno
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from cheatproof import executor
-from cheatproof.budget import BudgetExceeded
+from cheatproof.budget import Budget, BudgetExceeded, create_ledger
 from cheatproof.sanitize import REDACTED, assert_clean, sanitize
 from scripts import smoke
 
@@ -443,3 +445,23 @@ def test_record_fixtures_writes_redacted_files(tmp_path):
     chat = json.loads((out_dir / "chat_completion.json").read_text())
     assert chat["id"] == REDACTED
     assert chat["usage"] == {"prompt_tokens": 24, "completion_tokens": 64, "total_tokens": 88}
+
+
+def test_smoke_sandbox_step_stops_on_a_ledger_write_failure_at_the_cost_booking(tmp_path, monkeypatch):
+    # A real ledger: the reservation's write succeeds, the cost-booking write fails. The step must stop, not skip.
+    create_ledger(tmp_path / "ledger.json")
+    budget = Budget(tmp_path / "ledger.json", 20.0, 20.0, 250, sandbox_cost_cap_usd=0.5)
+    _install_client(monkeypatch)  # reports a non-zero Sandboxes cost, so the booking writes
+    real_replace = os.replace
+    writes = []
+
+    def fail_the_second_write(src, dst):
+        writes.append(dst)
+        if len(writes) > 1:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", fail_the_second_write)
+    with pytest.raises(BudgetExceeded, match="could not be read or written"):
+        smoke.run_sandbox_step(budget)
+    assert len(writes) == 2

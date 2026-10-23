@@ -23,7 +23,7 @@ from contree_sdk.sdk.exceptions import (
 )
 from contree_sdk.sdk.exceptions.api import RequestInfo, ResponseInfo
 
-from cheatproof.budget import Budget, BudgetExceeded
+from cheatproof.budget import Budget, BudgetExceeded, create_ledger
 from cheatproof.executor import (
     _BASELINE_SCRIPT,
     _DIFF_SCRIPT,
@@ -75,6 +75,10 @@ class FakeBudget:
 
     def book_sandbox_cost(self, usd):  # the real Budget logs and caps the cost; this fake only records it
         self.sandbox_costs.append(usd)
+
+    def check_not_halted(self):  # the real Budget reads the ledger; this fake reads its own halt flag
+        if self.halted:
+            raise BudgetExceeded(f"budget halted: {self.halted}")
 
     def halt(self, reason):
         self.halted = reason
@@ -376,6 +380,7 @@ def test_http_402_while_resolving_the_image_halts_the_budget():
 
 def real_budget(tmp_path):
     # A real ledger, so the Sandboxes cost log, its $0.50 cap and the halt run as they do in production.
+    create_ledger(tmp_path / "ledger.json")
     return Budget(tmp_path / "ledger.json", 20.0, 20.0, 250, sandbox_cost_cap_usd=0.5)
 
 
@@ -429,13 +434,15 @@ def test_http_402_halts_the_real_ledger_and_a_later_cost_cannot_clear_it(tmp_pat
     box.raise_on = lambda argv: leaky_error(402)
     with pytest.raises(BudgetExceeded, match="402"):
         session.run("x", timeout=5)
+    calls_before = len(box.calls)
     box.raise_on = None
-    box.cost = 0.1  # under the cap, but the budget is halted, so the call still stops
+    box.cost = 0.1  # under the cap, but the budget is halted, so the call stops before the sandbox runs it
     with pytest.raises(BudgetExceeded, match="halted"):
         session.run("x", timeout=5)
+    assert len(box.calls) == calls_before
     snap = budget.snapshot()
     assert "402" in snap["halted"]
-    assert snap["sandbox_cost_usd"] == pytest.approx(0.1)
+    assert snap.get("sandbox_cost_usd", 0.0) == 0.0
 
 
 def test_a_free_result_does_not_halt():
@@ -937,3 +944,90 @@ def test_executor_module_imports_without_contree_sdk():
     )
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert done.stdout.strip() == "ok", done.stderr
+
+
+# --- T35: ledger OSError is a refusal; halt before every exec; any 402 halts --------------------------------------
+
+
+class Http402(Exception):
+    """Not an SDK error, but it carries HTTP status 402, so it must halt the budget too."""
+
+    status = 402
+
+
+def test_http_402_from_a_non_sdk_exception_halts_the_budget(tmp_path):
+    budget = real_budget(tmp_path)
+    box, _, session = make(budget=budget)
+    box.raise_on = lambda argv: Http402("payment required")
+    with pytest.raises(BudgetExceeded, match="402"):
+        session.run("x", timeout=5)
+    assert "402" in budget.snapshot()["halted"]
+
+
+def test_a_halt_stops_the_next_exec_even_a_free_one(tmp_path):
+    budget = real_budget(tmp_path)
+    box, _, session = make(budget=budget)
+    budget.halt("manual halt")
+    calls = len(box.calls)
+    box.cost = 0  # a free call: the halt still stops it before the sandbox runs it
+    with pytest.raises(BudgetExceeded, match="budget halted"):
+        session.run("x", timeout=5)
+    assert len(box.calls) == calls
+
+
+def test_a_ledger_oserror_before_the_first_run_refuses_and_runs_nothing(tmp_path, monkeypatch):
+    budget = real_budget(tmp_path)
+
+    def broken_read(self):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Budget, "_read", broken_read)
+    box = FakeSandbox()
+    with pytest.raises(BudgetExceeded, match="could not be read or written") as err:
+        make(box=box, budget=budget)
+    assert "No space" not in str(err.value)  # the type name only, never the OS text
+    assert box.calls == []
+
+
+def test_a_ledger_oserror_during_a_run_becomes_budget_exceeded(tmp_path, monkeypatch):
+    budget = real_budget(tmp_path)
+    box, _, session = make(budget=budget)
+    calls = len(box.calls)
+
+    def broken_read(self):
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(Budget, "_read", broken_read)
+    with pytest.raises(BudgetExceeded, match="could not be read or written"):
+        session.run("x", timeout=5)
+    assert len(box.calls) == calls
+
+
+def test_a_ledger_oserror_while_booking_a_cost_becomes_budget_exceeded(tmp_path, monkeypatch):
+    budget = real_budget(tmp_path)
+    box, _, session = make(budget=budget)
+    box.cost = 0.1
+
+    def broken_book(self, usd):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Budget, "book_sandbox_cost", broken_book)
+    with pytest.raises(BudgetExceeded, match="could not be read or written"):
+        session.run("x", timeout=5)
+
+
+def test_a_402_the_ledger_cannot_halt_gives_a_fixed_message_with_no_sdk_error(tmp_path, monkeypatch):
+    budget = real_budget(tmp_path)
+    box, _, session = make(budget=budget)
+    box.raise_on = lambda argv: leaky_error(402)
+
+    def refused_halt(self, reason):
+        raise BudgetExceeded("ledger gone")
+
+    monkeypatch.setattr(Budget, "halt", refused_halt)
+    with pytest.raises(BudgetExceeded) as err:
+        session.run("x", timeout=5)
+    assert str(err.value) == "HTTP 402; ledger could not be halted"
+    assert err.value.__context__ is None  # the SDK error is never the context
+    assert err.value.__cause__ is None
+    assert FAKE_SECRET not in repr(err.value)

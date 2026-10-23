@@ -1,3 +1,4 @@
+import errno
 import json
 import math
 import os
@@ -8,12 +9,21 @@ import httpx
 import openai
 import pytest
 
-from cheatproof.budget import MAX_TOTAL_CAP_USD, Budget, BudgetExceeded, Hold, Price
+from cheatproof.budget import (
+    MAX_TOTAL_CAP_USD,
+    Budget,
+    BudgetExceeded,
+    Hold,
+    Price,
+    create_ledger,
+    init_ledger_from_env,
+)
 from cheatproof.llm import GuardedLLM
 
 PRICE = Price(input_per_m=1.0, output_per_m=2.0)
 OLD_MTIME_NS = 1_000_000_000 * 10**9  # 2001, far from now, so any rewrite of the file shows as a change
 TODAY = date.today().isoformat()
+pytestmark = pytest.mark.usefixtures("init_ledger")  # a missing ledger is refused
 
 
 def make_budget(tmp_path, total=1.0, daily=None, runs=2, run_usd=0.01):
@@ -211,6 +221,7 @@ def test_halt_wins_over_sandbox_run_cap_and_books_nothing(tmp_path):
     with pytest.raises(BudgetExceeded, match="halted"):
         b.reserve_sandbox_run()
     assert b.snapshot().get("sandbox_runs", 0) == 0
+    create_ledger(tmp_path / "other" / "ledger.json")
     ok = make_budget(tmp_path / "other", runs=1, run_usd=0.01)
     assert ok.reserve_sandbox_run() is None
     assert ok.snapshot()["total_usd"] == 0.0
@@ -594,9 +605,10 @@ def test_snapshot_does_not_reset_a_cleared_halted_flag(tmp_path):
     b.reserve("m", 1, 1)  # the cleared budget spends again
 
 
-def test_snapshot_creates_nothing_when_no_ledger_exists(tmp_path):
+def test_snapshot_refuses_a_missing_ledger_and_creates_nothing(tmp_path):
     b = Budget(tmp_path / "missing" / "ledger.json", 1.0, 1.0, 1)
-    assert b.snapshot() == {"total_usd": 0.0, "days": {}, "sandbox_runs": 0, "halted": None}
+    with pytest.raises(BudgetExceeded, match="budget init"):
+        b.snapshot()
     assert not (tmp_path / "missing").exists()
 
 
@@ -840,10 +852,11 @@ def test_malformed_sandbox_cost_halts_and_is_not_logged(tmp_path, bad):
     assert s.get("sandbox_cost_usd", 0.0) == 0.0
 
 
-def test_a_free_sandbox_result_writes_no_ledger(tmp_path):
+def test_a_free_sandbox_result_writes_nothing(tmp_path):
     b = make_capped(tmp_path)
+    before = (tmp_path / "ledger.json").read_text()
     b.book_sandbox_cost(0)
-    assert not (tmp_path / "ledger.json").exists()
+    assert (tmp_path / "ledger.json").read_text() == before
 
 
 def test_logged_sandbox_cost_over_the_cap_refuses_the_next_run_even_after_a_manual_unhalt(tmp_path):
@@ -920,3 +933,159 @@ def test_invalid_trial_cap_fails_closed(cap_env, monkeypatch, value):
     monkeypatch.setenv("TRIAL_CREDIT_CAP_USD", value)
     with pytest.raises(BudgetExceeded, match="TRIAL_CREDIT_CAP_USD"):
         Budget.from_env()
+
+
+# --- T35: a missing ledger is refused; only `budget init` creates one; halt is checked before every call -------------
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda b: b.reserve("m", 1, 1),
+        lambda b: b.reserve_sandbox_run(),
+        lambda b: b.reserve_local_run(),
+        lambda b: b.reserve_tavily_call(),
+        lambda b: b.halt("x"),
+        lambda b: b.book_sandbox_cost(0.1),
+        lambda b: b.book_sandbox_cost(0),
+        lambda b: b.check_not_halted(),
+        lambda b: b.snapshot(),
+    ],
+)
+def test_missing_ledger_refuses_every_call_and_creates_nothing(tmp_path, call):
+    (tmp_path / "ledger.json").unlink()  # the module fixture made one; this test needs none
+    b = make_budget(tmp_path)
+    with pytest.raises(BudgetExceeded, match="budget init"):
+        call(b)
+    assert not (tmp_path / "ledger.json").exists()
+
+
+def test_create_ledger_writes_every_field_zeroed(tmp_path):
+    path = create_ledger(tmp_path / "new" / "ledger.json")
+    assert json.loads(path.read_text()) == {
+        "total_usd": 0.0,
+        "days": {},
+        "sandbox_runs": 0,
+        "local_runs": 0,
+        "tavily_calls": 0,
+        "halted": None,
+        "sandbox_cost_usd": 0.0,
+        "sandbox_cost_days": {},
+        "trial_spend_usd": 0.0,
+    }
+    assert Budget(path, 1.0, 1.0, 1).snapshot()["halted"] is None
+
+
+def test_create_ledger_refuses_an_existing_file_and_keeps_it(tmp_path):
+    write_ledger(tmp_path, total_usd=0.5, halted="kept")
+    before = (tmp_path / "ledger.json").read_text()
+    with pytest.raises(BudgetExceeded, match="already exists"):
+        create_ledger(tmp_path / "ledger.json")
+    assert (tmp_path / "ledger.json").read_text() == before
+
+
+def test_a_created_ledger_runs_paid_calls(tmp_path):
+    (tmp_path / "ledger.json").unlink()
+    create_ledger(tmp_path / "ledger.json")
+    b = make_budget(tmp_path)
+    hold = b.reserve("m", 1000, 0)
+    assert b.settle(hold, 1000, 0) > 0
+
+
+def test_init_ledger_from_env_needs_an_absolute_spend_ledger(tmp_path, monkeypatch):
+    monkeypatch.delenv("SPEND_LEDGER", raising=False)
+    with pytest.raises(BudgetExceeded, match="SPEND_LEDGER"):
+        init_ledger_from_env()
+    monkeypatch.setenv("SPEND_LEDGER", "relative/ledger.json")
+    with pytest.raises(BudgetExceeded, match="SPEND_LEDGER"):
+        init_ledger_from_env()
+    target = tmp_path / "env" / "ledger.json"
+    monkeypatch.setenv("SPEND_LEDGER", str(target))
+    assert init_ledger_from_env() == target
+
+
+def test_halt_is_checked_by_check_not_halted_and_on_the_free_cost_path(tmp_path):
+    b = make_budget(tmp_path)
+    b.check_not_halted()  # not halted: passes
+    b.book_sandbox_cost(0)  # not halted: passes
+    b.halt("HTTP 402 from Sandboxes")
+    before = (tmp_path / "ledger.json").read_text()
+    with pytest.raises(BudgetExceeded, match="budget halted"):
+        b.check_not_halted()
+    with pytest.raises(BudgetExceeded, match="budget halted"):
+        b.book_sandbox_cost(0)
+    assert (tmp_path / "ledger.json").read_text() == before
+
+
+# --- T35 review: every ledger OSError is a refusal inside Budget; create_ledger is all-or-nothing ------------------
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda b: b.reserve("m", 1, 1),
+        lambda b: b.reserve_sandbox_run(),
+        lambda b: b.halt("x"),
+        lambda b: b.book_sandbox_cost(0.1),
+        lambda b: b.check_not_halted(),
+        lambda b: b.snapshot(),
+    ],
+)
+def test_a_ledger_that_cannot_be_read_or_written_refuses_without_the_os_text(tmp_path, call):
+    (tmp_path / "ledger.json").unlink()
+    (
+        tmp_path / "ledger.json"
+    ).mkdir()  # a directory where the ledger file should be: every read and write fails
+    b = make_budget(tmp_path)
+    with pytest.raises(BudgetExceeded, match="could not be read or written") as err:
+        call(b)
+    assert str(tmp_path) not in str(err.value)  # the type name only, never the path
+
+
+def test_a_failed_ledger_write_refuses_and_keeps_the_old_ledger(tmp_path, monkeypatch):
+    before = (tmp_path / "ledger.json").read_text()
+
+    def full_disk(src, dst):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(os, "replace", full_disk)
+    b = make_budget(tmp_path)
+    with pytest.raises(BudgetExceeded, match="could not be read or written"):
+        b.halt("x")
+    assert (tmp_path / "ledger.json").read_text() == before
+
+
+@pytest.mark.parametrize("step", ["fsync", "link"])
+def test_create_ledger_failing_write_leaves_no_partial_file(tmp_path, monkeypatch, step):
+    def full_disk(*args, **kwargs):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(os, step, full_disk)
+    target = tmp_path / "new" / "ledger.json"
+    with pytest.raises(BudgetExceeded, match="could not be read or written"):
+        create_ledger(target)
+    assert not target.exists()
+    assert [p.name for p in (tmp_path / "new").iterdir()] == ["ledger.lock"]  # no temp file left behind
+
+
+def test_create_ledger_link_refusal_says_already_exists(tmp_path, monkeypatch):
+    def taken(src, dst):
+        raise FileExistsError(errno.EEXIST, "File exists")
+
+    monkeypatch.setattr(os, "link", taken)
+    target = tmp_path / "new" / "ledger.json"
+    with pytest.raises(BudgetExceeded, match="already exists"):
+        create_ledger(target)
+    assert [p.name for p in (tmp_path / "new").iterdir()] == ["ledger.lock"]
+
+
+def test_a_non_utf8_ledger_is_refused_as_not_valid_json(tmp_path):
+    (tmp_path / "ledger.json").write_bytes(
+        b"\xff\xfe"
+    )  # not text, so the decode fails before any JSON is read
+    b = make_budget(tmp_path)
+    with pytest.raises(BudgetExceeded, match="not valid JSON") as err:
+        b.snapshot()
+    assert "codec" not in str(err.value)  # no decode detail leaves
+    with pytest.raises(BudgetExceeded, match="not valid JSON"):
+        b.reserve("m", 1, 1)

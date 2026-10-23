@@ -50,6 +50,9 @@ NAME_RE = re.compile(r"cheatproof-[0-9a-f]{32}")
 RUN_CAP = MAX_OUTPUT_BYTES + OUTPUT_MARGIN_BYTES
 
 
+pytestmark = pytest.mark.usefixtures("init_ledger")  # a missing ledger is refused
+
+
 class FakeDocker:
     """Stands in for the docker CLI. Records every call and answers the ones the executor makes.
 
@@ -1928,3 +1931,29 @@ def test_sweep_leaves_a_live_sessions_container_alone(tmp_path):
         assert make_docker(fake).sweep_leftovers() == 0
         assert fake.argvs(["docker", "rm"]) == []
     assert fake.names_removed() == [run_name(fake)]  # only the session's own close removed it
+
+
+def test_halt_stops_the_next_docker_exec_before_it_runs(tmp_path):
+    budget = make_budget(tmp_path)
+    fake = FakeDocker()
+    s = make_docker(fake).start(ENV, budget)
+    budget.halt("HTTP 402 from Token Factory")
+    logged = len(fake.log)
+    with pytest.raises(BudgetExceeded, match="budget halted"):
+        s.run("true", 5)
+    with pytest.raises(BudgetExceeded, match="budget halted"):
+        s.write_file("a.txt", "x")
+    assert len(fake.log) == logged
+
+
+def test_a_ledger_oserror_at_a_docker_start_refuses_and_runs_nothing(tmp_path, monkeypatch):
+    budget = make_budget(tmp_path)
+
+    def broken_reserve(self):
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(Budget, "reserve_local_run", broken_reserve)
+    fake = FakeDocker()
+    with pytest.raises(BudgetExceeded, match="could not be read or written"):
+        make_docker(fake).start(ENV, budget)
+    assert fake.runs() == []

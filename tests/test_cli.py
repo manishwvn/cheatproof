@@ -1,5 +1,6 @@
 """CLI tests: fakes only. No model, network, Docker or paid call, and no certify.py internals."""
 
+import argparse
 import dataclasses
 import hashlib
 import json
@@ -2179,3 +2180,19 @@ def test_report_skips_a_batch_file_it_cannot_read_with_a_note(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "batch:" not in captured.out
     assert "note:" in captured.err and "batch.json" in captured.err
+
+
+def test_budget_init_creates_the_ledger_once(tmp_path, monkeypatch, capsys):
+    ledger = tmp_path / "ledger.json"
+    monkeypatch.setenv("SPEND_LEDGER", str(ledger))
+    ns = argparse.Namespace(budget_command="init")
+    assert cli.cmd_budget(ns, deps=None) == 0
+    assert json.loads(ledger.read_text())["total_usd"] == 0.0
+    assert "created zeroed ledger" in capsys.readouterr().out
+    assert cli.cmd_budget(ns, deps=None) == 1  # a second init never overwrites
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_budget_init_is_a_subcommand():
+    args = cli.build_parser().parse_args(["budget", "init"])
+    assert args.command == "budget" and args.budget_command == "init"

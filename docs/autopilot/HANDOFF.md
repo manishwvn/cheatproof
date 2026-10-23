@@ -17,6 +17,7 @@ Read this, then `STATUS.md`, then `docs/autopilot/QUEUE.md`, before doing anythi
 - Caps: total $20, daily $4; `TRIAL_CREDIT_CAP_USD` 0.74 (default, never raise); `SANDBOX_COST_CAP_USD` 1.50 in `.env`.
 - The $26.65 account balance is card money: never spend it. Console trial credit was $0.71 on 2026-10-23.
 - HTTP 402 or a malformed cost still halts.
+- Fresh machine: run `python -m cheatproof.cli budget init` once; a lost halt is forgotten by a later init.
 
 ## What the routine does next
 - T08 batch 3 only: chunks of at most 3 tasks on Sandboxes, Nemotron Super, combined prompt. It stops at any halt, trial counter above $0.70 or Sandboxes sum above $1.40.

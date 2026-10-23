@@ -48,6 +48,7 @@ def sandbox_hello(budget: Budget) -> None:
     # workdir before any command, and alpine has no git repo, so it would fail after reserving a run.
     budget.reserve_sandbox_run()  # the cap check comes before any SDK import or network call
     client = SandboxExecutor()._get_client()
+    failure: BaseException | None = None
     try:
         # images.oci finds the tag or imports it from the registry on a miss, as the executor does for task images.
         # images.use (the executor's path for other names) is lazy: it makes no call, and an untagged name only
@@ -55,10 +56,11 @@ def sandbox_hello(budget: Budget) -> None:
         base = client.images.oci(SMOKE_IMAGE)
         done = base.run(shell=SMOKE_CMD, disposable=True, timeout=SMOKE_TIMEOUT_S).wait()
     except Exception as exc:
-        paid = _halt_for_payment(exc, budget)  # HTTP 402 halts every paid call, as in the executor
-        if paid is not None:
-            raise paid from None
-        raise
+        failure = _halt_for_payment(exc, budget)  # HTTP 402 halts every paid call, as in the executor
+        if failure is None:
+            raise
+    if failure is not None:
+        raise failure from None  # outside the except block: the SDK error is never the __context__
     result = done.result
     print(f"sandbox exit={result.exit_code} stdout={result.stdout.strip()!r}")
     cost = getattr(result, "cost", None)  # the executor's _check_cost rule: no cost reported, nothing to book

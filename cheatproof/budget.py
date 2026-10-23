@@ -14,7 +14,9 @@ against SANDBOX_RUN_CAP. Each cost a Sandboxes result reports is logged in the l
 never in the Token Factory totals, and the budget halts once the logged sum passes SANDBOX_COST_CAP_USD.
 The trial cap (TRIAL_CREDIT_CAP_USD) limits Token Factory spend counted from when it is set. Local Docker
 runs and Tavily calls book no money; they only count against their caps. A ledger that does not match
-this shape is refused the same way, never repaired. snapshot() only reads the ledger and never writes it.
+this shape is refused the same way, never repaired. A missing ledger is refused too: only create_ledger (the
+`budget init` CLI command) creates one, so a run never starts on a ledger nobody made. snapshot() only reads the
+ledger and never writes it.
 """
 
 from __future__ import annotations
@@ -23,8 +25,9 @@ import fcntl
 import json
 import math
 import os
+import tempfile
 from collections.abc import Callable
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -189,6 +192,68 @@ def _env_prices() -> dict[str, Price]:
     return prices
 
 
+def fresh_ledger() -> dict:
+    """A zeroed ledger with every field the reader expects. Only create_ledger writes one."""
+    return {
+        "total_usd": 0.0,
+        "days": {},
+        "sandbox_runs": 0,
+        "local_runs": 0,
+        "tavily_calls": 0,
+        "halted": None,
+        "sandbox_cost_usd": 0.0,
+        "sandbox_cost_days": {},
+        "trial_spend_usd": 0.0,
+    }
+
+
+def _unwritable(exc: OSError) -> BudgetExceeded:
+    """A ledger OSError as a refusal. Only the exception type name leaves: never the OS text or the path."""
+    return BudgetExceeded(
+        f"spend ledger could not be read or written ({type(exc).__name__}); refusing to run"
+    )
+
+
+def _write_new_file(path: Path, text: str) -> None:
+    """Write text to a new file at path, all or nothing. A temp file in the same directory is fsynced, then hard-linked
+    to path: link refuses an existing path, so nothing is overwritten. The temp file is always removed."""
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            raise BudgetExceeded(f"ledger {path} already exists; refusing to overwrite it") from None
+    finally:
+        with suppress(FileNotFoundError):
+            tmp.unlink()
+
+
+def create_ledger(path: Path) -> Path:
+    """Create the zeroed ledger at path, the only way a ledger comes into being. An existing file is refused, never
+    overwritten. The ledger lock is held, so a concurrent writer cannot slip in between the check and the create."""
+    path = Path(path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path.with_suffix(".lock"), "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if path.exists():
+                raise BudgetExceeded(f"ledger {path} already exists; refusing to overwrite it")
+            _write_new_file(path, json.dumps(fresh_ledger(), indent=2, sort_keys=True))
+    except OSError as exc:
+        raise _unwritable(exc) from None
+    return path
+
+
+def init_ledger_from_env() -> Path:
+    """Create the zeroed ledger at SPEND_LEDGER (see create_ledger). Fails closed when SPEND_LEDGER is unset or relative."""
+    return create_ledger(_ledger_path())
+
+
 class Budget:
     def __init__(
         self,
@@ -252,10 +317,17 @@ class Budget:
 
     @contextmanager
     def _lock(self):
-        self.ledger.parent.mkdir(parents=True, exist_ok=True)
-        # Append mode creates the lock file without truncating it.
-        with open(self.ledger.with_suffix(".lock"), "a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+        with ExitStack() as stack:
+            try:
+                self.ledger.parent.mkdir(parents=True, exist_ok=True)
+                # Append mode creates the lock file without truncating it.
+                lock = stack.enter_context(open(self.ledger.with_suffix(".lock"), "a"))
+            except OSError as exc:
+                raise _unwritable(exc) from None
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            except OSError as exc:
+                raise _unwritable(exc) from None
             yield
 
     @contextmanager
@@ -265,14 +337,27 @@ class Budget:
             state = self._read()
             yield state
             tmp = self.ledger.with_suffix(".tmp")
-            tmp.write_text(json.dumps(state, indent=2, sort_keys=True))
-            os.replace(tmp, self.ledger)
+            try:
+                tmp.write_text(json.dumps(state, indent=2, sort_keys=True))
+                os.replace(tmp, self.ledger)
+            except OSError as exc:
+                raise _unwritable(exc) from None
 
     def _read(self) -> dict:
-        if not self.ledger.exists():
-            return {"total_usd": 0.0, "days": {}, "sandbox_runs": 0, "halted": None}
         try:
-            state = json.loads(self.ledger.read_text())
+            if not self.ledger.exists():
+                # Never created implicitly: a missing ledger would read as zero spend and let a run start unbooked.
+                raise BudgetExceeded(
+                    f"ledger {self.ledger} does not exist; run `python -m cheatproof.cli budget init` once to create it"
+                )
+            raw = self.ledger.read_text()
+        except UnicodeDecodeError:
+            # Not text at all: the same refusal as bad JSON, and no decode detail leaves.
+            raise BudgetExceeded(f"ledger {self.ledger} is not valid JSON; fix it by hand") from None
+        except OSError as exc:
+            raise _unwritable(exc) from None
+        try:
+            state = json.loads(raw)
         except ValueError:
             raise BudgetExceeded(f"ledger {self.ledger} is not valid JSON; fix it by hand") from None
         if not isinstance(state, dict) or not all(k in state for k in ("total_usd", "days", "sandbox_runs")):
@@ -317,6 +402,12 @@ class Budget:
         if halted is not None and not isinstance(halted, bool) and not (isinstance(halted, str) and halted):
             raise BudgetExceeded(f"ledger {self.ledger} has an invalid halted value; fix it by hand")
         return state
+
+    def check_not_halted(self) -> None:
+        """Refuse while the ledger says halted. Read-only. Called before every exec, paid or free, so a halt stops the next one."""
+        halted = self.snapshot().get("halted")
+        if halted:
+            raise BudgetExceeded(f"budget halted: {halted}")
 
     def reserve(self, model: str, input_tokens: int, max_output_tokens: int) -> Hold:
         return self._reserve_usd(model, _priced(self.price(model), input_tokens, max_output_tokens))
@@ -411,6 +502,7 @@ class Budget:
             self.halt("a Sandboxes result reported a cost that is not a finite number of 0 or more")
             raise BudgetExceeded("a Sandboxes result reported a malformed cost; the budget is halted")
         if usd == 0:
+            self.check_not_halted()  # a free result writes nothing, but a halted budget still stops here
             return  # a free result changes nothing, so nothing is written
         day = date.today().isoformat()
         with self._locked() as s:
@@ -438,9 +530,16 @@ class Budget:
         A cleared `halted` flag therefore stays cleared.
         """
         lock_path = self.ledger.with_suffix(".lock")
-        if not lock_path.exists():
-            # No writer has ever locked this ledger, so there is nothing to wait for.
-            return self._read()
-        with open(lock_path) as lock:
-            fcntl.flock(lock, fcntl.LOCK_SH)
+        with ExitStack() as stack:
+            try:
+                # No writer has ever locked this ledger when there is no lock file, so there is nothing to wait for.
+                lock = stack.enter_context(open(lock_path)) if lock_path.exists() else None
+            except OSError as exc:
+                raise _unwritable(exc) from None
+            if lock is None:
+                return self._read()
+            try:
+                fcntl.flock(lock, fcntl.LOCK_SH)
+            except OSError as exc:
+                raise _unwritable(exc) from None
             return self._read()
