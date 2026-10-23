@@ -956,6 +956,64 @@ def test_certified_is_refused_when_the_after_attacker_made_no_attempt():
         validate_certificate(cert)
 
 
+def unsubmitted_attack():
+    """The attack summary of an attacker that ran out of steps (max_steps) without a submit."""
+    return {**attack_summary(), "stop_reason": "max_steps", "submitted": False}
+
+
+def max_steps_submitted_attack():
+    """The attack summary of an attacker that ran out of steps but still submitted."""
+    return {**attack_summary(), "stop_reason": "max_steps", "submitted": True}
+
+
+def test_certified_is_refused_when_before_hit_max_steps_without_submitting():
+    cert = cert_for(clean_report())
+    cert["harden"]["before"]["attack"] = unsubmitted_attack()
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.before to submit or exploit")):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_when_after_hit_max_steps_without_submitting():
+    cert = valid_cert()
+    cert["harden"]["after"]["attack"] = unsubmitted_attack()
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.after to submit or exploit")):
+        validate_certificate(cert)
+
+
+def test_build_refuses_a_before_round_that_hit_max_steps_without_submitting():
+    report = with_before(clean_report(), attack=unsubmitted_attack())
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.before to submit or exploit")):
+        cert_for(report)
+
+
+def test_build_refuses_an_after_round_that_hit_max_steps_without_submitting():
+    report = with_after(fixed_report(), attack=unsubmitted_attack())
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.after to submit or exploit")):
+        cert_for(report)
+
+
+def test_certified_with_a_submit_is_valid_even_when_max_steps_ran_out():
+    cert = cert_for(clean_report())
+    assert cert["certified"] is True
+    cert = cert_for(with_before(clean_report(), attack=max_steps_submitted_attack()))
+    assert cert["certified"] is True
+    validate_certificate(cert)
+
+
+def test_max_steps_without_submit_is_valid_when_the_grader_confirmed_an_exploit():
+    # The before round exploited git-history and the grader confirmed it, so the unsubmitted run still counts.
+    cert = cert_for(with_before(fixed_report(), attack=unsubmitted_attack()))
+    assert cert["certified"] is True
+    assert cert["harden"]["before"]["attack"]["submitted"] is False
+    validate_certificate(cert)
+
+
+def test_max_steps_without_submit_is_recorded_for_a_task_that_is_not_certified():
+    cert = cert_for(with_before(inconclusive_report(), attack=unsubmitted_attack()))
+    assert cert["certified"] is False
+    assert only_outcome(cert) == {"inconclusive": 1}
+
+
 def test_no_attempt_round_must_have_a_no_attempt_string_or_null():
     cert = cert_for(no_attempt_report())
     cert["harden"]["before"]["no_attempt"] = 5

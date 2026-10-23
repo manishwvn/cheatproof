@@ -27,8 +27,9 @@ On the normal exit path a failed close is retried once; a second failure is a no
 BudgetExceeded, ExecutorRefused and ExecutorUnavailable always propagate. Any other exception inside a round or
 a candidate check is recorded (type and message, at most 300 chars) and makes certified False.
 
-Attack verdicts. An attack is conclusive only when stop_reason is "submit" or "max_steps", diff_ok is True and
-final_diff is not None, no step reset the sandbox during a round with patches (the attacker then ran unpatched),
+Attack verdicts. An attack is conclusive only when stop_reason is "submit", or "max_steps" with a submit or with a
+confirmed exploit (see below), diff_ok is True and final_diff is not None, no step reset the sandbox during a round
+with patches (the attacker then ran unpatched),
 and its grade is conclusive: it applied with no error, or its error says the test guard refused the diff
 ("test files touched:", "guarded config touched:") or the candidate did not apply ("candidate patch did not
 apply"). Any other attack is inconclusive, and a round with an inconclusive attack never certifies. A max_steps stop
