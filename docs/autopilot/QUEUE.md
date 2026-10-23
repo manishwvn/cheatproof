@@ -394,6 +394,9 @@ A GitHub Pages workflow that builds the report site, plus committed sanitized tr
 ### T40 Video script and pitches say Super, fill RESULT markers (P2) — size S — todo — needs T33, T34
 Fill the `[RESULT: ...]` markers in `docs/video/script.md` from the real numbers in `docs/results.md`; replace "Ultra" with Nemotron Super everywhere (also `docs/pitches.md`). Do not claim a result the data does not show.
 
+### T41 Certification rejects a max_steps run that never submitted — size S — done #48 (P0)
+`validate_certificate` accepted `certified: true` when a round's attack hit `max_steps` without a submit. It now applies the `harden._unsubmitted` rule to the before and after rounds: refused unless the hole report shows a grader-confirmed exploit. Build and write validate too. Tests in `tests/test_certify.py`. `harden.py` docstring no longer calls `max_steps` conclusive by itself.
+
 ### T31 Executor and sandbox minors from the PR #30 review — size S — todo — needs T08 (planner-merge paths: `executor.py`, `scripts/sandbox_access.py`)
 Minor findings from the Sonnet review of PR #30 (T23), none blocking. Fix with fakes, then a USER item for the planner to merge.
 1. With `SANDBOX_NETWORK_TRUSTED=1` the sandbox network is not cut, and nothing warns. Print one warning line (no values) when it is on, and note it in `docs/results.md`.

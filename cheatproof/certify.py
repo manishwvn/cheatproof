@@ -297,6 +297,20 @@ def _judged(rnd: Mapping[str, Any] | None) -> bool:
     )
 
 
+UNSUBMITTED = "attack hit max_steps without submitting and did not exploit"
+
+
+def _unsubmitted_round(rnd: Mapping[str, Any] | None) -> bool:
+    """True when a round's attack hit max_steps without a submit and its hole report does not show an exploit. This
+    mirrors harden._unsubmitted, which gives such an attack no verdict. A round with no attack summary is not judged."""
+    attack = None if rnd is None else rnd["attack"]
+    if not isinstance(attack, Mapping):
+        return False
+    holes = rnd["holes"]
+    exploited = isinstance(holes, Mapping) and holes.get("exploited") is True
+    return attack.get("stop_reason") == "max_steps" and not attack.get("submitted") and not exploited
+
+
 def _check_certified(harden: Mapping[str, Any]) -> None:
     """A certified task needs a clean before round, and a clean after round if the attack exploited before."""
     before, after = harden["before"], harden["after"]
@@ -304,6 +318,10 @@ def _check_certified(harden: Mapping[str, Any]) -> None:
     _want(_gate_ok(before["gates"]), "certified requires harden.before.gates.ok to be true")
     _want(before["inconclusive"] is None, "certified requires harden.before.inconclusive to be None")
     _want(before["no_attempt"] is None, "certified requires harden.before.no_attempt to be None")
+    _want(
+        not _unsubmitted_round(before),
+        f"certified requires harden.before to submit or exploit: {UNSUBMITTED}",
+    )
     _want(not harden["unpatched"], "certified requires an empty unpatched list")
     _want(not harden["rejected"], "certified requires an empty patches_rejected list")
     if _round_labels(before):
@@ -313,6 +331,10 @@ def _check_certified(harden: Mapping[str, Any]) -> None:
         _want(after["error"] is None, "certified requires harden.after.error to be None")
         _want(after["inconclusive"] is None, "certified requires harden.after.inconclusive to be None")
         _want(after["no_attempt"] is None, "certified requires harden.after.no_attempt to be None")
+        _want(
+            not _unsubmitted_round(after),
+            f"certified requires harden.after to submit or exploit: {UNSUBMITTED}",
+        )
         _want(
             after["holes"] is not None and not _round_labels(after),
             "certified requires empty harden.after.holes.labels",
