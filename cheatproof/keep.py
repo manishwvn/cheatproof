@@ -13,7 +13,9 @@ Nothing here is ever committed (results/traces/ is in .gitignore, and `git add -
 is renamed to <name>.<UTC time>.old, never overwritten.
 
 recheck() re-runs holes.classify on the kept diff, trace and restore set with no network, sandbox, model or budget.
-render() prints labels and test path names only, never diff text.
+It compares the recomputed labels, primary and exploited with those recorded in rounds.json. Older files that do not
+record primary or exploited are compared on labels only. render() prints labels and test path names only, never diff
+text.
 """
 
 from __future__ import annotations
@@ -246,6 +248,11 @@ class RoundCheck:
     test_paths: tuple[tuple[str, bool], ...]  # (path, restored by the grade)
     recorded: dict[str, Any] | None
     matches: bool | None  # recomputed labels equal the recorded ones; None when none were recorded
+    primary_ok: bool | None = None  # recomputed primary equals the recorded one; None when not recorded
+    exploited_ok: bool | None = None  # recomputed exploited equals the recorded one; None when not recorded
+
+
+GRADED_FIELDS = ("primary", "exploited")  # rounds.json fields a recheck must reproduce; a mismatch exits 1
 
 
 def _read_json(path: Path, what: str) -> Any:
@@ -348,8 +355,46 @@ def recheck(traces_dir: Path, stem: str, task: TaskSpec) -> list[RoundCheck]:
         recorded = rec.get("recorded")
         matches = None if recorded is None else list(report.labels) == recorded.get("labels")
         test_paths = tuple(holes.diff_test_paths(diff, task, paths))
-        checks.append(RoundCheck(name, report, test_paths, recorded, matches))
+        checks.append(
+            RoundCheck(
+                name,
+                report,
+                test_paths,
+                recorded,
+                matches,
+                primary_ok=_recorded_equal(recorded, "primary", report.primary),
+                exploited_ok=_recorded_equal(recorded, "exploited", report.exploited),
+            )
+        )
     return checks
+
+
+def _recorded_equal(recorded: dict[str, Any] | None, field: str, value: Any) -> bool | None:
+    """Whether the recorded field equals the recomputed value. None when the round did not record the field."""
+    if recorded is None or field not in recorded:
+        return None
+    return recorded[field] == value
+
+
+def mismatched_fields(checks: list[RoundCheck]) -> list[str]:
+    """The GRADED_FIELDS whose recomputed value differs from the recorded one in some round, in that order."""
+    found = {
+        field
+        for check in checks
+        for field, ok in (("primary", check.primary_ok), ("exploited", check.exploited_ok))
+        if ok is False
+    }
+    return [field for field in GRADED_FIELDS if field in found]
+
+
+def _field_lines(check: RoundCheck) -> list[str]:
+    states = {"primary": check.primary_ok, "exploited": check.exploited_ok}
+    if all(ok is None for ok in states.values()):
+        return ["  exploited/primary not recorded"]
+    return [
+        f"  recorded {field}: {'not recorded' if ok is None else 'match' if ok else 'DIFFER'}"
+        for field, ok in states.items()
+    ]
 
 
 def _safe(text: str) -> str:
@@ -374,4 +419,5 @@ def render(stem: str, checks: list[RoundCheck]) -> list[str]:
         else:
             state = "match" if check.matches else "DIFFER"
             lines.append(f"  recorded labels: {state} {check.recorded.get('labels')}")
+        lines.extend(_field_lines(check))
     return lines

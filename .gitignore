@@ -8,6 +8,8 @@ LEARNING.md
 runs/
 # Raw attacker step args: never committed unsanitized
 results/traces/
+# Any folder named traces (T46): raw attacker traces and diffs, wherever a run keeps them
+**/traces/
 results/reports/
 # Local site build (cli site default output; CI builds it, never commits it)
 results/site/
