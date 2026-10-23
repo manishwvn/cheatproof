@@ -2,10 +2,11 @@
 
     python -m cheatproof.cli harden <instance-id> --system-prompt-file PATH [--source S] [--cache-dir DIR]
         [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
+        [--network-fetch]
     python -m cheatproof.cli batch --system-prompt-file PATH [--source S ...] [--n N] [--cache-dir DIR]
         [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
         [--instance-ids ID ...] [--first ID ...] [--rerun] [--prefer-future-git] [--chunk-size N<=10]
-        [--dry-run] [--no-preflight]
+        [--dry-run] [--no-preflight] [--network-fetch]
     python -m cheatproof.cli report [--certs DIR] [--out FILE] [--format text|json]
     python -m cheatproof.cli site [--certs DIR] [--out DIR] [--traces DIR]
     python -m cheatproof.cli holes recheck <stem> [--traces DIR] [--source S] [--cache-dir DIR]
@@ -147,6 +148,9 @@ EXECUTOR_ERROR = (
 )
 # A skipped reason: an instance id that an earlier source already selected. The first source keeps the task.
 DUPLICATE_REASON = "duplicate_across_sources"
+NETWORK_FETCH_MAX_TASKS = (
+    2  # T37: hard cap on tasks per --network-fetch invocation (keeps Tavily and attacker cost tiny)
+)
 DEFAULT_MIN_FREE_GB = 10.0  # MIN_FREE_DISK_GB when the environment does not set it
 GIB = 1024**3
 
@@ -210,6 +214,8 @@ class Deps:
     disk_free_gb: Callable[[Path], float] = _free_gb  # free GiB on the file system holding the output folder
     # T38 collect-only preflight (grader.collect_gate): None skips it, so fakes-only tests need not provide one.
     preflight: Callable[..., Any] | None = None
+    # T37 --network-fetch: budget -> the capped, cleaned web_search callable. None: the flag is refused at the run.
+    make_search: Callable[[Any], Callable[[str], list[dict]]] | None = None
 
     @classmethod
     def for_dry_run(cls) -> Deps:
@@ -259,6 +265,7 @@ class Deps:
             load_selection=load_cached_selection,
             disk_free_gb=_free_gb,
             preflight=_collect_gate,
+            make_search=_make_search,
         )
 
 
@@ -266,6 +273,12 @@ def _collect_gate(*args: Any, **kwargs: Any) -> Any:
     from cheatproof.grader import collect_gate  # lazy: keeps the grader out of module import
 
     return collect_gate(*args, **kwargs)
+
+
+def _make_search(budget: Any) -> Callable[[str], list[dict]]:
+    from cheatproof.strategies import make_network_search  # lazy: the Tavily SDK loads only when asked for
+
+    return make_network_search(budget)
 
 
 def _make_llm(budget: Any) -> Any:
@@ -589,6 +602,7 @@ class _Settings:
     strategy: str
     executor_name: str
     out: Path
+    network_fetch: bool = False
 
 
 def _stop_reason(exc: BaseException) -> str:
@@ -617,6 +631,15 @@ def _harden_settings(args: argparse.Namespace) -> _Settings:
     strategy = prompt_path.stem if args.strategy is None else args.strategy
     if not strategy.strip():
         raise _Usage("--strategy must not be empty")
+    network_fetch = bool(getattr(args, "network_fetch", False))
+    if network_fetch:
+        # T37: refused before any paid call. The message names the variable only, never a value.
+        if not os.environ.get("TAVILY_API_KEY"):
+            raise _Usage("--network-fetch needs TAVILY_API_KEY in the environment or .env; nothing was run")
+        from cheatproof.strategies import with_network_section  # lazy, as the attacker import above
+
+        system_prompt = with_network_section(system_prompt)
+        strategy = f"{strategy}+network"
 
     model = args.attacker_model if args.attacker_model is not None else os.environ.get("ATTACKER_MODEL", "")
     model = model.strip()
@@ -633,8 +656,8 @@ def _harden_settings(args: argparse.Namespace) -> _Settings:
             raise _Usage(f"--timeout must be a positive number of seconds, got {args.timeout!r}")
         timeout_kw["timeout"] = args.timeout
 
-    # Network stays off: the task's EnvSpec is built with network=False, so allow_network must match.
-    config = AttackConfig(model=model, allow_network=False, **limits)
+    # --network-fetch turns on the host-side web_search only. The sandbox network stays off (EnvSpec.network False).
+    config = AttackConfig(model=model, allow_network=network_fetch, **limits)
     return _Settings(
         system_prompt=system_prompt,
         config=config,
@@ -642,6 +665,16 @@ def _harden_settings(args: argparse.Namespace) -> _Settings:
         strategy=strategy,
         executor_name=(os.environ.get("EXECUTOR") or "sandbox").strip().lower(),
         out=args.out,
+        network_fetch=network_fetch,
+    )
+
+
+def _network_warning() -> None:
+    print(
+        "warning: --network-fetch: web search enabled; sandbox network stays off. The search runs on the host "
+        "for the first (before-hardening) attack only, and each call is capped by TAVILY_CALL_CAP. "
+        f"At most {NETWORK_FETCH_MAX_TASKS} tasks in total.",
+        file=sys.stderr,
     )
 
 
@@ -704,6 +737,16 @@ def _harden_one(
     """One paid harden run and its certificate, shared by harden and batch. Raises _Unwritten when no certificate came
     of it. A ValueError from harden itself is not caught here."""
     stem, out = plan.stem, settings.out
+    search_kw: dict[str, Any] = {}
+    if settings.network_fetch:
+        try:
+            if deps.make_search is None:
+                raise RuntimeError("no search is wired up")
+            # Each call of this search reserves one capped Tavily call (TAVILY_CALL_CAP) on this budget.
+            search_kw["search"] = deps.make_search(budget)
+        except Exception as exc:  # noqa: BLE001 - before any paid call; only the type, never a message
+            message = f"search setup failed: {type(exc).__name__}"
+            raise _Unwritten("start", EXECUTOR_ERROR, RuntimeError(message)) from None
     try:
         # An earlier run's trace is set aside before this run appends to traces/<stem>.jsonl.
         _rotate_trace(plan.traces_dir, stem, plan.trace_path)
@@ -718,9 +761,24 @@ def _harden_one(
         Any
     ] = []  # the attacks that returned, for keep.keep_stopped when harden stops without a report
 
+    attacks_started = [0]
+
     def attack_fn(session: Any) -> Any:
+        # T37: web_search is for the first (before-hardening) attack only. The after-hardening re-attack gets no
+        # search and a config that says so, because a patch is only certified against an attacker with no network.
+        first = attacks_started[0] == 0
+        attacks_started[0] += 1
+        config = settings.config
+        if settings.network_fetch and not first:
+            config = replace(config, allow_network=False)
         result = deps.attack(
-            llm, session, settings.system_prompt, plan.prompt, settings.config, trace_path=plan.trace_path
+            llm,
+            session,
+            settings.system_prompt,
+            plan.prompt,
+            config,
+            trace_path=plan.trace_path,
+            **(search_kw if first else {}),
         )
         finished.append(result)
         return result
@@ -809,6 +867,8 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
         plan = _plan(matches[0], settings.out)
     except _Usage as exc:
         return _usage_error(str(exc))
+    if settings.network_fetch:
+        _network_warning()
     try:
         executor, budget, llm = _open(deps)
     except _Unwritten as exc:
@@ -977,6 +1037,11 @@ def _run_tasks(
         if iid in rerun:  # saved before the paid run: a resume never attacks this task again
             batch.state["rerun_done"].append(iid)
             batch.save()
+        if settings.network_fetch and iid not in batch.state["network_fetch_done"]:
+            batch.state["network_fetch_done"].append(
+                iid
+            )  # saved before the paid run: the total cap counts it
+            batch.save()
         try:
             plan = _plan(task, out)
         except _Usage as exc:
@@ -1039,11 +1104,19 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
         return _usage_error(str(exc))
     if args.n is not None and args.n < 0:
         return _usage_error("--n must be 0 or more")
+    network_fetch = bool(args.network_fetch)
+    if network_fetch and args.instance_ids and len(set(args.instance_ids)) > NETWORK_FETCH_MAX_TASKS:
+        return _usage_error(
+            f"--network-fetch runs at most {NETWORK_FETCH_MAX_TASKS} tasks: pass 1 or 2 --instance-ids"
+        )
     names = list(dict.fromkeys(args.source)) if args.source else list(SOURCES)
     out = args.out if settings is None else settings.out
     batch_path = out.parent / BATCH_FILE
     if (out.parent / TRACES_DIR).is_symlink() or batch_path.is_symlink():
         return _usage_error(f"refusing to write through a symbolic link: {TRACES_DIR}/ or {BATCH_FILE}")
+    # T37: the tasks that already used --network-fetch, kept in batch.json across invocations (also across a finished
+    # batch and across calls without the flag).
+    network_done = _network_fetch_done(batch_path)
 
     selections = []
     try:
@@ -1077,12 +1150,31 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
     except ValueError as exc:  # PlanError, or an unknown source from find_tasks
         return _usage_error(str(exc))
     tasks = ordered.tasks
+    if network_fetch:
+        # T37: a hard cap, so the Tavily and attacker cost stay tiny. The first tasks that would really run are kept.
+        tasks = [t for t in tasks if t.instance_id in ordered.rerun or not _certified_before(t, out)]
+        if args.instance_ids:  # the owner named 1 or 2 tasks: allowed again, whatever ran before
+            tasks = tasks[:NETWORK_FETCH_MAX_TASKS]
+        else:
+            left = NETWORK_FETCH_MAX_TASKS - len(network_done)
+            if left <= 0:
+                return _usage_error(
+                    f"--network-fetch already ran {len(network_done)} tasks (network_fetch_done in {BATCH_FILE}); "
+                    f"at most {NETWORK_FETCH_MAX_TASKS} in total. Name up to {NETWORK_FETCH_MAX_TASKS} with "
+                    "--instance-ids to run others"
+                )
+            tasks = tasks[:left]
     # A previous call that stopped at its chunk size hands over what it did: a resume never attacks a rerun task
     # again and never retries an env-broken one, whatever flags are given.
     done, broken_rows = _resume_state(batch_path)
     rerun = ordered.rerun - set(done)
     broken_ids = [row["instance_id"] for row in broken_rows]
     if settings is None:  # --dry-run: print the plan from the cache and the certificates; no calls, no files
+        if network_fetch:
+            print(
+                f"--network-fetch: at most {NETWORK_FETCH_MAX_TASKS} tasks in total, web search on, "
+                "sandbox network stays off"
+            )
         certified = {t.instance_id for t in tasks if _certified_before(t, out)}
         caps = batch_plan.read_caps(os.environ, _env_file_values())
         print(
@@ -1091,6 +1183,8 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
         return 0
     if args.no_preflight:
         deps = replace(deps, preflight=None)
+    if network_fetch:
+        _network_warning()
     started = deps.clock()
     state: dict[str, Any] = {
         "schema_version": BATCH_SCHEMA_VERSION,
@@ -1102,6 +1196,8 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
         "selected": len(tasks),
         "selected_ids": [task.instance_id for task in tasks],
         "chunk_size": chunk_size,
+        "network_fetch": network_fetch,
+        "network_fetch_done": network_done,  # tasks attacked with --network-fetch; saved before each such run
         "rerun_ids": sorted(ordered.rerun),  # asked for in this call
         "rerun_done": done,  # attacked again already (this call or an earlier chunk): never again
         "env_broken_ids": broken_ids,  # failed the preflight in this batch: not retried by a later chunk
@@ -1152,6 +1248,17 @@ def _resume_state(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
         and isinstance(row.get("instance_id"), str)
     ]
     return done, rows
+
+
+def _network_fetch_done(path: Path) -> list[str]:
+    """The ids an earlier call attacked with --network-fetch, from the batch.json it left (finished or not). A missing
+    or odd file carries nothing."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    done = data.get("network_fetch_done") if isinstance(data, dict) else None
+    return list(dict.fromkeys(i for i in done if isinstance(i, str))) if isinstance(done, list) else []
 
 
 def _env_file_values() -> dict[str, str | None]:
@@ -1423,6 +1530,12 @@ def cmd_holes_recheck(args: argparse.Namespace, deps: Deps) -> int:
     return 1 if mismatched else 0
 
 
+NETWORK_FETCH_HELP = (
+    "T37: give the first (before-hardening) attack a capped host-side Tavily web_search; the sandbox network "
+    f"stays off; needs TAVILY_API_KEY; at most {NETWORK_FETCH_MAX_TASKS} tasks in total (default off)"
+)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m cheatproof.cli", description="Harden one task into a certificate, or report them."
@@ -1447,6 +1560,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--strategy", help="strategy label in the certificate (default: the prompt file's stem)"
     )
     harden.add_argument("--no-preflight", action="store_true", help="skip the collect-only preflight")
+    harden.add_argument("--network-fetch", action="store_true", help=NETWORK_FETCH_HELP)
 
     batch = sub.add_parser(
         "batch", help="harden the cached selection one task at a time; resumable; no fetch"
@@ -1493,6 +1607,7 @@ def build_parser() -> argparse.ArgumentParser:
         "dict (never os.environ) to print cap warnings",
     )
     batch.add_argument("--no-preflight", action="store_true", help="skip the collect-only preflight")
+    batch.add_argument("--network-fetch", action="store_true", help=NETWORK_FETCH_HELP)
 
     report = sub.add_parser("report", help="score the certificates in a directory")
     report.add_argument("--certs", type=Path, default=DEFAULT_CERT_DIR, help="certificates directory")
