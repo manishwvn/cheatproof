@@ -14,7 +14,7 @@ applies). Other projects' images (`fde1-app`, `pgvector/pgvector:pg16`) must nev
 
 ## Milestone: live access and executor
 
-### T01 Smoke test, model IDs and prices — size S — in review — after 2026-10-21 [95%]
+### T01 Smoke test, model IDs and prices — size S — done #36
 Run `uv run python scripts/smoke.py`. Live scripts load `.env` from the main checkout (the parent of `git rev-parse
 --git-common-dir`), so worktrees share one key file and never copy it. Record the exact Nemotron model IDs (Nano,
 Super, Ultra) from `/v1/models` and their per-1M prices from the public Token Factory price page into `.env.example`
@@ -364,6 +364,16 @@ The gold gate for Algebra8__pyopenapi3-83 fails with `pytest exited 4: ERROR: no
 
 ### T30 Collection cause for pytest "found no collectors" — size S — done #39
 DRMacIver__shrinkray-7's gold gate fails with `pytest exited 4: ERROR: found no collectors for /testbed/tests/test_main.py::test_kill_process` (2026-10-22 rerun). PR #37 runs the collection rerun only on `not found:`. Extend `_not_found_file` in cheatproof/grader.py to also accept `found no collectors for <node>` (bare or under workdir), with fakes-only tests in tests/test_grader.py. No live run needed until U25 is done.
+
+### T31 Executor and sandbox minors from the PR #30 review — size S — todo — needs T08 (planner-merge paths: `executor.py`, `scripts/sandbox_access.py`)
+Minor findings from the Sonnet review of PR #30 (T23), none blocking. Fix with fakes, then a USER item for the planner to merge.
+1. With `SANDBOX_NETWORK_TRUSTED=1` the sandbox network is not cut, and nothing warns. Print one warning line (no values) when it is on, and note it in `docs/results.md`.
+2. Sandbox `exec` and OCI-import runs are not counted by `reserve_sandbox_run` or the cost log. Count them, or document why not.
+3. The `colima ssh -- df` disk check after every run has a 15 s timeout. Skip it for the Sandboxes backend, which has no local images.
+4. Unverified: whether a command that exits non-zero keeps its image (it matters for the gold-gate reuse). Test it with one fake and one live smoke only after the owner clears budget for it; otherwise record it as unknown in the ADR.
+
+### T32 Do not lose a certificate to the leak guard — size S — todo
+Batch 2 (PR #38): `Azure__autorest.python-475` ran, but `certificate.exposure_before.future_git_evidence[10]` held a secret-like value and the certificate write was refused (`certificate_write_failed`, $0.0606 spent, result lost). Keep the guard strict, but redact the matching evidence line in `certify.py` before the write (replace the value with a fixed marker, keep the file path and the finding type), so a hole is still reported and replayable. Fakes-only tests next to the existing leak-guard tests; never print the matched value. If `leakcheck.py` or the certificate writer is a planner-merge path, open the PR and add a USER item. Do before the next T08 batch if the routine has the time; it does not block batch 3.
 
 ### T27 Budget hardening from PR #32 review — size S — todo — needs T08
 Review of PR #32 (`cheatproof/budget.py` and the Sandboxes cost path, planner-merge). Do all items, with fakes:
