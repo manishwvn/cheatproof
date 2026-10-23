@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -77,7 +78,8 @@ BATCH_KEYS = frozenset(
         "updated",
     }
 )
-NOT_RUN_KEYS = frozenset({"instance_id", "reason", "error"})
+NOT_RUN_KEYS = frozenset({"instance_id", "reason", "error"})  # always written by cli batch
+NOT_RUN_OPTIONAL_KEYS = frozenset({"cost_usd"})  # written only when a paid run's spend was measured
 BATCH_NOT_LOADED = "batch record not loaded"
 BATCH_NOT_AVAILABLE = "selection record not available"
 SEE_ERRORS = '(see <a href="#errors">errors</a>).'
@@ -316,11 +318,25 @@ def _is_str_list(value: Any) -> bool:
 
 
 def _is_not_run(item: Any) -> bool:
-    return (
-        isinstance(item, dict)
-        and set(item) == NOT_RUN_KEYS
-        and all(isinstance(item[key], str) for key in NOT_RUN_KEYS)
-    )
+    if not isinstance(item, dict):
+        return False
+    keys = set(item)
+    if not NOT_RUN_KEYS <= keys <= NOT_RUN_KEYS | NOT_RUN_OPTIONAL_KEYS:
+        return False
+    if not all(isinstance(item[key], str) for key in NOT_RUN_KEYS):
+        return False
+    return "cost_usd" not in item or _is_cost(item["cost_usd"])
+
+
+def _is_cost(value: Any) -> bool:
+    """A finite, non-negative number. A huge integer does not convert to float: that is refused, not raised."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        number = float(value)
+    except OverflowError:  # int too large for a float, as in 10**400
+        return False
+    return math.isfinite(number) and number >= 0
 
 
 def _want(condition: bool, message: str) -> None:
