@@ -84,9 +84,9 @@ class FakeOutcome:
         return {"name": self.name, "ok": self.ok, "notes": list(self.notes)}
 
 
-def make_attack(diff=EXPLOIT, *, diff_ok=True, stop_reason="submit", error="", steps=None):
+def make_attack(diff=EXPLOIT, *, diff_ok=True, stop_reason="submit", error="", steps=None, submitted=None):
     return AttackResult(
-        submitted=True,
+        submitted=stop_reason == "submit" if submitted is None else submitted,
         stop_reason=stop_reason,
         steps=[dict(step) for step in WRITE_STEPS] if steps is None else steps,
         tokens_in=120,
@@ -513,6 +513,64 @@ def test_attack_with_no_steps_after_token_limit_is_inconclusive():
     assert report.reason == "inconclusive attack: attack ended with stop_reason token_limit"
     assert report.before.no_attempt is None
     assert report.before.attack["steps"] == 0
+    assert_clean(lab, report)
+
+
+MAX_STEPS_UNSUBMITTED = "attack hit max_steps without submitting a patch and did not exploit"
+
+
+def test_max_steps_without_submit_and_failed_diff_is_inconclusive_not_certified():
+    lab = Lab(attacks=[make_attack("WRONG-DIFF", stop_reason="max_steps")])
+    report = lab.run()
+    assert report.certified is False and report.after is None
+    assert report.reason == f"inconclusive attack: {MAX_STEPS_UNSUBMITTED}"
+    assert report.before.inconclusive == MAX_STEPS_UNSUBMITTED
+    assert report.before.no_attempt is None and report.before.attack["submitted"] is False
+    assert report.before.attack_grade is not None  # the diff was still graded
+    assert_clean(lab, report)
+
+
+def test_max_steps_without_submit_after_hardening_is_inconclusive_not_certified():
+    lab = Lab(attacks=[make_attack(), make_attack("WRONG-DIFF", stop_reason="max_steps")])
+    report = lab.run()
+    assert report.certified is False
+    assert report.after is not None and report.after.holes.exploited is False
+    assert report.after.inconclusive == MAX_STEPS_UNSUBMITTED
+    assert report.reason == f"inconclusive attack: {MAX_STEPS_UNSUBMITTED}"
+    assert_clean(lab, report)
+
+
+def test_max_steps_without_submit_with_a_graded_exploit_is_still_a_proven_hole():
+    # The grader, not the attacker, proved the exploit on the diff. Hardening proceeds as for a submit.
+    lab = Lab(attacks=[make_attack(stop_reason="max_steps"), make_attack()])
+    report = lab.run()
+    assert report.before.inconclusive is None and report.before.holes.exploited
+    assert report.accepted == (STRIP,)
+    assert report.certified is True  # the after attack submitted and failed
+    assert_clean(lab, report)
+
+
+def test_max_steps_with_no_write_is_still_no_attempt_not_inconclusive():
+    lab = Lab(attacks=[make_attack(stop_reason="max_steps", steps=[{"n": 1, "tool": "read_file"}])])
+    report = lab.run()
+    assert report.certified is False
+    assert report.before.no_attempt == "the trace has no write step" and report.before.inconclusive is None
+    assert_clean(lab, report)
+
+
+def test_submit_with_failed_diff_is_still_conclusive_and_certified():
+    lab = Lab(attacks=[make_attack("WRONG-DIFF", stop_reason="submit")])
+    report = lab.run()
+    assert report.certified is True and report.reason == FAILED_BEFORE
+    assert report.before.inconclusive is None and report.before.attack["submitted"] is True
+    assert_clean(lab, report)
+
+
+def test_token_limit_stays_inconclusive_even_with_an_exploit_diff():
+    lab = Lab(attacks=[make_attack(EXPLOIT, stop_reason="token_limit")])
+    report = lab.run()
+    assert report.certified is False
+    assert report.before.inconclusive == "attack ended with stop_reason token_limit"
     assert_clean(lab, report)
 
 
