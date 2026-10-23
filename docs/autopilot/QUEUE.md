@@ -254,7 +254,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — todo (batch 3 only, then HALT) — needs T23, T07, T16, T17, T18, T19, T20, T22 [30%]
+### T08 Eval run and results with raw counts — size M — todo — needs T23, T07, T16, T17, T18, T19, T20, T22 [30%]
 Unblocked 2026-10-21: U21 is closed and T23 is done (#30), so T08 has no U21 dependency left.
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
@@ -265,7 +265,7 @@ Audit 2026-10-18: before the run, smoke one real image's gold gate. `grader.PYTE
 under `sh -lc`; SWE-bench images may need `conda activate testbed`. Check image HEAD equals `base_commit`
 (`strip-future-git` refuses otherwise). Run on Sandboxes (`EXECUTOR=sandbox`), not local Docker.
 
-Planner note 2026-10-23 (U25 resolved, owner approved resume; batch 3 only). The Token Factory console on 2026-10-23
+Planner note 2026-10-23 (U25 resolved, owner approved resume; batch 3 only, then HALT). The Token Factory console on 2026-10-23
 15:44 UTC shows Sandboxes NOT billed (no line item) and trial credits at $0.71; the $26.65 balance is untouched.
 Settings now: `SANDBOX_COST_CAP_USD=1.50` (estimate-only counter; $0.50 used) and `TRIAL_CREDIT_CAP_USD` stays at its
 default 0.74 ($0.38 counted), so the trial counter halts the run at about $0.35 real remaining, above the owner's $0.25
