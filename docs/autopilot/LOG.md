@@ -342,3 +342,12 @@ progress 82% (21/30 tasks done, 6 days to submit)
 - Learning notes for #39 added.
 - No other runnable task: T08 waits on U25, T24/T27/T10 need T08, T12 after 2026-10-27. Hand-back condition not met (T12 is date-gated, not owner-blocked).
 - Lessons: when a matcher keys on a tool's error wording, list every wording that tool uses for the same exit code before shipping.
+
+## 2026-10-23 planner (handoff before context clear)
+- Merged #36 (T01 smoke on Sandboxes; Sonnet approve, 5 low findings moved to T27 item list), #40/#41 (queue). T08 resumed as batch 3 only.
+- Decision: owner re-checked the console on 2026-10-23 15:44 UTC: Sandboxes has no billing line; trial credit $0.71; the $26.65 balance is untouched. Reason: the cost the API reports is an estimate, so `SANDBOX_COST_CAP_USD` is a guard, set to 1.50 in the live `.env`.
+- Decision: `TRIAL_CREDIT_CAP_USD` stays 0.74 (default). Reason: the counter reads $0.38 used, so it halts near $0.35 real credit left, above the owner's $0.25 floor, and the ledger overestimates against the console. Never raise it without the owner.
+- Decision: batch 3 runs in chunks of at most 3 tasks, then the routine halts the budget itself and asks for U26. Reason: the owner wants a console re-check before each further batch.
+- Decision: Nemotron Super stays the attacker (Ultra is dearer); Haiku builds, Sonnet reviews, Opus only orchestrates.
+- Queued from chat-only items: T31 (PR #30 minors), T32 (certificate lost to the leak guard), T27 item for the PR #36 follow-ups. PR #32 minors were already T27 items 1-9.
+- Live ledger `halted` cleared (backup `~/.cheatproof-autopilot/ledger.pre-u25.bak`).
