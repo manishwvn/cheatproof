@@ -323,7 +323,10 @@ def test_clean_text_redacts_whole_string_credential_patterns():
 
     assert clean_text("fix Bearer abc123token now", 100) == "fix REDACTED now"
     assert clean_text("setup password=hunter2 here", 100) == "setup REDACTED here"
-    assert clean_text("use api_key: abc123 please", 100) == "use REDACTED please"
+    assert clean_text("use api_key: abc123 please", 100) == "use api_key: REDACTED please"
+    assert clean_text("send access_token=abc and auth-token:xyz", 100) == "send REDACTED and REDACTED"
+    assert clean_text("Authorization: abc", 100) == "Authorization: REDACTED"
+    assert clean_text("key=abcdefghijkl", 100) == "REDACTED"
     assert "hunter2" not in clean_text("PASSWORD=hunter2", 100)
 
 
@@ -488,3 +491,37 @@ def test_the_total_cap_is_kept_in_batch_json_across_invocations(tmp_path, monkey
     named = tc.batch_argv(tmp_path, out, "--network-fetch", "--instance-ids", tc.ID_D)
     assert cli.main(named, deps=deps) == 0
     assert tc.read_batch(out)["network_fetch_done"] == [tc.ID_A, tc.ID_B, tc.ID_D]
+
+
+def test_clean_text_keeps_ordinary_words_that_contain_a_credential_word():
+    from cheatproof.sanitize import clean_text
+
+    for text in (
+        "KeyError: x",
+        "monkey: patch",
+        "key: x",
+        "auth: yes",
+        "tokenizer: fast",
+        "see config.key=short",
+    ):
+        assert clean_text(text, 100) == text
+
+
+def test_clean_text_is_linear_on_hostile_input():
+    import time
+
+    from cheatproof.sanitize import clean_text
+
+    hostile = (
+        "a" * 64_000,
+        "a=" * 32_000,
+        "key=" * 16_000,
+        "token:" * 10_000,
+        "Bearer " * 9_000,
+        "x" * 64_000 + " password=1",
+    )
+    start = time.perf_counter()
+    for text in hostile:
+        for limit in (300, 2000, 20_000):
+            clean_text(text, limit)
+    assert time.perf_counter() - start < 0.5

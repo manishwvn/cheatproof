@@ -16,11 +16,13 @@ Limits (all in code):
   `allow_network=False`, so `web_search` cannot survive a patch.
 - At most 2 tasks in total: `batch` keeps the ids it ran in `batch.json` (`network_fetch_done`, saved before each
   run, carried over every later batch) and refuses a third unless `--instance-ids` names 1 or 2. 3 or more
-  `--instance-ids` are refused. `harden` runs one task per call and keeps no record; `TAVILY_CALL_CAP` bounds it.
+  `--instance-ids` are refused. `harden --network-fetch` has no persisted task cap (one task per call, no record): only `TAVILY_CALL_CAP`
+  bounds repeated `harden` runs.
 - Refused with exit 2 when `TAVILY_API_KEY` is absent (the message names the variable, never a value).
 - The query is cleaned before it leaves the host and before it is traced: the `TAVILY_API_KEY` value, `Bearer <token>`
-  and `name=value` credential patterns are replaced on the whole string, the text is cut to 300 chars, and each word
-  is checked on its own. Result titles, urls and snippets get the same cleaning. The trace shows the cleaned query
+  and `name=value` credentials (`password=`, `api_key:`, `access_token=`; a bare `key=` or `auth:` only with a value of 8
+  chars or more) are replaced, the text is cut to 300 chars before any regex runs (linear time, a word over 512 chars is
+  redacted whole), and each word is checked on its own. Result titles, urls and snippets get the same cleaning. The trace shows the cleaned query
   (`tool: web_search`, `args.query` in `traces/<stem>.jsonl`). The key is never in a query, result, trace or error.
 
 Run one task (not before the owner clears it):

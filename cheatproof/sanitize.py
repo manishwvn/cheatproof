@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Iterator
+from itertools import pairwise
 from typing import Any
 
 REDACTED = "REDACTED"
@@ -207,27 +208,73 @@ def assert_clean(obj: Any) -> None:
 MAX_QUERY_CHARS = 300  # a web search query (sent and traced) is cut to this
 TAVILY_KEY_ENV = "TAVILY_API_KEY"
 _MIN_SECRET_CHARS = 4  # a shorter configured secret is not matched verbatim: it would shred ordinary text
-_PRECAP_CHARS = 64_000  # bounds the whole-string passes; far above any limit * 4 the callers use
-# `password=hunter2`, `api_key: abc`, `token=...`: a name with a credential word, a separator and a value. The value is
-# a whole word, so a space-separated secret after `password =` is still caught by the word pass only if secret-like.
-SECRET_ASSIGNMENT = re.compile(
-    r"[\w.\-]*(?:password|passwd|secret|token|api[_\-]?key|key|auth)[\w.\-]*\s*[=:]\s*\S+", re.IGNORECASE
-)
+_PRECAP_CHARS = 64_000  # bounds every pass below; far above any limit the callers use
+_NAME_CHARS = 64  # the part of a word before `=` or `:` that is read as a name
+_MAX_WORD_CHARS = 512  # a longer word is redacted whole
+_WEAK_VALUE_CHARS = 8  # `key=` and `auth:` redact a value only when it is this long
+# Names of a credential assignment. A name is split on `.`, `_` and `-` and matched by whole part, so `api_key`,
+# `access_token` and `auth-token` match while `KeyError` and `monkey` do not. A weak name (a bare `key` or `auth`) needs
+# a long value, so `key: x` in prose stays.
+_STRONG_PARTS = frozenset({"password", "passwd", "secret", "token", "apikey", "authorization", "credential"})
+_WEAK_PARTS = frozenset({"key", "auth"})
+_NAME_SPLIT = re.compile(r"[._\-]+")
+_NON_NAME = re.compile(r"[^\w.\-]")
+
+
+def _assignment_kind(before: str) -> str | None:
+    """ "strong", "weak" or None for the text left of `=` or `:`. Reads the last name-like run of at most _NAME_CHARS."""
+    name = _NON_NAME.split(before[-_NAME_CHARS:])[-1].lower()
+    parts = [part for part in _NAME_SPLIT.split(name) if part]
+    if any(part in _STRONG_PARTS for part in parts) or any(
+        a == "api" and b == "key" for a, b in pairwise(parts)
+    ):
+        return "strong"
+    return "weak" if any(part in _WEAK_PARTS for part in parts) else None
+
+
+def _is_secret_value(kind: str, value: str) -> bool:
+    return kind == "strong" or len(value) >= _WEAK_VALUE_CHARS
+
+
+def _redact_assignments(words: list[str]) -> list[str]:
+    """`password=hunter2` and `api_key: abc` become REDACTED. Linear: one pass over the words, each tested with
+    str.find and a split of at most _NAME_CHARS characters. A value in the next word (`token: abc`) is redacted too."""
+    out: list[str] = []
+    waiting: str | None = None  # kind of a name whose value is the next word
+    for word in words:
+        if waiting is not None:
+            out.append(REDACTED if _is_secret_value(waiting, word) else word)
+            waiting = None
+            continue
+        marks = [i for i in (word.find("="), word.find(":")) if i > 0]
+        kind = _assignment_kind(word[: min(marks)]) if marks else None
+        if kind is None:
+            out.append(word)
+            continue
+        value = word[min(marks) + 1 :].lstrip("=:")
+        if not value:
+            waiting = kind
+            out.append(word)
+        else:
+            out.append(REDACTED if _is_secret_value(kind, value) else word)
+    return out
 
 
 def clean_text(text: str, limit: int, secrets: tuple[str, ...] = ()) -> str:
     """Free text as one line of at most limit chars. For a web search query or a result snippet, where replacing the
     whole string would lose it.
 
-    The whole string comes first: the TAVILY_API_KEY value (read from the environment here, never stored or printed)
-    and every value in secrets are replaced verbatim, then `Bearer <token>` and `name=value` credential patterns. Then
-    the text is cut at limit * 4, split into words, and each word is checked on its own (a secret-like word becomes
-    REDACTED and the words around it stay). The result is cut at limit."""
+    First the TAVILY_API_KEY value (read from the environment here, never stored or printed) and every value in
+    secrets are replaced verbatim (str.replace, linear). Then the text is cut at limit * 8, and only then does any
+    regex run: `Bearer <token>`, then a word pass for `name=value` credentials (no backtracking: see
+    _redact_assignments), then each word is checked on its own (a secret-like word becomes REDACTED and the words
+    around it stay). The result is cut at limit."""
+    limit = max(limit, 0)
     text = text[:_PRECAP_CHARS]
     for value in (*secrets, os.environ.get(TAVILY_KEY_ENV, "")):
         if len(value) >= _MIN_SECRET_CHARS:
             text = text.replace(value, REDACTED)
-    text = BEARER.sub(REDACTED, text)
-    text = SECRET_ASSIGNMENT.sub(REDACTED, text)
-    words = text[: max(limit, 0) * 4].split()
-    return " ".join(sanitize(word) for word in words)[: max(limit, 0)]
+    text = BEARER.sub(REDACTED, text[: limit * 8])
+    words = _redact_assignments(text.split())
+    # A word this long is no query or snippet word, and the checks in sanitize() are not linear on it: redact it whole.
+    return " ".join(REDACTED if len(word) > _MAX_WORD_CHARS else sanitize(word) for word in words)[:limit]
