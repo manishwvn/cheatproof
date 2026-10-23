@@ -14,24 +14,24 @@ Read this, then `STATUS.md`, then `docs/autopilot/QUEUE.md`, before doing anythi
 ## Ledger and caps (`~/.cheatproof-autopilot/ledger.json`)
 - `halted` is null (cleared 2026-10-23). Backups: `ledger.pre-u21.bak`, `ledger.pre-u25.bak`.
 - Counters at handoff: total $0.535, trial spend $0.3796, Sandboxes cost $0.5022, 46 sandbox runs.
-- Caps: total $20, daily $4; `TRIAL_CREDIT_CAP_USD` 0.74 (default, never raise); `SANDBOX_COST_CAP_USD` 1.50 in `.env`.
-- The $26.65 account balance is card money: never spend it. Console trial credit was $0.71 on 2026-10-23.
+- Caps: total $20, daily $4; `REAL_SPEND_CAP_USD` default and hard ceiling $10 (T43, replaces the trial-only 0.74 cap; total real spend = trial + promo, counted in the ledger's `trial_spend_usd`); `SANDBOX_COST_CAP_USD` 1.50 in `.env`.
+- The $26.65 balance is hackathon promo credit (Token Factory > Transactions: "Adjustment: AI Builder Program Credits", +$26.65, Oct 18), not card money. The $0.71 trial is used first, then the promo. Owner 2026-10-23: promo spend is allowed up to $10 total real spend for now. The balance must never go negative (a negative balance charges the card).
 - HTTP 402 or a malformed cost still halts.
 - Fresh machine: run `python -m cheatproof.cli budget init` once; a lost halt is forgotten by a later init.
 
 ## What the routine does next
-- T08 batch 3 only: chunks of at most 3 tasks on Sandboxes, Nemotron Super, combined prompt. It stops at any halt, trial counter above $0.70 or Sandboxes sum above $1.40.
+- T08 batch 3 only: chunks of at most 3 tasks on Sandboxes, Nemotron Super, combined prompt. It stops at any halt, real-spend counter (`trial_spend_usd`) near the $10 cap or Sandboxes sum above $1.40.
 - Then it halts the budget itself, updates `docs/results.md`, adds USER item U26, and waits. It must not start batch 4.
 - After that: T32 (leak guard loses a certificate), T27 (budget hardening), T31 (executor minors), T24, T10 to T13. T12 is date-gated (after 2026-10-27).
 
 ## Owner blockers
 - U26 (appears after batch 3): re-check the Token Factory console, then say whether to run batch 4 and whether to raise caps.
-- Tell the planner when the promo credit shows, so the trial cap can be raised.
+- Raising `REAL_SPEND_CAP_USD` past $10 needs the owner and a code change (`MAX_REAL_SPEND_CAP_USD`).
 - U6, video, submission (Oct 26 to 28). T14 submit is the owner's alone; nothing goes public without the owner.
 
 ## Gotchas
 - Sandboxes are NOT billed (console, 2026-10-23, no line item). The API still reports a non-zero `resources.cost` on `done.result.cost`, which is only an estimate; the cap is a guard.
-- The Nebius AI Cloud console is a separate, empty tenant. Never submit its billing form. Only Token Factory has the trial credit.
+- The Nebius AI Cloud console is a separate, empty tenant. Never submit its billing form. Only Token Factory has the trial and promo credit.
 - Sandboxes is the default backend. No local swebench image exists; never pull one by hand; never touch other projects' Docker images (fde1-app, pgvector/pgvector:pg16); never retry `docker rmi` (denied by the guard).
 - Cost lives on `done.result.cost`, not `done.cost` (that bug hid the halt in #30).
 - A hardened task costs about $0.056 trial and $0.09 Sandboxes. Measure before sizing a batch; `batch` has no stop before a run that would pass a cap.

@@ -12,7 +12,11 @@ empty, nan, inf, zero, negative or too-large money value, or a bad count cap, ra
 before anything is spent, because a bad value must never read as "unlimited". Sandboxes runs count
 against SANDBOX_RUN_CAP. Each cost a Sandboxes result reports is logged in the ledger's Sandboxes section,
 never in the Token Factory totals, and the budget halts once the logged sum passes SANDBOX_COST_CAP_USD.
-The trial cap (TRIAL_CREDIT_CAP_USD) limits Token Factory spend counted from when it is set. Local Docker
+The real-spend cap (REAL_SPEND_CAP_USD, default and hard ceiling $10) limits TOTAL real Token Factory spend (trial
+credit plus the hackathon promo credit), counted in the ledger's trial_spend_usd field (the name is kept so the live
+ledger keeps counting). A set value above the ceiling, or invalid, zero or negative, raises: it never falls back to a
+higher cap. The old TRIAL_CREDIT_CAP_USD, if set, still applies as an additional, stricter cap. The account balance
+must never go negative, because a negative balance charges the card. Local Docker
 runs and Tavily calls book no money; they only count against their caps. A ledger that does not match
 this shape is refused the same way, never repaired. A missing ledger is refused too: only create_ledger (the
 `budget init` CLI command) creates one, so a run never starts on a ledger nobody made. snapshot() only reads the
@@ -36,8 +40,10 @@ from pathlib import Path
 MAX_TOTAL_CAP_USD = 20.0
 # Cap on the summed Sandboxes cost in the ledger. An invalid SANDBOX_COST_CAP_USD falls back to this, never to no cap.
 DEFAULT_SANDBOX_COST_CAP_USD = 0.50
-# Cap on Token Factory spend counted from when it is set: $0.84 of trial credit left, minus a $0.10 floor.
-DEFAULT_TRIAL_CREDIT_CAP_USD = 0.74
+# Cap on TOTAL real Token Factory spend (trial + promo credit), set by the owner 2026-10-23. Default and hard ceiling:
+# raising the ceiling needs a code change. Spend is counted in the ledger field trial_spend_usd (old name kept).
+MAX_REAL_SPEND_CAP_USD = 10.0
+DEFAULT_REAL_SPEND_CAP_USD = 10.0
 
 
 class BudgetExceeded(RuntimeError):
@@ -82,6 +88,16 @@ def _total_cap(value: object) -> float:
     if number > MAX_TOTAL_CAP_USD:
         raise BudgetExceeded(
             f"total cap (SPEND_CAP_USD) must be at most ${MAX_TOTAL_CAP_USD:g} (see .env.example), got {value!r}"
+        )
+    return number
+
+
+def _real_cap(value: object) -> float:
+    number = _positive("real spend cap (REAL_SPEND_CAP_USD)", value)
+    if number > MAX_REAL_SPEND_CAP_USD:
+        raise BudgetExceeded(
+            f"real spend cap (REAL_SPEND_CAP_USD) must be at most ${MAX_REAL_SPEND_CAP_USD:g} "
+            f"(see .env.example), got {value!r}"
         )
     return number
 
@@ -163,10 +179,18 @@ def _sandbox_cost_cap_env() -> float:
     return value if value <= MAX_TOTAL_CAP_USD else DEFAULT_SANDBOX_COST_CAP_USD
 
 
-def _trial_cap_env() -> float:
-    # Unset means the default. Set but invalid raises: a bad trial cap never reads as unlimited.
+def _real_cap_env() -> float:
+    # Unset means the default. Set but invalid or above the ceiling raises: never a higher cap, never unlimited.
+    if "REAL_SPEND_CAP_USD" not in os.environ:
+        return DEFAULT_REAL_SPEND_CAP_USD
+    return _real_cap(os.environ["REAL_SPEND_CAP_USD"])
+
+
+def _trial_cap_env() -> float | None:
+    # The old trial cap, now only an extra stricter cap. Unset means none (REAL_SPEND_CAP_USD still applies).
+    # Set but invalid raises: a bad value never reads as unlimited.
     if "TRIAL_CREDIT_CAP_USD" not in os.environ:
-        return DEFAULT_TRIAL_CREDIT_CAP_USD
+        return None
     raw = os.environ["TRIAL_CREDIT_CAP_USD"]
     value = _positive("TRIAL_CREDIT_CAP_USD", raw)
     if value > MAX_TOTAL_CAP_USD:
@@ -267,7 +291,8 @@ class Budget:
         local_run_cap: int = 2000,
         tavily_call_cap: int = 200,
         sandbox_cost_cap_usd: float = DEFAULT_SANDBOX_COST_CAP_USD,
-        trial_credit_cap_usd: float = DEFAULT_TRIAL_CREDIT_CAP_USD,
+        real_spend_cap_usd: float = DEFAULT_REAL_SPEND_CAP_USD,
+        trial_credit_cap_usd: float | None = None,
     ) -> None:
         # Every cap and price is checked here too, so a direct construction fails closed as well.
         self.ledger = Path(ledger)
@@ -287,7 +312,13 @@ class Budget:
         self.local_run_cap = _count_cap("local_run_cap (LOCAL_RUN_CAP)", local_run_cap)
         self.tavily_call_cap = _count_cap("tavily_call_cap (TAVILY_CALL_CAP)", tavily_call_cap)
         self.sandbox_cost_cap_usd = _positive("sandbox cost cap (SANDBOX_COST_CAP_USD)", sandbox_cost_cap_usd)
-        self.trial_credit_cap_usd = _positive("trial credit cap (TRIAL_CREDIT_CAP_USD)", trial_credit_cap_usd)
+        self.real_spend_cap_usd = _real_cap(real_spend_cap_usd)
+        # Optional extra cap, stricter than the real-spend cap when lower. None means only REAL_SPEND_CAP_USD applies.
+        self.trial_credit_cap_usd = (
+            None
+            if trial_credit_cap_usd is None
+            else _positive("trial credit cap (TRIAL_CREDIT_CAP_USD)", trial_credit_cap_usd)
+        )
 
     @classmethod
     def from_env(cls) -> Budget:
@@ -295,6 +326,7 @@ class Budget:
         ledger = _ledger_path()
         total_cap = _env_cap("SPEND_CAP_USD")
         daily_cap = _env_cap("DAILY_CAP_USD")
+        real_cap = _real_cap_env()
         trial_cap = _trial_cap_env()
         run_cap = _count_env("SANDBOX_RUN_CAP", "250")
         local_cap = _count_env("LOCAL_RUN_CAP", "2000")
@@ -309,6 +341,7 @@ class Budget:
             local_run_cap=local_cap,
             tavily_call_cap=tavily_cap,
             sandbox_cost_cap_usd=_sandbox_cost_cap_env(),
+            real_spend_cap_usd=real_cap,
             trial_credit_cap_usd=trial_cap,
         )
 
@@ -428,8 +461,13 @@ class Budget:
         today = s["days"].get(day, 0.0)
         if today + worst > self.daily_cap_usd:
             raise BudgetExceeded(f"daily cap ${self.daily_cap_usd:.2f} reached (today ${today:.4f})")
-        trial = s.get("trial_spend_usd", 0.0)
-        if trial + worst > self.trial_credit_cap_usd:
+        trial = s.get("trial_spend_usd", 0.0)  # total real Token Factory spend counted (old field name kept)
+        if trial + worst > self.real_spend_cap_usd:
+            raise BudgetExceeded(
+                f"real spend cap (REAL_SPEND_CAP_USD) ${self.real_spend_cap_usd:.2f} reached "
+                f"(${trial:.4f} counted of trial plus promo credit)"
+            )
+        if self.trial_credit_cap_usd is not None and trial + worst > self.trial_credit_cap_usd:
             raise BudgetExceeded(
                 f"trial credit cap (TRIAL_CREDIT_CAP_USD) ${self.trial_credit_cap_usd:.2f} reached "
                 f"(${trial:.4f} counted since the cap was set)"

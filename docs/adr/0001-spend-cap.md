@@ -4,8 +4,8 @@
 token counts, settle and ledger checks)
 
 **Context.** Token Factory needs a card. It has no documented hard spend limit, the balance can go negative, and the
-card is auto-charged at month start or at a billing threshold. The project must stay inside free credits, including
-during public judging (Dec 1–15) when anyone can trigger runs.
+card is auto-charged at month start or at a billing threshold. The project must stay inside free credits (the $1 trial
+and the hackathon promo credit, not card money), including during public judging (Dec 1–15) when anyone can trigger runs.
 
 **Decision.** Every paid call goes through `cheatproof/budget.py`:
 - It reserves the worst-case cost (estimated input × price, plus `max_tokens` × price) before calling, and settles
@@ -16,6 +16,10 @@ during public judging (Dec 1–15) when anyone can trigger runs.
 - **Ceiling.** The code enforces $20 as a hard maximum on the total cap (`MAX_TOTAL_CAP_USD`). A larger total cap
   raises `BudgetExceeded`, and so does a daily cap above the total cap. Only the owner may lower caps in `.env`.
   Raising the ceiling needs a code change through planner merge.
+- **Real-spend cap (T43, 2026-10-23).** `REAL_SPEND_CAP_USD` caps TOTAL real Token Factory spend (trial + promo credit).
+  Default and hard ceiling $10 (`MAX_REAL_SPEND_CAP_USD`); a set value above 10, zero, negative or invalid raises
+  `BudgetExceeded`, never a higher cap. It counts in the ledger field `trial_spend_usd` (name kept so the live ledger
+  keeps counting). The old `TRIAL_CREDIT_CAP_USD`, if set, is an extra, stricter cap. The balance must never go negative.
 - **Fail closed.** `SPEND_CAP_USD` and `DAILY_CAP_USD` are required, with no default. Each must parse as a finite
   number above 0. Every price (`MODEL_PRICES_JSON`, `SANDBOX_RUN_USD`) must be finite and above 0, and
   `SANDBOX_RUN_CAP` a whole number of 0 or more. A missing, empty, nan, inf, zero, negative or oversized money value,
