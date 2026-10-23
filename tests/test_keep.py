@@ -294,11 +294,12 @@ def test_recheck_uses_the_cached_restore_set_not_the_task(tmp_path, capsys):
     data["restore_paths"] = None  # unreadable at run time: fail closed, every test path is labelled
     restore_path.write_text(json.dumps(data), encoding="utf-8")
     capsys.readouterr()
-    assert _recheck(traces, task) == 0
-    out = capsys.readouterr().out
-    assert "before: labels=['test-edit']" in out
-    assert "tests/test_core.py: unrestored by the grade" in out
-    assert "recorded labels: DIFFER" in out
+    assert _recheck(traces, task) == 1  # the recorded primary no longer matches: named on stderr (T46)
+    captured = capsys.readouterr()
+    assert "before: labels=['test-edit']" in captured.out
+    assert "tests/test_core.py: unrestored by the grade" in captured.out
+    assert "recorded labels: DIFFER" in captured.out
+    assert "recorded primary does not match the recomputed primary" in captured.err
 
 
 @pytest.mark.parametrize(
@@ -556,3 +557,84 @@ def test_version_control_ignores_the_kept_raw_files(name):
         ["git", "check-ignore", "-q", f"results/traces/{name}"], cwd=root, capture_output=True, check=False
     )
     assert probe.returncode == 0, f"results/traces/{name} is not ignored"
+
+
+# --- T46: recheck also compares primary and exploited with rounds.json ------------------------------------------
+
+
+def _edit_recorded(traces: Path, stem: str, name: str, *, drop: tuple[str, ...] = (), **changes) -> None:
+    path = traces / f"{stem}.rounds.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    recorded = data["rounds"][name]["recorded"]
+    recorded.update(changes)
+    for key in drop:
+        recorded.pop(key)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_harden_records_primary_and_exploited_beside_the_labels(tmp_path):
+    task = make_task()
+    traces = _harden(tmp_path, task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py")])
+    stem = cli._certificate_stem(task)
+    rounds = json.loads((traces / f"{stem}.rounds.json").read_text(encoding="utf-8"))["rounds"]
+    assert rounds["before"]["recorded"]["primary"] == "test-edit"
+    assert rounds["before"]["recorded"]["exploited"] is True
+
+
+def test_recheck_passes_when_primary_and_exploited_agree(tmp_path, capsys):
+    task = make_task()
+    traces = _harden(tmp_path, task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py")])
+    capsys.readouterr()
+    assert _recheck(traces, task) == 0
+    out = capsys.readouterr().out
+    assert "recorded primary: match" in out and "recorded exploited: match" in out
+
+
+@pytest.mark.parametrize(
+    "field, changes", [("exploited", {"exploited": False}), ("primary", {"primary": "none"})]
+)
+def test_recheck_exits_1_and_names_the_recorded_field_that_differs(tmp_path, capsys, field, changes):
+    task = make_task()
+    traces = _harden(tmp_path, task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py")])
+    stem = cli._certificate_stem(task)
+    _edit_recorded(traces, stem, "before", **changes)
+    capsys.readouterr()
+    assert _recheck(traces, task) == 1
+    captured = capsys.readouterr()
+    assert f"recorded {field} does not match the recomputed {field}: {stem}.rounds.json" in captured.err
+    assert f"recorded {field}: DIFFER" in captured.out
+    assert SECRET_BODY not in captured.out + captured.err  # no diff text, and no recorded or recomputed value
+
+
+def test_recheck_names_both_differing_fields_in_a_fixed_order(tmp_path, capsys):
+    task = make_task()
+    traces = _harden(tmp_path, task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py")])
+    stem = cli._certificate_stem(task)
+    _edit_recorded(traces, stem, "before", primary="none", exploited=False)
+    capsys.readouterr()
+    assert _recheck(traces, task) == 1
+    err = capsys.readouterr().err.splitlines()
+    assert [line.split()[2] for line in err if "does not match" in line] == ["primary", "exploited"]
+
+
+def test_recheck_on_an_older_rounds_file_checks_labels_only(tmp_path, capsys):
+    task = make_task()
+    traces = _harden(tmp_path, task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py")])
+    stem = cli._certificate_stem(task)
+    _edit_recorded(traces, stem, "before", drop=("primary", "exploited"))
+    capsys.readouterr()
+    assert _recheck(traces, task) == 0
+    captured = capsys.readouterr()
+    assert "exploited/primary not recorded" in captured.out
+    assert "recorded labels: match" in captured.out
+    assert captured.err == ""
+
+
+def test_recheck_labels_that_differ_still_exit_0_as_before(tmp_path, capsys):
+    task = make_task()
+    traces = _harden(tmp_path, task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py")])
+    stem = cli._certificate_stem(task)
+    _edit_recorded(traces, stem, "before", labels=[])
+    capsys.readouterr()
+    assert _recheck(traces, task) == 0
+    assert "recorded labels: DIFFER" in capsys.readouterr().out

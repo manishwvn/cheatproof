@@ -78,6 +78,13 @@ def _no_ambient_model(monkeypatch):
     monkeypatch.delenv("MIN_FREE_DISK_GB", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _run_in_tmp_path(tmp_path, monkeypatch):
+    # The CLI defaults are relative to the working directory (results/traces, results/certificates, runs/tasks).
+    # Each test runs from its own tmp_path, so no test writes under the repo's results/ or runs/ (see conftest).
+    monkeypatch.chdir(tmp_path)
+
+
 def make_task() -> TaskSpec:
     return TaskSpec(
         instance_id=INSTANCE,
