@@ -6,6 +6,7 @@
         [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
     python -m cheatproof.cli report [--certs DIR] [--out FILE] [--format text|json]
     python -m cheatproof.cli site [--certs DIR] [--out DIR] [--traces DIR]
+    python -m cheatproof.cli holes recheck <stem> [--traces DIR] [--source S] [--cache-dir DIR]
 
 harden finds the task in the local cache only (never the network), runs harden() with one attacker bound to the
 given system prompt, writes one certificate and prints its path and a summary line. The attacker's task prompt is
@@ -52,6 +53,11 @@ site builds the static report site through site.build_site from the certificate 
 no Budget, LLM or executor is built for it. Its traces come from --traces, or from traces/ beside the certificates
 when that directory exists and --traces is not given.
 
+Since T42 harden and batch also keep, in the ignored traces/ folder and by the same stem, the RAW attack diffs
+(<stem>.before.diff, <stem>.after.diff, <stem>.diff), <stem>.restore.json (the grade's restore set, written before the
+paid run) and <stem>.rounds.json (see cheatproof/keep.py). holes recheck re-runs holes.classify on those files with no
+network, sandbox, model or budget and prints labels and test path names only; a missing piece is named and exits 1.
+
 Exit codes: 0 a certificate was written (certified or not), or the report was printed. 1 the budget was halted or
 capped, the executor refused or was unavailable, the spend could not be checked, or the certificate could not be
 written after a paid run (its report is kept in reports/). 2 usage error: bad flags, missing prompt, unknown or
@@ -96,6 +102,7 @@ if TYPE_CHECKING:
 
 DEFAULT_CACHE_DIR = Path("runs/tasks")
 DEFAULT_CERT_DIR = Path("results/certificates")
+DEFAULT_TRACES_DIR = Path("results/traces")  # ignored by version control: raw run files stay local (T42)
 DEFAULT_SITE_DIR = Path("results/site")
 # Siblings of the certificates directory, named by the certificate file stem (see the module docstring).
 TRACES_DIR = "traces"
@@ -629,13 +636,23 @@ def _harden_one(
     try:
         # An earlier run's trace is set aside before this run appends to traces/<stem>.jsonl.
         _rotate_trace(plan.traces_dir, stem, plan.trace_path)
+        # T42: the task's restore set is cached beside the trace before the paid run, for the offline recheck.
+        from cheatproof import keep  # lazy: keep imports harden
+
+        keep.start_run(plan.traces_dir, stem, plan.task)
     except OSError as exc:
         raise _Unwritten("start", "certificate_write_failed", exc) from None
 
+    finished: list[
+        Any
+    ] = []  # the attacks that returned, for keep.keep_stopped when harden stops without a report
+
     def attack_fn(session: Any) -> Any:
-        return deps.attack(
+        result = deps.attack(
             llm, session, settings.system_prompt, plan.prompt, settings.config, trace_path=plan.trace_path
         )
+        finished.append(result)
+        return result
 
     spent_before = _ledger_total(budget)
     if spent_before is None or not math.isfinite(spent_before):
@@ -646,8 +663,13 @@ def _harden_one(
         report = deps.harden(executor, plan.env, plan.task, attack_fn, budget=budget, **settings.timeout_kw)
     except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
         # The attack may have spent before harden stopped (a reset after it, say): the ledger delta is kept, and the
-        # trace the attack wrote stays where it is.
+        # trace the attack wrote stays where it is. T42: the raw diffs of the attacks that returned are kept too, best
+        # effort and never masking this stop (harden raised, so no report exists and the grades are unknown).
+        for note in keep.keep_stopped(finished, stem, plan.traces_dir):
+            print(f"note: {note}", file=sys.stderr)
         raise _Unwritten("start", _stop_reason(exc), exc, _spent_since(budget, spent_before)) from None
+    for note in keep.keep_raw(report, stem, plan.traces_dir):  # T42: raw diffs stay local, never raises
+        print(f"note: {note}", file=sys.stderr)
     spent_after = _ledger_total(budget)
     cost = None if spent_after is None else spent_after - spent_before
     if cost is None or not (math.isfinite(cost) and cost >= 0):
@@ -1152,6 +1174,41 @@ def cmd_site(args: argparse.Namespace, deps: Deps) -> int:
     return 1 if result.errors else 0
 
 
+def cmd_holes_recheck(args: argparse.Namespace, deps: Deps) -> int:
+    """T42: re-run the hole classifier offline on the kept diff, trace and restore set. Labels only.
+
+    No budget, executor, model or network. 0 when the labels were recomputed; 1 when a kept piece is missing or
+    unreadable (the message names it); 2 for a usage error such as a bad stem or an uncached task.
+    """
+    from cheatproof import keep  # lazy: keep imports harden
+
+    stem = args.stem
+    if not keep.valid_stem(stem):
+        return _usage_error(f"not a certificate stem: {stem!r}")
+    traces = args.traces
+    try:
+        instance_id = keep.load_instance_id(traces, stem)
+        matches = deps.find_tasks(instance_id, args.source, args.cache_dir)
+    except keep.KeepError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        return _usage_error(str(exc))
+    if len(matches) != 1:
+        return _usage_error(
+            f"{len(matches)} cached tasks named {instance_id!r} under {args.cache_dir}: "
+            "run python -m cheatproof.tasks fetch, or pass --source"
+        )
+    try:
+        checks = keep.recheck(traces, stem, matches[0])
+    except keep.KeepError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    for line in keep.render(stem, checks):
+        print(line)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m cheatproof.cli", description="Harden one task into a certificate, or report them."
@@ -1212,6 +1269,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="directory of <certificate file stem>.jsonl attacker traces (default: traces/ beside the "
         "certificates, when it exists)",
     )
+
+    holes = sub.add_parser("holes", help="offline checks of kept attack evidence; no paid calls")
+    holes_sub = holes.add_subparsers(dest="holes_command", required=True)
+    recheck = holes_sub.add_parser(
+        "recheck",
+        help="re-run the hole classifier on the kept diff, trace and restore set; prints labels only",
+    )
+    recheck.add_argument("stem", help="certificate file stem, for example CycloneDX__cyclonedx-python-348")
+    recheck.add_argument(
+        "--traces", type=Path, default=DEFAULT_TRACES_DIR, help="directory of the kept raw run files"
+    )
+    recheck.add_argument("--source", help="task source to search (default: every cached source)")
+    recheck.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR, help="task cache directory")
     return parser
 
 
@@ -1228,6 +1298,8 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
         return cmd_batch(args, deps)
     if args.command == "site":
         return cmd_site(args, deps)
+    if args.command == "holes":
+        return cmd_holes_recheck(args, deps)
     return cmd_report(args, deps)
 
 
