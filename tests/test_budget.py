@@ -22,6 +22,8 @@ from cheatproof.budget import (
 )
 from cheatproof.llm import GuardedLLM
 
+FAKE_LLM_SECRET = "FAKE-LLM-SECRET-402-do-not-print"
+
 PRICE = Price(input_per_m=1.0, output_per_m=2.0)
 OLD_MTIME_NS = 1_000_000_000 * 10**9  # 2001, far from now, so any rewrite of the file shows as a change
 TODAY = date.today().isoformat()
@@ -120,7 +122,7 @@ def test_guarded_chat_refuses_before_calling_model_when_over_cap(tmp_path):
 def test_http_402_halts_every_later_call(tmp_path):
     b = make_budget(tmp_path, total=10, daily=10)
     llm = GuardedLLM(b, client=fake_client(FakeCompletions(error=status_error(402))))
-    with pytest.raises(openai.APIStatusError):
+    with pytest.raises(BudgetExceeded, match="HTTP 402 from Token Factory"):
         llm.chat("m", [{"role": "user", "content": "hi"}], max_tokens=10)
     with pytest.raises(BudgetExceeded, match="halted"):
         b.reserve("m", 1, 1)
@@ -1079,6 +1081,9 @@ def test_create_ledger_refuses_an_existing_file_and_keeps_it(tmp_path):
 
 def test_a_created_ledger_runs_paid_calls(tmp_path):
     (tmp_path / "ledger.json").unlink()
+    (
+        tmp_path / "ledger.lock"
+    ).unlink()  # the lock left by the first create is a lost-ledger sign, so start clean
     create_ledger(tmp_path / "ledger.json")
     b = make_budget(tmp_path)
     hold = b.reserve("m", 1000, 0)
@@ -1182,3 +1187,142 @@ def test_a_non_utf8_ledger_is_refused_as_not_valid_json(tmp_path):
     assert "codec" not in str(err.value)  # no decode detail leaves
     with pytest.raises(BudgetExceeded, match="not valid JSON"):
         b.reserve("m", 1, 1)
+
+
+# --- T45 review: a lost ledger is not silently replaced; a missing halted key is corrupt; 402 from the LLM ---------
+
+
+def _lost_ledger_dir(tmp_path):
+    """A directory where a ledger existed and was lost: a backup named like the ledger is left behind.
+    The module's autouse ledger lives in tmp_path itself, so these tests use a subdirectory."""
+    lost = tmp_path / "lost"
+    lost.mkdir()
+    (lost / "ledger.json.bak").write_text("old spend")
+    return lost
+
+
+def test_a_stale_lock_alone_does_not_block_init(tmp_path):
+    early = tmp_path / "stale"
+    create_ledger(early / "ledger.json")
+    (early / "ledger.json").unlink()  # the lock stays behind, but no backup: init still works
+    assert (early / "ledger.lock").exists()
+    assert create_ledger(early / "ledger.json") == early / "ledger.json"
+
+
+def test_a_run_before_init_leaves_no_lock_and_init_then_works(tmp_path):
+    early = tmp_path / "early"
+    target = early / "ledger.json"
+    b = Budget(target, 1.0, 1.0, 1, prices={"m": PRICE}, sandbox_run_usd=0.01)
+    with pytest.raises(BudgetExceeded, match="budget init"):
+        b.reserve("m", 1, 1)
+    with pytest.raises(BudgetExceeded, match="budget init"):
+        b.snapshot()
+    with pytest.raises(BudgetExceeded, match="budget init"):
+        b.halt("x")
+    assert not (early / "ledger.lock").exists()  # no lock file blocks the later init
+    assert create_ledger(target) == target
+    assert b.reserve("m", 1, 1).usd >= 0
+
+
+def test_create_ledger_refuses_a_backup_named_like_the_ledger_and_keeps_it(tmp_path):
+    fresh = _lost_ledger_dir(tmp_path)
+    with pytest.raises(BudgetExceeded, match=r"backup named like the ledger \(\*\.bak\)") as err:
+        create_ledger(fresh / "ledger.json")
+    assert not (fresh / "ledger.json").exists()
+    assert (fresh / "ledger.json.bak").read_text() == "old spend"
+    assert "ledger.json.bak" not in str(err.value)  # kind names only, never file names
+    assert str(tmp_path) not in str(err.value)
+
+
+def test_a_backup_not_named_like_the_ledger_does_not_block_init(tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "unrelated.bak").write_text("not ours")
+    assert create_ledger(other / "ledger.json") == other / "ledger.json"
+    assert (other / "unrelated.bak").read_text() == "not ours"
+
+
+def test_force_fresh_creates_past_a_lost_ledger_backup_and_keeps_it(tmp_path):
+    lost = _lost_ledger_dir(tmp_path)
+    create_ledger(lost / "ledger.json", force_fresh=True)
+    assert json.loads((lost / "ledger.json").read_text())["total_usd"] == 0.0
+    assert (lost / "ledger.json.bak").read_text() == "old spend"
+
+
+def test_force_fresh_never_overwrites_an_existing_ledger(tmp_path):
+    write_ledger(tmp_path, total_usd=0.5, halted="kept")
+    before = (tmp_path / "ledger.json").read_text()
+    with pytest.raises(BudgetExceeded, match="already exists"):
+        create_ledger(tmp_path / "ledger.json", force_fresh=True)
+    assert (tmp_path / "ledger.json").read_text() == before
+
+
+def test_init_ledger_from_env_refuses_lost_siblings_until_force_fresh(tmp_path, monkeypatch):
+    target = tmp_path / "env" / "ledger.json"
+    target.parent.mkdir()
+    (target.parent / "ledger.json.bak").write_text("old")
+    monkeypatch.setenv("SPEND_LEDGER", str(target))
+    with pytest.raises(BudgetExceeded, match="backup named like the ledger"):
+        init_ledger_from_env()
+    assert not target.exists()
+    assert init_ledger_from_env(force_fresh=True) == target
+
+
+def test_a_ledger_without_a_halted_key_is_refused_not_read_as_running(tmp_path):
+    state = {
+        "total_usd": 0.0,
+        "days": {},
+        "sandbox_runs": 0,
+    }  # no halted key: a corrupt ledger, not a running one
+    (tmp_path / "ledger.json").write_text(json.dumps(state))
+    b = make_budget(tmp_path)
+    with pytest.raises(BudgetExceeded, match="halted"):
+        b.snapshot()
+    with pytest.raises(BudgetExceeded, match="halted"):
+        b.check_not_halted()
+    with pytest.raises(BudgetExceeded, match="halted"):
+        b.reserve("m", 1, 1)
+    with pytest.raises(BudgetExceeded, match="halted"):
+        b.reserve_sandbox_run()
+    assert json.loads((tmp_path / "ledger.json").read_text()) == state  # nothing written
+
+
+def test_http_402_from_the_llm_is_a_fixed_message_with_no_sdk_text(tmp_path):
+    b = make_budget(tmp_path, total=10, daily=10)
+    req = httpx.Request("POST", "https://example.invalid/v1/chat/completions")
+    err = openai.APIStatusError(
+        f"balance gone {FAKE_LLM_SECRET}",
+        response=httpx.Response(402, request=req),
+        body={"key": FAKE_LLM_SECRET},
+    )
+    llm = GuardedLLM(b, client=fake_client(FakeCompletions(error=err)))
+    with pytest.raises(BudgetExceeded) as raised:
+        llm.chat("m", [{"role": "user", "content": "hi"}], max_tokens=10)
+    assert str(raised.value) == "HTTP 402 from Token Factory; the budget is halted"
+    assert raised.value.__context__ is None and raised.value.__cause__ is None
+    assert FAKE_LLM_SECRET not in repr(raised.value)
+    assert "402" in b.snapshot()["halted"]
+
+
+def test_http_402_the_ledger_cannot_halt_gives_a_fixed_message(tmp_path, monkeypatch):
+    b = make_budget(tmp_path, total=10, daily=10)
+    req = httpx.Request("POST", "https://example.invalid/v1/chat/completions")
+    err = openai.APIStatusError("gone", response=httpx.Response(402, request=req), body=None)
+    llm = GuardedLLM(b, client=fake_client(FakeCompletions(error=err)))
+
+    def refused_halt(self, reason):
+        raise BudgetExceeded("ledger gone")
+
+    monkeypatch.setattr(Budget, "halt", refused_halt)
+    with pytest.raises(BudgetExceeded) as raised:
+        llm.chat("m", [{"role": "user", "content": "hi"}], max_tokens=10)
+    assert str(raised.value) == "HTTP 402 from Token Factory; ledger could not be halted"
+    assert raised.value.__context__ is None and raised.value.__cause__ is None
+
+
+def test_a_non_402_llm_error_still_raises_the_sdk_error(tmp_path):
+    b = make_budget(tmp_path, total=10, daily=10)
+    llm = GuardedLLM(b, client=fake_client(FakeCompletions(error=status_error(500))))
+    with pytest.raises(openai.APIStatusError):
+        llm.chat("m", [{"role": "user", "content": "hi"}], max_tokens=10)
+    assert b.snapshot()["halted"] is None  # a 5xx halts nothing

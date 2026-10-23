@@ -1031,3 +1031,75 @@ def test_a_402_the_ledger_cannot_halt_gives_a_fixed_message_with_no_sdk_error(tm
     assert err.value.__context__ is None  # the SDK error is never the context
     assert err.value.__cause__ is None
     assert FAKE_SECRET not in repr(err.value)
+
+
+# --- T45 review: the HTTP status also comes from exc.response.status_code, and a 402 in that shape halts ----------
+
+
+class _ResponseShapedError(Exception):
+    """An SDK-style error that carries its status only on .response, as httpx-based errors do."""
+
+    def __init__(self, status):
+        super().__init__(f"leaky server text {FAKE_SECRET}")
+        self.response = SimpleNamespace(status_code=status)
+
+
+class _StatusCodeShapedError(Exception):
+    def __init__(self, status):
+        super().__init__(f"leaky server text {FAKE_SECRET}")
+        self.status_code = status
+
+
+class _BothShapesError(Exception):
+    def __init__(self):
+        super().__init__(f"leaky {FAKE_SECRET}")
+        self.status_code = 500
+        self.response = SimpleNamespace(status_code=402)
+
+
+@pytest.mark.parametrize(
+    "exc, status",
+    [
+        (_StatusCodeShapedError(402), 402),
+        (_ResponseShapedError(402), 402),
+        (_ResponseShapedError(503), 503),
+        (_ResponseShapedError(True), None),  # a bool is not a status
+        (_ResponseShapedError("402"), None),  # nor is a string
+        (_BothShapesError(), 500),  # exc.status_code is read before exc.response
+        (Exception("no status"), None),
+    ],
+)
+def test_http_status_reads_status_code_then_response_status_code(exc, status):
+    from cheatproof.executor import _http_status
+
+    assert _http_status(exc) == status
+
+
+def test_describe_error_names_a_response_shaped_status_and_no_text():
+    from cheatproof.executor import _describe_error
+
+    text = _describe_error(_ResponseShapedError(503))
+    assert text == "_ResponseShapedError (HTTP 503)"
+    assert FAKE_SECRET not in text
+
+
+def test_halt_for_payment_halts_on_a_response_shaped_402(tmp_path):
+    from cheatproof.executor import _halt_for_payment
+
+    budget = real_budget(tmp_path)
+    err = _halt_for_payment(_ResponseShapedError(402), budget)
+    assert str(err) == "HTTP 402 from Sandboxes; the budget is halted"
+    assert "402" in budget.snapshot()["halted"]
+    assert FAKE_SECRET not in repr(err) and FAKE_SECRET not in str(err)
+    assert err.__context__ is None and err.__cause__ is None  # returned, not raised: no SDK context
+    assert _halt_for_payment(_ResponseShapedError(503), budget) is None
+
+
+def test_http_402_in_response_shape_from_a_call_halts_the_real_ledger(tmp_path):
+    budget = real_budget(tmp_path)
+    box, _, session = make(budget=budget)
+    box.raise_on = lambda argv: _ResponseShapedError(402)
+    with pytest.raises(BudgetExceeded, match="402") as err:
+        session.run("x", timeout=5)
+    assert "402" in budget.snapshot()["halted"]
+    assert_no_secret(err.value)

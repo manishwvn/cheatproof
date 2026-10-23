@@ -2196,12 +2196,30 @@ def test_report_skips_a_batch_file_it_cannot_read_with_a_note(tmp_path, capsys):
 def test_budget_init_creates_the_ledger_once(tmp_path, monkeypatch, capsys):
     ledger = tmp_path / "ledger.json"
     monkeypatch.setenv("SPEND_LEDGER", str(ledger))
-    ns = argparse.Namespace(budget_command="init")
+    ns = argparse.Namespace(budget_command="init", force_fresh=False)
     assert cli.cmd_budget(ns, deps=None) == 0
     assert json.loads(ledger.read_text())["total_usd"] == 0.0
     assert "created zeroed ledger" in capsys.readouterr().out
     assert cli.cmd_budget(ns, deps=None) == 1  # a second init never overwrites
     assert "already exists" in capsys.readouterr().err
+
+
+def test_budget_init_force_fresh_is_a_flag_and_never_read_from_env(tmp_path, monkeypatch, capsys):
+    ledger = tmp_path / "ledger.json"
+    (tmp_path / "ledger.json.bak").write_text("old spend")
+    monkeypatch.setenv("SPEND_LEDGER", str(ledger))
+    monkeypatch.setenv("FORCE_FRESH", "1")
+    monkeypatch.setenv("CHEATPROOF_FORCE_FRESH", "1")
+    assert cli.build_parser().parse_args(["budget", "init"]).force_fresh is False
+    assert cli.build_parser().parse_args(["budget", "init", "--force-fresh"]).force_fresh is True
+    refused = argparse.Namespace(budget_command="init", force_fresh=False)
+    assert cli.cmd_budget(refused, deps=None) == 1  # env vars do not turn the flag on
+    assert "backup named like the ledger" in capsys.readouterr().err
+    assert not ledger.exists()
+    forced = cli.build_parser().parse_args(["budget", "init", "--force-fresh"])
+    assert cli.cmd_budget(forced, deps=None) == 0
+    assert json.loads(ledger.read_text())["total_usd"] == 0.0
+    assert (tmp_path / "ledger.json.bak").read_text() == "old spend"
 
 
 def test_budget_init_is_a_subcommand():

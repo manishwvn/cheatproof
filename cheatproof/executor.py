@@ -986,8 +986,10 @@ def _sdk_exceptions():
 
 
 def _http_status(exc: BaseException) -> int | None:
-    for name in ("status", "status_code"):
-        value = getattr(exc, name, None)
+    """The HTTP status an SDK error carries: exc.status, exc.status_code, then exc.response.status_code. Ints only."""
+    response = getattr(exc, "response", None)
+    for source, name in ((exc, "status"), (exc, "status_code"), (response, "status_code")):
+        value = getattr(source, name, None)
         if isinstance(value, int) and not isinstance(value, bool):
             return value
     return None
