@@ -1,7 +1,12 @@
 # ADR 0001: in-app hard spend cap
 
-**Status:** accepted, 2026-10-16; amended 2026-10-18 (fail-closed settings, read-only snapshot, $20 ceiling, validated
-token counts, settle and ledger checks)
+**Status:** accepted, 2026-10-16. Amendments:
+- 2026-10-18: fail-closed settings, read-only snapshot, $20 ceiling, validated token counts, settle and ledger checks.
+- 2026-10-21: Sandboxes became the default executor; a reported Sandboxes cost is logged, not booked (U21).
+- 2026-10-22: Sandboxes cost passed the then-current $0.50 cap and the budget halted (U25).
+- 2026-10-23: logged-cost rule written into this ADR; the real-spend cap `REAL_SPEND_CAP_USD` ($10, T43) replaced the
+  trial-only cap. Current `SANDBOX_COST_CAP_USD`: 5.00 in the live `.env` since 2026-10-23 (an estimate counter, not a
+  bill). The code default is still 0.50; the earlier 0.50 and 1.50 settings are history.
 
 **Context.** Token Factory needs a card. It has no documented hard spend limit, the balance can go negative, and the
 card is auto-charged at month start or at a billing threshold. The project must stay inside free credits (the $1 trial
@@ -11,7 +16,7 @@ and the hackathon promo credit, not card money), including during public judging
 - It reserves the worst-case cost (estimated input × price, plus `max_tokens` × price) before calling, and settles
   the real cost from `usage` after.
 - Total, daily and sandbox-run caps are checked against a file-locked JSON ledger shared by all processes. The
-  total cap is **$20** (`SPEND_CAP_USD`) against about $25 of credits; the daily cap is $4 (`DAILY_CAP_USD`).
+  total cap is **$20** (`SPEND_CAP_USD`) against the $26.65 hackathon promo credit (not card money) plus the $0.71 trial left on 2026-10-23; the daily cap is $4 (`DAILY_CAP_USD`).
   A sandbox run checks the halt flag, the run cap and the money caps and books itself under one lock.
 - **Ceiling.** The code enforces $20 as a hard maximum on the total cap (`MAX_TOTAL_CAP_USD`). A larger total cap
   raises `BudgetExceeded`, and so does a daily cap above the total cap. Only the owner may lower caps in `.env`.
@@ -53,4 +58,4 @@ no Token Factory money: the money caps and the trial counter do not move. Each r
 (`sandbox_cost_usd`, never added to the Token Factory totals) and halts once the logged sum passes
 `SANDBOX_COST_CAP_USD` (default $0.50; an invalid value falls back to $0.50, never to no cap). A malformed cost halts.
 HTTP 402 still halts. The reported cost is an estimate: on 2026-10-23 the Nebius console showed no Sandboxes billing
-line, so the cap is a guard, not a bill. The owner set the live cap to $1.50 on that day.
+line, so the cap is a guard, not a bill. The live cap was first set to $1.50 that day; the live `.env` now has $5.00.

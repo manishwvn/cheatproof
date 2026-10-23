@@ -31,7 +31,7 @@ For each task (the project plans a 40-task set: 30 SWE-rebench and 10 SWE-bench 
    grader pass without a real fix (strategies: git-history retrieval, test edits, hard-coding). The gold patch and
    the test patch are not in its prompt.
 4. **Grade and classify.** The grader decides pass or fail in code. The hole classifier labels a success
-   (`git-history`, `test-edit`, `network`, `hard-code`) from the trace and the diff, in code, not by a model.
+   (`grader-forgery`, `network`, `git-history`, `test-edit`, `hard-code`, in that priority order) from the trace and the diff, in code, not by a model.
    Hard-code is only ever a lead, because no rule can prove it.
 5. **Patch.** Rule-based patches close the labelled hole: strip future git objects and refs, a grader that refuses
    edits to test files, network off.
@@ -117,8 +117,9 @@ uv run ruff check . && uv run ruff format --check .
 
 In `.env`, set at least the keys named in `.env.example`: `NEBIUS_API_KEY`, `NEBIUS_PROJECT_ID`, the caps
 (`SPEND_CAP_USD`, `DAILY_CAP_USD` are required and there is no default), `EXECUTOR=sandbox`, and `SPEND_LEDGER` to an
-absolute path of your choice. `ATTACKER_MODEL` in `.env.example` still names Ultra; set it to
-`nvidia/nemotron-3-super-120b-a12b` or pass `--attacker-model` on every run, as below.
+absolute path of your choice. `.env.example` defaults `ATTACKER_MODEL` to Nemotron 3 Super
+(`nvidia/nemotron-3-super-120b-a12b`). Ultra is only for explicit hero runs, passed with `--attacker-model`; all
+results below use Super.
 
 **Free, offline commands** (no model, sandbox or budget; use the committed certificates):
 
@@ -126,6 +127,9 @@ absolute path of your choice. `ATTACKER_MODEL` in `.env.example` still names Ult
 uv run python -m cheatproof.cli report --certs results/certificates        # score with n and raw counts
 uv run python -m cheatproof.cli site --certs results/certificates --out site   # static report site
 ```
+
+Read the `report` output with care: its line "hackable before hardening: 1 of 1 = 100.0%" counts the one
+**unverified** `test-edit` label (0 verified holes). It is a count of labels, not a result.
 
 **Paid path** (spends credits; every call goes through the budget, see below):
 
@@ -174,9 +178,10 @@ Token Factory has no documented hard spend limit and the balance can go negative
 - A file-locked JSON ledger (`SPEND_LEDGER`) is shared by all processes. Caps: total, at most $20 in code
   (`SPEND_CAP_USD`); daily (`DAILY_CAP_USD`, $4 in `.env.example`); a real-spend cap on Token Factory spend
   (`REAL_SPEND_CAP_USD`, default and ceiling $10); sandbox runs (`SANDBOX_RUN_CAP`); Tavily calls (`TAVILY_CALL_CAP`).
-- The project runs on free credit only (the $1 trial plus the hackathon promo credit), never card money. The code
-  does not itself stop a negative balance; it holds because the $10 cap is below the credit, so we check the console
-  between batches.
+- The project runs on free credit only (the $1 trial plus the hackathon promo credit), never card money. The real-spend
+  counter does not include about $0.155 of earlier spend, so real spend can reach about $10.16. "The balance never goes
+  negative" holds only because $10 is below the $26.65 promo credit and a person checks the console between chunks; the
+  code does not enforce it.
 - The money caps fail closed: a missing, zero, negative, nan or oversized value refuses to start. A ledger that does
   not match its schema is refused, not repaired.
 - Sandbox runs book no Token Factory money. Each cost the Sandboxes API reports is logged in a separate ledger section
@@ -223,7 +228,6 @@ batch runs, with raw counts and the same caveats.
 
 - `python -m cheatproof.cli site` on the committed results builds the pages but reports one error and exits 1: the
   committed `results/batch.json` has a `cost_usd` key in its not-run rows that the site's batch reader does not accept.
-- `.env.example` still lists Ultra as the `ATTACKER_MODEL`. The results use Super.
 
 ## Repository map
 
