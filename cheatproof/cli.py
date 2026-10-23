@@ -50,9 +50,10 @@ earlier run are not kept.
 T38 (batch 3 preparation, see cheatproof/plan.py): --instance-ids runs exactly those cached tasks in that order;
 --first puts ids at the front (from the cache, even outside the selection); a task with a certificate is skipped unless
 --rerun names it (for --first ids) or --prefer-future-git picks it (an uncertified certificate whose exposure_before
-shows future_git is attacked again, first). --chunk-size N (1..10, default 10) stops after N tasks that got a try (run
+shows future_git is attacked again, first). --chunk-size N (1..10, default 3) stops after N tasks that got a try (run
 or not run, never the already certified) and writes next_chunk_pending and pending_ids to batch.json; the next chunk is
-the same command without --first/--rerun/--prefer-future-git. --dry-run prints the order, chunk boundaries and the
+the same command again: the previous batch.json's rerun_done and env_broken_ids make a resume skip a rerun task and an
+env-broken one. A rerun keeps a copy of the certificate it replaces (keep.copy_aside). --dry-run prints the order, chunk boundaries and the
 estimated cost (ledger-measured averages) with no call and no file. Before any attacker token, harden and batch start
 a session and run grader.collect_gate (pytest --collect-only -q on the gold tests); a failure is the not-run reason
 env-broken with one sanitized line (--no-preflight skips it). Exit 1 for harden.
@@ -202,6 +203,28 @@ class Deps:
     disk_free_gb: Callable[[Path], float] = _free_gb  # free GiB on the file system holding the output folder
     # T38 collect-only preflight (grader.collect_gate): None skips it, so fakes-only tests need not provide one.
     preflight: Callable[..., Any] | None = None
+
+    @classmethod
+    def for_dry_run(cls) -> Deps:
+        """T38 batch --dry-run: only the cache readers. No .env load, no attacker, LLM, budget or executor is
+        built or imported, so no SDK loads and the ledger is not touched."""
+
+        def refuse(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("a dry run makes no calls")
+
+        return cls(
+            find_tasks=find_cached_tasks,
+            make_executor=refuse,
+            make_budget=refuse,
+            make_llm=refuse,
+            harden=refuse,
+            attack=refuse,
+            build_certificate=refuse,
+            write_certificate=refuse,
+            score_directory=refuse,
+            build_site=refuse,
+            clock=_utc_now,
+        )
 
     @classmethod
     def default(cls) -> Deps:
@@ -661,6 +684,8 @@ def _preflight(plan: _Plan, deps: Deps, opened: tuple[Any, Any, Any]) -> str | N
         raise _Unwritten("start", _stop_reason(exc), exc) from None
     except ValueError as exc:
         return sanitize(f"collect-only preflight refused: {exc}")
+    except Exception as exc:  # noqa: BLE001 - an odd preflight failure is env-broken, never a batch crash
+        return sanitize(f"collect-only preflight failed: {type(exc).__name__}: {exc}")[:ERROR_CHARS]
     return None if result.ok else sanitize(result.error or "collect-only failed")
 
 
@@ -742,6 +767,10 @@ def _harden_one(
             strategy=settings.strategy,
         )
         out.mkdir(parents=True, exist_ok=True)
+        # A rerun replaces an earlier certificate: keep a copy first; only the write below replaces it.
+        from cheatproof.certify import certificate_filename  # lazy, as in _certified_before
+
+        keep.copy_aside(out, certificate_filename(plan.task.instance_id))
         path = deps.write_certificate(cert, out)
     except Exception as exc:  # noqa: BLE001 - any failure after a paid run keeps the run, then reports it
         # The paid run is kept: its report and its diffs, even though no certificate came of it.
@@ -910,25 +939,35 @@ def _run_tasks(
     out = settings.out
     stop: tuple[str, str] | None = None  # (reason, error) for each remaining task, once a stop has happened
     attempted = 0  # tasks that got a try in this call: run or not run, never the already certified
+    skip_broken = set(batch.state.get("env_broken_ids", ()))  # env-broken in an earlier chunk: not retried
     for i, task in enumerate(tasks):
         iid = task.instance_id
         if _certified_before(task, out) and iid not in rerun:
             batch.already(iid)
+            continue
+        if iid in skip_broken:
+            print(f"{iid}: env-broken in an earlier chunk, not retried")
             continue
         if stop is not None:
             batch.not_run(iid, stop[0], stop[1])
             continue
         if attempted >= chunk_size:  # T38: stop between chunks so the console can be checked
             pending = [
-                t.instance_id for t in tasks[i:] if t.instance_id in rerun or not _certified_before(t, out)
+                t.instance_id
+                for t in tasks[i:]
+                if t.instance_id not in skip_broken
+                and (t.instance_id in rerun or not _certified_before(t, out))
             ]
             batch.state.update(next_chunk_pending=True, pending_ids=pending)
             batch.save()
             print(
-                f"next chunk pending: {len(pending)} tasks; check the console, then rerun without --first/--rerun"
+                f"next chunk pending: {len(pending)} tasks; check the console, then run the same command again"
             )
             break
         attempted += 1
+        if iid in rerun:  # saved before the paid run: a resume never attacks this task again
+            batch.state["rerun_done"].append(iid)
+            batch.save()
         try:
             plan = _plan(task, out)
         except _Usage as exc:
@@ -950,6 +989,7 @@ def _run_tasks(
             try:
                 broken = _preflight(plan, deps, opened)
                 if broken is not None:  # counts as attempted; no attacker token was spent
+                    batch.state["env_broken_ids"].append(iid)
                     batch.not_run(iid, ENV_BROKEN, broken)
                     continue
                 outcome = _run_or_stop(plan, settings, deps, opened)
@@ -1028,9 +1068,17 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
     except ValueError as exc:  # PlanError, or an unknown source from find_tasks
         return _usage_error(str(exc))
     tasks = ordered.tasks
+    # A previous call that stopped at its chunk size hands over what it did: a resume never attacks a rerun task
+    # again and never retries an env-broken one, whatever flags are given.
+    done, broken_rows = _resume_state(batch_path)
+    rerun = ordered.rerun - set(done)
+    broken_ids = [row["instance_id"] for row in broken_rows]
     if settings is None:  # --dry-run: print the plan from the cache and the certificates; no calls, no files
         certified = {t.instance_id for t in tasks if _certified_before(t, out)}
-        print("\n".join(batch_plan.render_plan(tasks, certified, ordered.rerun, chunk_size)))
+        caps = batch_plan.read_caps(os.environ, _env_file_values())
+        print(
+            "\n".join(batch_plan.render_plan(tasks, certified, rerun, chunk_size, caps=caps, skip=broken_ids))
+        )
         return 0
     if args.no_preflight:
         deps = replace(deps, preflight=None)
@@ -1045,24 +1093,64 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
         "selected": len(tasks),
         "selected_ids": [task.instance_id for task in tasks],
         "chunk_size": chunk_size,
-        "rerun_ids": sorted(ordered.rerun),
+        "rerun_ids": sorted(ordered.rerun),  # asked for in this call
+        "rerun_done": done,  # attacked again already (this call or an earlier chunk): never again
+        "env_broken_ids": broken_ids,  # failed the preflight in this batch: not retried by a later chunk
         "next_chunk_pending": False,  # True when this call stopped at the chunk size with tasks left
         "pending_ids": [],
         "run": 0,
         "already_certified": 0,
-        "not_run": [],
+        "not_run": broken_rows,
         "started": started,
         "updated": started,
     }
     batch = _Batch(batch_path, state, deps.clock)
     try:
         batch.save()  # the selection is on disk before the first paid call
-        code = _run_tasks(tasks, settings, deps, batch, _min_free_gb(), chunk_size, ordered.rerun)
+        code = _run_tasks(tasks, settings, deps, batch, _min_free_gb(), chunk_size, rerun)
     except OSError as exc:  # batch.json could not be written, or the free disk could not be read
         return _failure(exc)
     if code in (0, 1):
         print(_batch_summary(state))
     return code
+
+
+def _resume_state(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
+    """(rerun_done ids, env-broken not-run rows) of the batch.json that a call left with next_chunk_pending, else
+    two empty lists. A missing, odd or finished file carries nothing: a new batch starts clean."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return [], []
+    if not isinstance(data, dict) or data.get("schema_version") != BATCH_SCHEMA_VERSION:
+        return [], []
+    if data.get("next_chunk_pending") is not True:
+        return [], []
+    done = data.get("rerun_done")
+    rows = data.get("not_run")
+    done = [i for i in done if isinstance(i, str)] if isinstance(done, list) else []
+    rows = [
+        {k: row[k] for k in ("instance_id", "reason", "error") if k in row}
+        for row in (rows if isinstance(rows, list) else [])
+        if isinstance(row, dict)
+        and row.get("reason") == ENV_BROKEN
+        and isinstance(row.get("instance_id"), str)
+    ]
+    return done, rows
+
+
+def _env_file_values() -> dict[str, str | None]:
+    """The main checkout's .env values, read into a dict only: nothing enters os.environ, and only the cap names
+    are looked up by the caller. Empty when there is no file."""
+    from dotenv import dotenv_values
+
+    from cheatproof.envfile import find_env_file
+
+    path = find_env_file()
+    try:
+        return dict(dotenv_values(path)) if path is not None else {}
+    except OSError:
+        return {}
 
 
 def _read_batch(path: Path) -> dict[str, Any] | None:
@@ -1374,7 +1462,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--rerun", action="store_true", help="ignore the existing certificate of the --first ids"
     )
     batch.add_argument(
-        "--chunk-size", type=int, help="stop after this many tasks (1..10, default 10); batch.json notes it"
+        "--chunk-size", type=int, help="stop after this many tasks (1..10, default 3); batch.json notes it"
     )
     batch.add_argument("--dry-run", action="store_true", help="print the plan and estimated cost; no calls")
     batch.add_argument("--no-preflight", action="store_true", help="skip the collect-only preflight")
@@ -1420,7 +1508,8 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
     except SystemExit as exc:  # argparse exits 2 on a usage error and 0 on --help
         return int(exc.code or 0)
     if deps is None:
-        deps = Deps.default()
+        dry = args.command == "batch" and args.dry_run
+        deps = Deps.for_dry_run() if dry else Deps.default()
     if args.command == "harden":
         return cmd_harden(args, deps)
     if args.command == "batch":

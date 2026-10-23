@@ -16,7 +16,8 @@ def spec(iid):
 
 
 def test_chunk_size_default_and_bounds():
-    assert plan.check_chunk_size(None) == plan.MAX_CHUNK == 10
+    assert plan.check_chunk_size(None) == plan.DEFAULT_CHUNK == 3
+    assert plan.check_chunk_size(10) == plan.MAX_CHUNK == 10
     assert plan.check_chunk_size(1) == 1
     for bad in (0, 11, -3):
         with pytest.raises(plan.PlanError):
@@ -26,7 +27,7 @@ def test_chunk_size_default_and_bounds():
 def test_estimate_uses_the_ledger_measured_averages():
     assert plan.estimate(0) == (0, 0)
     trial, sandbox = plan.estimate(10)
-    assert (round(trial, 3), round(sandbox, 2)) == (0.56, 0.9)
+    assert (round(trial, 3), round(sandbox, 2)) == (0.56, 1.2)  # 0.09 measured + 0.03 preflight, per task
 
 
 def test_unreadable_or_odd_certificates_are_no_evidence(tmp_path):
@@ -59,5 +60,5 @@ def test_render_plan_marks_boundaries_and_skips():
     text = "\n".join(lines)
     assert "5 selected, 4 to run, chunk size 2" in text
     assert "x__y-1: already has a certificate, skipped" in text
-    assert "x__y-2: run (existing certificate is replaced)" in text
+    assert "x__y-2: run (existing certificate is replaced, a copy is kept)" in text
     assert text.count("chunk boundary") == 1

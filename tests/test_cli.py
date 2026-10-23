@@ -1500,6 +1500,8 @@ BATCH_KEYS = {
     "already_certified",
     "chunk_size",
     "rerun_ids",
+    "rerun_done",
+    "env_broken_ids",
     "next_chunk_pending",
     "pending_ids",
     "not_run",
@@ -2248,10 +2250,9 @@ def preflight_deps(spy, tasks, *, errors=None, events=None, exc=None, **override
         message = errors.get(task.instance_id)
         return types.SimpleNamespace(ok=message is None, error=message)
 
-    deps = batch_deps(
-        spy, tasks, make_executor=lambda: PreExecutor(events, exc), preflight=preflight, **overrides
-    )
-    return deps, seen, events
+    wired = {"make_executor": lambda: PreExecutor(events, exc), "preflight": preflight}
+    wired.update(overrides)
+    return batch_deps(spy, tasks, **wired), seen, events
 
 
 def exposure_cert(out, iid, *, future=True, certified=False):
@@ -2290,7 +2291,7 @@ def test_dry_run_prints_the_plan_and_makes_no_call(tmp_path, capsys):
     rows = [line.split() for line in printed.splitlines() if line.strip().startswith("chunk ")]
     assert [row[1] for row in rows] == ["1", "1", "2"]
     assert "chunk boundary after 2 tasks" in printed
-    assert "trial $0.168" in printed and "Sandboxes $0.27" in printed  # 3 x 0.056, 3 x 0.09
+    assert "trial $0.168" in printed and "Sandboxes $0.36" in printed  # 3 x 0.056, 3 x 0.12
     assert not (out.parent / "batch.json").exists() and spy.harden_calls == []
 
 
@@ -2375,16 +2376,6 @@ def test_chunk_size_stops_after_n_tasks_and_records_the_pending_chunk(tmp_path, 
     assert state["next_chunk_pending"] is False and state["pending_ids"] == []
 
 
-def test_chunk_size_defaults_to_ten_and_refuses_more(tmp_path, capsys):
-    out = out_dir(tmp_path)
-    assert cli.main(batch_argv(tmp_path, out), deps=batch_deps(Spy(), batch_tasks(ID_A))) == 0
-    assert read_batch(out)["chunk_size"] == 10
-    for bad in ("0", "11", "-1"):
-        deps = batch_deps(Spy(), batch_tasks(ID_A))
-        assert cli.main(batch_argv(tmp_path, out, "--chunk-size", bad), deps=deps) == 2
-    assert "--chunk-size must be 1..10" in capsys.readouterr().err
-
-
 def test_preflight_failure_is_env_broken_with_no_attacker_run(tmp_path, capsys):
     out = out_dir(tmp_path)
     spy = Spy()
@@ -2453,3 +2444,227 @@ def test_harden_preflight_failure_exits_1_without_a_paid_run(tmp_path, capsys):
     assert cli.main(argv, deps=deps) == 1
     assert spy.harden_calls == [] and "env-broken: collect-only exited 4: x" in capsys.readouterr().err
     assert cli.main([*argv, "--no-preflight"], deps=deps) == 0 and len(spy.harden_calls) == 1
+
+
+# T38 review fixes: the rerun keeps a copy, a resume never repeats a rerun or an env-broken retry, default chunk 3,
+# dry run builds no real Deps, a broad preflight failure is env-broken.
+def test_rerun_keeps_a_copy_of_the_certificate_it_replaces(tmp_path):
+    out = out_dir(tmp_path)
+    certified_file(out, ID_B)
+    spy = Spy()
+    argv = batch_argv(tmp_path, out, "--first", ID_B, "--rerun")
+    assert cli.main(argv, deps=batch_deps(spy, batch_tasks(ID_B))) == 0
+    assert (
+        json.loads((out / f"{ID_B}.json").read_text())["instance_id"] == ID_B
+    )  # the final write replaced it
+    copies = sorted(out.glob(f"{ID_B}.json.*.old"))
+    assert len(copies) == 1 and copies[0].read_text() == "{}"  # the old certificate, intact
+    assert [p.name for p in out.glob("*.json")] == [f"{ID_B}.json"]  # report and site read *.json only
+
+
+def test_a_failed_rerun_write_leaves_the_original_certificate(tmp_path):
+    out = out_dir(tmp_path)
+    certified_file(out, ID_B)
+
+    def refuse(cert, directory):
+        raise OSError("disk full")
+
+    argv = batch_argv(tmp_path, out, "--first", ID_B, "--rerun")
+    cli.main(argv, deps=batch_deps(Spy(), batch_tasks(ID_B), write_certificate=refuse))
+    assert (out / f"{ID_B}.json").read_text() == "{}"
+
+
+def test_keep_copy_aside_names_copies_apart_and_refuses_a_link(tmp_path):
+    from cheatproof import keep
+
+    assert keep.copy_aside(tmp_path, "a.json") is None
+    (tmp_path / "a.json").write_text("one")
+    first = keep.copy_aside(tmp_path, "a.json")
+    second = keep.copy_aside(tmp_path, "a.json")
+    assert first != second and first.name.startswith("a.json.") and first.name.endswith(".old")
+    assert (tmp_path / "a.json").read_text() == "one" and first.read_text() == second.read_text() == "one"
+    (tmp_path / "l.json").symlink_to(tmp_path / "a.json")
+    with pytest.raises(OSError):
+        keep.copy_aside(tmp_path, "l.json")
+
+
+def test_resume_with_the_same_flags_attacks_no_rerun_task_again(tmp_path):
+    out = out_dir(tmp_path)
+    certified_file(out, ID_C)
+    tasks = batch_tasks(ID_A, ID_B, ID_C, ID_D, ID_E)
+    flags = ("--first", ID_C, "--rerun", "--prefer-future-git", "--chunk-size", "2")
+    spy = Spy()
+    assert cli.main(batch_argv(tmp_path, out, *flags), deps=batch_deps(spy, tasks)) == 0
+    assert harden_order(spy) == [ID_C, ID_A]
+    state = read_batch(out)
+    assert state["rerun_done"] == [ID_C] and state["pending_ids"] == [ID_B, ID_D, ID_E]
+    spy = Spy()  # the same command again: C is not attacked again
+    assert cli.main(batch_argv(tmp_path, out, *flags), deps=batch_deps(spy, tasks)) == 0
+    assert harden_order(spy) == [ID_B, ID_D]
+    assert read_batch(out)["rerun_done"] == [ID_C]
+    spy = Spy()
+    assert cli.main(batch_argv(tmp_path, out, *flags), deps=batch_deps(spy, tasks)) == 0
+    assert harden_order(spy) == [ID_E] and read_batch(out)["next_chunk_pending"] is False
+
+
+def test_rerun_is_recorded_before_the_paid_run(tmp_path):
+    out = out_dir(tmp_path)
+    certified_file(out, ID_C)
+    seen = {}
+
+    def harden(executor, env, task, attack_fn, *, budget, **kwargs):
+        seen["done"] = read_batch(out)["rerun_done"]  # on disk while the paid run is going
+        raise ExecutorRefused("stop here")
+
+    argv = batch_argv(tmp_path, out, "--first", ID_C, "--rerun")
+    cli.main(argv, deps=batch_deps(Spy(), batch_tasks(ID_C), harden=harden))
+    assert seen["done"] == [ID_C]
+
+
+def test_env_broken_task_is_not_retried_by_the_next_chunk(tmp_path, capsys):
+    out = out_dir(tmp_path)
+    tasks = batch_tasks(ID_A, ID_B, ID_C, ID_D)
+    spy = Spy()
+    deps, seen, _ = preflight_deps(spy, tasks, errors={ID_A: "collect-only exited 4"})
+    assert cli.main(batch_argv(tmp_path, out, "--chunk-size", "2"), deps=deps) == 0
+    assert seen == [ID_A, ID_B] and harden_order(spy) == [ID_B]
+    state = read_batch(out)
+    assert state["env_broken_ids"] == [ID_A] and state["pending_ids"] == [ID_C, ID_D]
+    spy = Spy()  # chunk 2, A would break again but is not even tried
+    deps, seen, _ = preflight_deps(spy, tasks, errors={ID_A: "collect-only exited 4"})
+    assert cli.main(batch_argv(tmp_path, out, "--chunk-size", "2"), deps=deps) == 0
+    assert seen == [ID_C, ID_D] and harden_order(spy) == [ID_C, ID_D]
+    state = read_batch(out)
+    assert state["env_broken_ids"] == [ID_A] and state["next_chunk_pending"] is False
+    assert [(r["instance_id"], r["reason"]) for r in state["not_run"]] == [(ID_A, "env-broken")]
+    assert f"{ID_A}: env-broken in an earlier chunk, not retried" in capsys.readouterr().out
+    # a finished batch carries nothing: the next, fresh batch tries A again
+    spy = Spy()
+    deps, seen, _ = preflight_deps(spy, tasks, errors={ID_A: "collect-only exited 4"})
+    assert cli.main(batch_argv(tmp_path, out, "--chunk-size", "2"), deps=deps) == 0
+    assert seen == [ID_A]
+
+
+def test_default_chunk_is_three_and_ten_is_the_most(tmp_path, capsys):
+    out = out_dir(tmp_path)
+    tasks = batch_tasks(ID_A, ID_B, ID_C, ID_D, ID_E)
+    spy = Spy()
+    assert cli.main(batch_argv(tmp_path, out), deps=batch_deps(spy, tasks)) == 0
+    assert harden_order(spy) == [ID_A, ID_B, ID_C]
+    assert read_batch(out)["chunk_size"] == 3 and read_batch(out)["pending_ids"] == [ID_D, ID_E]
+    assert cli.main(batch_argv(tmp_path, out, "--chunk-size", "10"), deps=batch_deps(Spy(), tasks)) == 0
+    for bad in ("0", "11", "-1"):
+        assert cli.main(batch_argv(tmp_path, out, "--chunk-size", bad), deps=batch_deps(Spy(), tasks)) == 2
+    assert "--chunk-size must be 1..10" in capsys.readouterr().err
+
+
+def test_dry_run_warns_when_the_estimate_passes_a_cap_and_prints_only_numbers(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        cli, "_env_file_values", lambda: {"REAL_SPEND_CAP_USD": "0.05", "NEBIUS_API_KEY": "sk-x"}
+    )
+    monkeypatch.setenv("SANDBOX_COST_CAP_USD", "0.30")
+    monkeypatch.delenv("REAL_SPEND_CAP_USD", raising=False)
+    monkeypatch.delenv("TRIAL_CREDIT_CAP_USD", raising=False)
+    argv = ["batch", "--dry-run", "--out", str(out_dir(tmp_path)), "--source", "swe-bench-verified"]
+    assert cli.main(argv, deps=batch_deps(Spy(), batch_tasks(ID_A, ID_B, ID_C))) == 0
+    printed = capsys.readouterr().out
+    assert "WARNING: estimated Sandboxes $0.36 is above SANDBOX_COST_CAP_USD $0.3" in printed
+    assert "WARNING: estimated trial spend $0.168 is above REAL_SPEND_CAP_USD $0.05" in printed
+    assert "ledger not read" in printed and "an estimate" in printed
+    assert "sk-x" not in printed and "NEBIUS" not in printed
+
+
+def test_dry_run_with_caps_above_the_estimate_prints_no_warning(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(cli, "_env_file_values", dict)
+    monkeypatch.setenv("SANDBOX_COST_CAP_USD", "1.5")
+    monkeypatch.delenv("REAL_SPEND_CAP_USD", raising=False)
+    monkeypatch.delenv("TRIAL_CREDIT_CAP_USD", raising=False)
+    argv = ["batch", "--dry-run", "--out", str(out_dir(tmp_path)), "--source", "swe-bench-verified"]
+    assert cli.main(argv, deps=batch_deps(Spy(), batch_tasks(ID_A))) == 0
+    assert "WARNING" not in capsys.readouterr().out
+
+
+def test_dry_run_follows_a_pending_batch_file(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(cli, "_env_file_values", dict)
+    out = out_dir(tmp_path)
+    out.parent.mkdir(parents=True)
+    pending = {"schema_version": 1, "next_chunk_pending": True, "rerun_done": [ID_C]}
+    pending["not_run"] = [{"instance_id": ID_A, "reason": "env-broken", "error": "x"}]
+    (out.parent / "batch.json").write_text(json.dumps(pending), encoding="utf-8")
+    certified_file(out, ID_C)
+    argv = ["batch", "--dry-run", "--out", str(out), "--source", "swe-bench-verified"]
+    argv += ["--first", ID_C, "--rerun"]
+    deps = batch_deps(Spy(), batch_tasks(ID_A, ID_B, ID_C))
+    assert cli.main(argv, deps=deps) == 0
+    printed = capsys.readouterr().out
+    assert f"{ID_C}: already has a certificate, skipped" in printed
+    assert f"{ID_A}: env-broken in an earlier chunk, not retried" in printed
+    assert "1 to run" in printed
+
+
+def test_dry_run_builds_no_real_deps_and_imports_no_sdk(tmp_path):
+    import subprocess
+
+    from cheatproof.tasks import SOURCES
+
+    root = Path(cheatproof.__file__).resolve().parent.parent
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    name = "swe-bench-verified"
+    task = batch_tasks(ID_A)[0].to_dict()
+    payload = {
+        "version": CACHE_VERSION,
+        "source": name,
+        "scan_rows": SOURCES[name].scan_rows,
+        "scanned": 1,
+        "skipped": {},
+        "tasks": [task],
+    }
+    (cache / f"{name}.json").write_text(json.dumps(payload), encoding="utf-8")
+    script = (
+        "import os, sys\n"
+        f"sys.path.insert(0, {str(root)!r})\n"
+        "before = dict(os.environ)\n"
+        "from cheatproof import cli\n"
+        f"rc = cli.main(['batch', '--dry-run', '--source', {name!r}, '--cache-dir', {str(cache)!r},"
+        f" '--out', {str(tmp_path / 'results' / 'certificates')!r}])\n"
+        "bad = [m for m in ('openai', 'contree_sdk', 'tavily', 'cheatproof.llm', 'cheatproof.attacker') if m in sys.modules]\n"
+        "print('RESULT', rc, bad, dict(os.environ) == before)\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k not in ("SPEND_LEDGER",)}
+    proc = subprocess.run(
+        [sys.executable, "-c", script], check=False, capture_output=True, text=True, env=env, timeout=60
+    )
+    assert proc.returncode == 0, proc.stderr[-500:]
+    assert "RESULT 0 [] True" in proc.stdout  # no SDK module, no environment change (no .env load)
+    assert "dry run, no calls made" in proc.stdout
+    assert not (tmp_path / "results").exists()  # nothing written
+
+
+def test_dry_run_deps_refuse_every_call():
+    deps = cli.Deps.for_dry_run()
+    for name in ("make_executor", "make_budget", "harden", "attack", "write_certificate"):
+        with pytest.raises(RuntimeError, match="dry run"):
+            getattr(deps, name)()
+
+
+@pytest.mark.parametrize("exc", [RuntimeError("sandbox start broke"), KeyError("x"), OSError("pipe")])
+def test_an_odd_preflight_failure_is_env_broken_not_a_crash(tmp_path, exc):
+    out = out_dir(tmp_path)
+    spy = Spy()
+    deps = batch_deps(
+        spy, batch_tasks(ID_A, ID_B), make_executor=lambda: PreExecutor([], exc), preflight=lambda s, t: None
+    )
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0
+    rows = read_batch(out)["not_run"]
+    assert [r["reason"] for r in rows] == ["env-broken", "env-broken"] and spy.harden_calls == []
+    assert type(exc).__name__ in rows[0]["error"]
+
+
+def test_a_raising_preflight_function_is_env_broken(tmp_path):
+    def preflight(session, task):
+        raise TypeError("odd")
+
+    deps, _, _ = preflight_deps(Spy(), batch_tasks(ID_A), preflight=preflight)
+    assert cli.main(batch_argv(tmp_path, out_dir(tmp_path)), deps=deps) == 0
+    assert read_batch(out_dir(tmp_path))["not_run"][0]["reason"] == "env-broken"

@@ -30,7 +30,9 @@ MAX_RESULT_CHARS = (
     4000  # default: tool results sent back to the model are cut to this (plus a marker); T38 lowered it
 )
 RESULT_CHARS_CEILING = 8000  # the old default; AttackConfig.max_result_chars may go lower, never above this
-DEFAULT_MAX_OUTPUT_TOKENS = 1536  # T38: the model's reply cap per step, lowered from 2048; never raised
+DEFAULT_MAX_OUTPUT_TOKENS = 2048  # the model's reply cap per step (a cut tool call is reported, see CUT_NOTE)
+# A reply that ended at the output limit has cut tool arguments: the call is not run, and the model is told.
+CUT_NOTE = "error: reply cut at the output limit; send a shorter command or patch"
 TRACE_ARG_CHARS = 2000  # string arguments are cut to this in the trace
 DIGEST_HEAD_CHARS = 300
 ERROR_DETAIL_CHARS = 300
@@ -236,6 +238,14 @@ def _message(resp: object) -> object | None:
         return choices[0].message
     except (AttributeError, IndexError, KeyError, TypeError):
         return None
+
+
+def _cut_at_limit(resp: object) -> bool:
+    """True when the provider says the reply ended at the output limit (finish_reason 'length')."""
+    try:
+        return resp.choices[0].finish_reason == "length"  # type: ignore[attr-defined]
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return False
 
 
 def _first_call(message: object, step: int) -> _Call | None:
@@ -528,6 +538,8 @@ def attack(
         code: str | None = None
         reset = False
         try:
+            if _cut_at_limit(resp):  # the arguments are cut mid-way: report that, not a bad_json guess
+                raise _ToolError("output_cut", CUT_NOTE)
             args = _parse_args(call.raw_args)
             if isinstance(call.raw_args, str) and call.raw_args.strip():
                 sent_args = call.raw_args
