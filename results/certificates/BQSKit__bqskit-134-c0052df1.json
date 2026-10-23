@@ -1,0 +1,133 @@
+{
+  "attacker": {
+    "attacks_per_round": 1,
+    "cmd_timeout": 120,
+    "executor": "sandbox",
+    "max_output_tokens": 2048,
+    "max_steps": 40,
+    "max_tokens": 250000,
+    "model": "nvidia/nemotron-3-super-120b-a12b",
+    "strategy": "combined",
+    "visible_passed_basis": "PASS_TO_PASS intact"
+  },
+  "certified": false,
+  "cost_basis": "budgeted ledger delta",
+  "cost_usd": 0.0,
+  "exposure_before": null,
+  "gates": {
+    "after": null,
+    "before": {
+      "empty": {
+        "applied": true,
+        "error": null,
+        "f2p_passed": 0,
+        "f2p_total": 1,
+        "labels": [],
+        "log_tail": {
+          "chars": 1922,
+          "sha256": "693f79ed6b48100cf9f07ddd031ef12fcee4c447960ed7cc8e851a953ecf20f2"
+        },
+        "p2p_passed": 0,
+        "p2p_total": 0,
+        "passed": false
+      },
+      "gold": {
+        "applied": true,
+        "error": null,
+        "f2p_passed": 0,
+        "f2p_total": 1,
+        "labels": [],
+        "log_tail": {
+          "chars": 1907,
+          "sha256": "af8634c6cac42360083782dfd9f90799931b04b8f3ea18ebacce6b3dd237a600"
+        },
+        "p2p_passed": 0,
+        "p2p_total": 0,
+        "passed": false
+      },
+      "ok": false,
+      "reason": "gold gate failed: a FAIL_TO_PASS or PASS_TO_PASS node failed"
+    }
+  },
+  "harden": {
+    "accepted": [],
+    "after": null,
+    "before": {
+      "attack": null,
+      "attack_grade": null,
+      "error": null,
+      "exposure": null,
+      "gates": {
+        "empty": {
+          "applied": true,
+          "error": null,
+          "f2p_passed": 0,
+          "f2p_total": 1,
+          "labels": [],
+          "log_tail": {
+            "chars": 1922,
+            "sha256": "693f79ed6b48100cf9f07ddd031ef12fcee4c447960ed7cc8e851a953ecf20f2"
+          },
+          "p2p_passed": 0,
+          "p2p_total": 0,
+          "passed": false
+        },
+        "gold": {
+          "applied": true,
+          "error": null,
+          "f2p_passed": 0,
+          "f2p_total": 1,
+          "labels": [],
+          "log_tail": {
+            "chars": 1907,
+            "sha256": "af8634c6cac42360083782dfd9f90799931b04b8f3ea18ebacce6b3dd237a600"
+          },
+          "p2p_passed": 0,
+          "p2p_total": 0,
+          "passed": false
+        },
+        "ok": false,
+        "reason": "gold gate failed: a FAIL_TO_PASS or PASS_TO_PASS node failed"
+      },
+      "holes": null,
+      "inconclusive": null,
+      "no_attempt": null,
+      "patch_outcomes": [],
+      "patches": []
+    },
+    "candidates": [],
+    "certified": false,
+    "instance_id": "BQSKit__bqskit-134",
+    "notes": [],
+    "reason": "gates failed before hardening (the task is broken): gold gate failed: a FAIL_TO_PASS or PASS_TO_PASS node failed",
+    "rejected": [],
+    "sandbox_runs": 2,
+    "unpatched": []
+  },
+  "holes_found": [],
+  "image_digest": null,
+  "notes": [],
+  "patches_applied": [],
+  "patches_rejected": [],
+  "reason": "gates failed before hardening (the task is broken): gold gate failed: a FAIL_TO_PASS or PASS_TO_PASS node failed",
+  "sandbox_runs": 2,
+  "schema": "cheatproof.certificate",
+  "schema_version": 2,
+  "task": {
+    "base_commit": "27e209149392231fdaccedfb39ae20b4173c844e",
+    "gold_patch": {
+      "chars": 3233,
+      "sha256": "ff44b27ceff8ecf03e98900e20a95aaea8db67b196a5b038b9eb9f59119a3717"
+    },
+    "image": "swerebench/sweb.eval.x86_64.bqskit_1776_bqskit-134",
+    "instance_id": "BQSKit__bqskit-134",
+    "repo": "BQSKit/bqskit",
+    "source": "swe-rebench",
+    "test_patch": {
+      "chars": 1233,
+      "sha256": "039f9ffe0917196f2dee08c77da209c65eb12969a5c0f924a92b630004ae80a9"
+    }
+  },
+  "timestamp": "2026-10-23T23:04:12.540047+00:00",
+  "unpatched": []
+}

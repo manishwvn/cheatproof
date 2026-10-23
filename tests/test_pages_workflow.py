@@ -120,6 +120,8 @@ def test_site_builds_every_committed_certificate_without_traces_and_with_no_erro
     result = build_site(certs, tmp_path / "site")
     assert result.errors == []  # so cli site exits 0 and the workflow deploys
     assert result.index.is_file()
+    # The committed results/batch.json is the record the batch writer leaves; it must load, not just pass as absent.
+    assert "batch record not loaded" not in result.index.read_text(encoding="utf-8")
     assert len(result.pages) == len(list(certs.glob("*.json")))
     for page in result.pages:
         assert NO_TRANSCRIPT in page.read_text(encoding="utf-8")
