@@ -254,7 +254,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
-### T08 Eval run and results with raw counts — size M — waiting: U25 — needs T23, T07, T16, T17, T18, T19, T20, T22 [30%]
+### T08 Eval run and results with raw counts — size M — todo (batch 3 only, then HALT) — needs T23, T07, T16, T17, T18, T19, T20, T22 [30%]
 Unblocked 2026-10-21: U21 is closed and T23 is done (#30), so T08 has no U21 dependency left.
 Run the full loop on the 40 tasks within the $20 cap (check the ledger before starting; stop at the daily cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
@@ -264,6 +264,23 @@ git-ignored cache; `git add -f` is denied).
 Audit 2026-10-18: before the run, smoke one real image's gold gate. `grader.PYTEST_CMD` runs bare `python -m pytest`
 under `sh -lc`; SWE-bench images may need `conda activate testbed`. Check image HEAD equals `base_commit`
 (`strip-future-git` refuses otherwise). Run on Sandboxes (`EXECUTOR=sandbox`), not local Docker.
+
+Planner note 2026-10-23 (U25 resolved, owner approved resume; batch 3 only). The Token Factory console on 2026-10-23
+15:44 UTC shows Sandboxes NOT billed (no line item) and trial credits at $0.71; the $26.65 balance is untouched.
+Settings now: `SANDBOX_COST_CAP_USD=1.50` (estimate-only counter; $0.50 used) and `TRIAL_CREDIT_CAP_USD` stays at its
+default 0.74 ($0.38 counted), so the trial counter halts the run at about $0.35 real remaining, above the owner's $0.25
+floor. Never raise either cap. Batch 3 rules:
+- Run `batch` on Sandboxes for the next tasks to reach 18 of 40 tasks attempted (currently 8; about 10 more, fewer if a cap
+  trips first). `fetch --n 18`, then `batch --n 18` skips the already certified. Same attacker as batch 2 (Nemotron Super,
+  never Ultra), combined prompt, `--max-steps 40 --max-tokens 250000`. This is the cheapest routing.
+- Expected: about $0.056 trial and $0.09 Sandboxes per hardened task, so the trial cap probably stops the batch near
+  6 tasks. That is fine: record n honestly and do not raise the cap to reach 18.
+- Run in chunks of at most 3 tasks and read the ledger between chunks; stop on any halt, on a trial counter above
+  $0.70, or on a Sandboxes sum above $1.40. Env-broken or leak-refused tasks count as attempted; report them as such.
+- After the batch (or at the first halt), call `Budget().halt("T08 batch 3 done: owner checks the Token Factory console")`
+  so no further paid call runs, update `docs/results.md` (raw counts, cost from the ledger, which cap stopped it), and
+  add one USER item U26 asking the owner to re-check the console and say whether to run batch 4. Do NOT start batch 4.
+  Keep T08 at `waiting: U26` after that.
 
 Planner note 2026-10-21 (supersedes the Docker, batch-pruning and disk notes below, which are history): the owner
 removed all local swebench images, so no step assumes one. Run every task on Sandboxes. The local Docker fallback
@@ -363,6 +380,8 @@ Review of PR #32 (`cheatproof/budget.py` and the Sandboxes cost path, planner-me
    assert time or freeze the clock.
 `budget.py` is a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
 
+PR #36 review follow-ups (Sonnet, 2026-10-23, low): in `scripts/smoke.py` build the client before `reserve_sandbox_run()` so a missing SDK or key does not burn a run; add tests that the cap check precedes client construction, that `book_sandbox_cost` over the cap raises `BudgetExceeded`, and that `cost=None` books nothing; drop the unused `expected` parameter and use `token=FAKE` in the fixture.
+
 ### T09 Report page and judge replay mode — size M — done #12 — needs T07
 A static report site (no server, no paid calls): the 40-task table, one before/after page per environment with the
 patch diff, the attack transcript and the gates. Judge mode replays recorded runs, labelled "recorded". Builds from
@@ -407,8 +426,8 @@ The owner makes the repo public and submits on Devpost. Marked done only on the 
 
 ## USER
 
-- **U25 Budget halted: Sandboxes cost cap** (alerted 2026-10-22): the ledger is halted because Sandboxes cost $0.5022 passed SANDBOX_COST_CAP_USD ($0.50). U21 found Sandboxes are not billed per the Nebius console, so the cap is a guard. Owner: clear the top-level `halted` field in the live ledger, and choose SANDBOX_COST_CAP_USD for the rest of T08 (about $0.09 per task, about $3 for the remaining 32 tasks); TRIAL_CREDIT_CAP_USD ($0.74, $0.38 used) covers about 6 more tasks at about $0.06 each. Then flip T08 to todo.
-- **U24 Merge PR #36** (T01 smoke sandbox fix): say `review` in an interactive session to merge PR #36 (touches `scripts/smoke.py`, a planner-merge path). CI green, Opus final review approve.
+- ~~**U25 Budget halted: Sandboxes cost cap**~~ Done 2026-10-23: owner approved; ledger halt cleared, SANDBOX_COST_CAP_USD=1.50, trial cap kept at 0.74 (see T08 batch 3). Original text: (alerted 2026-10-22): the ledger is halted because Sandboxes cost $0.5022 passed SANDBOX_COST_CAP_USD ($0.50). U21 found Sandboxes are not billed per the Nebius console, so the cap is a guard. Owner: clear the top-level `halted` field in the live ledger, and choose SANDBOX_COST_CAP_USD for the rest of T08 (about $0.09 per task, about $3 for the remaining 32 tasks); TRIAL_CREDIT_CAP_USD ($0.74, $0.38 used) covers about 6 more tasks at about $0.06 each. Then flip T08 to todo.
+- ~~**U24 Merge PR #36**~~ Done 2026-10-23 (see LOG). (T01 smoke sandbox fix): say `review` in an interactive session to merge PR #36 (touches `scripts/smoke.py`, a planner-merge path). CI green, Opus final review approve.
 - **U23 Merge PR #31** (T25, planner-merge paths, stacked on PR #30): after U22, say `review` in an interactive
   session to merge https://github.com/manishwvn/cheatproof/pull/31 (GitHub retargets it to `main` once #30 merges).
   CI green; Sonnet approve, Opus approve.
