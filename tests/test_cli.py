@@ -1503,6 +1503,7 @@ BATCH_KEYS = {
     "rerun_done",
     "env_broken_ids",
     "next_chunk_pending",
+    "finished",
     "pending_ids",
     "not_run",
     "started",
@@ -1928,7 +1929,7 @@ def test_batch_json_is_replaced_whole_after_every_task(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "replace", recording_replace)
     out = out_dir(tmp_path)
     assert cli.main(batch_argv(tmp_path, out), deps=batch_deps(Spy(), batch_tasks(ID_A, ID_B))) == 0
-    assert [state["run"] for state in seen] == [0, 1, 2]  # the selection first, then after each task
+    assert [state["run"] for state in seen] == [0, 1, 2, 2]  # selection, each task, then finished
     assert seen[0]["started"] == CLOCK and seen[-1]["updated"] == CLOCK
     assert not (out.parent / "batch.json.tmp").exists()
 
@@ -2667,22 +2668,92 @@ def test_dry_run_deps_refuse_every_call():
 
 
 @pytest.mark.parametrize("exc", [RuntimeError("sandbox start broke"), KeyError("x"), OSError("pipe")])
-def test_an_odd_preflight_failure_is_env_broken_not_a_crash(tmp_path, exc):
+def test_a_transient_start_error_is_a_retried_executor_error_not_env_broken(tmp_path, exc):
     out = out_dir(tmp_path)
     spy = Spy()
     deps = batch_deps(
         spy, batch_tasks(ID_A, ID_B), make_executor=lambda: PreExecutor([], exc), preflight=lambda s, t: None
     )
-    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0
-    rows = read_batch(out)["not_run"]
-    assert [r["reason"] for r in rows] == ["env-broken", "env-broken"] and spy.harden_calls == []
-    assert type(exc).__name__ in rows[0]["error"]
+    assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0  # no crash
+    state = read_batch(out)
+    assert [r["reason"] for r in state["not_run"]] == ["executor_error", "executor_error"]
+    assert spy.harden_calls == [] and type(exc).__name__ in state["not_run"][0]["error"]
+    assert state["env_broken_ids"] == []  # never stored as permanent
+    # the next call tries both again (nothing carried: neither is env-broken)
+    seen = []
+    deps2, seen, _ = preflight_deps(Spy(), batch_tasks(ID_A, ID_B))
+    assert cli.main(batch_argv(tmp_path, out), deps=deps2) == 0
+    assert seen == [ID_A, ID_B]
 
 
-def test_a_raising_preflight_function_is_env_broken(tmp_path):
+def test_a_raising_preflight_function_is_a_retried_executor_error(tmp_path):
     def preflight(session, task):
         raise TypeError("odd")
 
     deps, _, _ = preflight_deps(Spy(), batch_tasks(ID_A), preflight=preflight)
     assert cli.main(batch_argv(tmp_path, out_dir(tmp_path)), deps=deps) == 0
-    assert read_batch(out_dir(tmp_path))["not_run"][0]["reason"] == "env-broken"
+    state = read_batch(out_dir(tmp_path))
+    assert state["not_run"][0]["reason"] == "executor_error" and state["env_broken_ids"] == []
+
+
+def test_a_collect_failure_is_still_stored_as_env_broken(tmp_path):
+    deps, _, _ = preflight_deps(Spy(), batch_tasks(ID_A), errors={ID_A: "collect-only exited 4"})
+    assert cli.main(batch_argv(tmp_path, out_dir(tmp_path)), deps=deps) == 0
+    assert read_batch(out_dir(tmp_path))["env_broken_ids"] == [ID_A]
+
+
+def test_a_rerun_after_an_interrupted_run_does_not_attack_the_rerun_task_again(tmp_path):
+    out = out_dir(tmp_path)
+    certified_file(out, ID_C)
+    tasks = batch_tasks(ID_A, ID_B, ID_C)
+    flags = ("--first", ID_C, "--rerun", "--chunk-size", "3")
+
+    def interrupted(executor, env, task, attack_fn, *, budget, **kwargs):
+        raise KeyboardInterrupt  # Ctrl-C in the middle of the first paid rerun
+
+    with pytest.raises(KeyboardInterrupt):
+        cli.main(batch_argv(tmp_path, out, *flags), deps=batch_deps(Spy(), tasks, harden=interrupted))
+    state = read_batch(out)
+    assert state["finished"] is False and state["rerun_done"] == [ID_C]  # saved before the paid run
+    spy = Spy()
+    assert cli.main(batch_argv(tmp_path, out, *flags), deps=batch_deps(spy, tasks)) == 0
+    assert harden_order(spy) == [ID_A, ID_B]  # C is not attacked again
+    assert read_batch(out)["finished"] is True
+    # the batch finished normally, so a new batch with the same flags starts clean and attacks C again
+    spy = Spy()
+    assert cli.main(batch_argv(tmp_path, out, *flags), deps=batch_deps(spy, tasks)) == 0
+    assert harden_order(spy) == [ID_C]
+
+
+def test_a_budget_stop_does_not_finish_the_batch_so_a_rerun_skips_the_rerun_task(tmp_path):
+    out = out_dir(tmp_path)
+    certified_file(out, ID_C)
+    tasks = batch_tasks(ID_A, ID_C)
+    flags = ("--first", ID_C, "--rerun")
+
+    def over_budget(executor, env, task, attack_fn, *, budget, **kwargs):
+        raise BudgetExceeded("cap")
+
+    assert cli.main(batch_argv(tmp_path, out, *flags), deps=batch_deps(Spy(), tasks, harden=over_budget)) == 1
+    assert read_batch(out)["finished"] is False
+    spy = Spy()
+    assert cli.main(batch_argv(tmp_path, out, *flags), deps=batch_deps(spy, tasks)) == 0
+    assert harden_order(spy) == [ID_A]
+
+
+def test_a_chunk_end_leaves_finished_false(tmp_path):
+    out = out_dir(tmp_path)
+    cli.main(batch_argv(tmp_path, out, "--chunk-size", "1"), deps=batch_deps(Spy(), batch_tasks(ID_A, ID_B)))
+    state = read_batch(out)
+    assert state["next_chunk_pending"] is True and state["finished"] is False
+
+
+def test_batch_dry_run_help_says_the_env_file_is_read_into_a_local_dict():
+    text = cli.build_parser().format_help()
+    sub = next(
+        a
+        for a in cli.build_parser()._subparsers._group_actions[0].choices["batch"]._actions
+        if "--dry-run" in a.option_strings
+    )
+    assert "never os.environ" in sub.help and ".env" in sub.help
+    assert text  # parser builds

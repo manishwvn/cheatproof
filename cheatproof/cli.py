@@ -54,7 +54,9 @@ shows future_git is attacked again, first). --chunk-size N (1..10, default 3) st
 or not run, never the already certified) and writes next_chunk_pending and pending_ids to batch.json; the next chunk is
 the same command again: the previous batch.json's rerun_done and env_broken_ids make a resume skip a rerun task and an
 env-broken one. A rerun keeps a copy of the certificate it replaces (keep.copy_aside). --dry-run prints the order, chunk boundaries and the
-estimated cost (ledger-measured averages) with no call and no file. Before any attacker token, harden and batch start
+estimated cost (ledger-measured averages) with no call and no file. It reads only the cap values
+(SANDBOX_COST_CAP_USD, REAL_SPEND_CAP_USD, TRIAL_CREDIT_CAP_USD) from the process environment and from .env into a
+local dict; .env is never loaded into os.environ, and the ledger is not read. Before any attacker token, harden and batch start
 a session and run grader.collect_gate (pytest --collect-only -q on the gold tests); a failure is the not-run reason
 env-broken with one sanitized line (--no-preflight skips it). Exit 1 for harden.
 report prints certify.score_directory() as it is: rates with their n, raw counts, outcomes, holes and sources.
@@ -138,6 +140,9 @@ RATE_LABELS = (
 BATCH_FILE = "batch.json"  # beside the certificates directory; rewritten whole after every task
 BATCH_SCHEMA_VERSION = 1
 ENV_BROKEN = "env-broken"  # not-run reason: the collect-only preflight failed, so no attacker token was spent
+EXECUTOR_ERROR = (
+    "executor_error"  # not-run reason: the preflight could not run (transient); retried next time
+)
 # A skipped reason: an instance id that an earlier source already selected. The first source keeps the task.
 DUPLICATE_REASON = "duplicate_across_sources"
 DEFAULT_MIN_FREE_GB = 10.0  # MIN_FREE_DISK_GB when the environment does not set it
@@ -682,10 +687,12 @@ def _preflight(plan: _Plan, deps: Deps, opened: tuple[Any, Any, Any]) -> str | N
             result = deps.preflight(session, plan.task)
     except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
         raise _Unwritten("start", _stop_reason(exc), exc) from None
-    except ValueError as exc:
+    except ValueError as exc:  # bad node ids or base commit: the task itself is unusable
         return sanitize(f"collect-only preflight refused: {exc}")
-    except Exception as exc:  # noqa: BLE001 - an odd preflight failure is env-broken, never a batch crash
-        return sanitize(f"collect-only preflight failed: {type(exc).__name__}: {exc}")[:ERROR_CHARS]
+    except Exception as exc:  # noqa: BLE001 - a transient start or SDK error is not the task's fault
+        # Not env-broken (that is permanent for a resume): a plain not-run row that the next call retries.
+        message = f"preflight could not run: {type(exc).__name__}: {exc}"
+        raise _Unwritten("start", EXECUTOR_ERROR, RuntimeError(message)) from None
     return None if result.ok else sanitize(result.error or "collect-only failed")
 
 
@@ -1097,6 +1104,7 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
         "rerun_done": done,  # attacked again already (this call or an earlier chunk): never again
         "env_broken_ids": broken_ids,  # failed the preflight in this batch: not retried by a later chunk
         "next_chunk_pending": False,  # True when this call stopped at the chunk size with tasks left
+        "finished": False,  # True only at the normal end of the whole batch; a chunk end or a stop leaves it False
         "pending_ids": [],
         "run": 0,
         "already_certified": 0,
@@ -1108,6 +1116,9 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
     try:
         batch.save()  # the selection is on disk before the first paid call
         code = _run_tasks(tasks, settings, deps, batch, _min_free_gb(), chunk_size, rerun)
+        if code == 0 and not state["next_chunk_pending"]:
+            state["finished"] = True  # nothing left to resume: a later batch starts clean
+            batch.save()
     except OSError as exc:  # batch.json could not be written, or the free disk could not be read
         return _failure(exc)
     if code in (0, 1):
@@ -1116,15 +1127,17 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
 
 
 def _resume_state(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
-    """(rerun_done ids, env-broken not-run rows) of the batch.json that a call left with next_chunk_pending, else
-    two empty lists. A missing, odd or finished file carries nothing: a new batch starts clean."""
+    """(rerun_done ids, env-broken not-run rows) of the batch.json an earlier call left, unless that batch
+    finished (finished is true, written only at the normal end of the whole batch). A chunk end, a budget stop, a
+    crash or a Ctrl-C leaves finished false, so a rerun of the same command never repeats a paid rerun. A missing
+    or odd file carries nothing."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return [], []
     if not isinstance(data, dict) or data.get("schema_version") != BATCH_SCHEMA_VERSION:
         return [], []
-    if data.get("next_chunk_pending") is not True:
+    if data.get("finished") is True:
         return [], []
     done = data.get("rerun_done")
     rows = data.get("not_run")
@@ -1464,7 +1477,12 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument(
         "--chunk-size", type=int, help="stop after this many tasks (1..10, default 3); batch.json notes it"
     )
-    batch.add_argument("--dry-run", action="store_true", help="print the plan and estimated cost; no calls")
+    batch.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the plan and estimated cost; no calls. Reads only the cap values from .env into a local "
+        "dict (never os.environ) to print cap warnings",
+    )
     batch.add_argument("--no-preflight", action="store_true", help="skip the collect-only preflight")
 
     report = sub.add_parser("report", help="score the certificates in a directory")
