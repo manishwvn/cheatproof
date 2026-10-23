@@ -5,7 +5,6 @@
 """
 
 import argparse
-import asyncio
 import json
 import os
 from pathlib import Path
@@ -19,8 +18,13 @@ if __name__ == "__main__":
     ENV_LOADED = load_env()
 
 from cheatproof.budget import Budget, BudgetExceeded
+from cheatproof.executor import SandboxExecutor, _halt_for_payment
 from cheatproof.llm import GuardedLLM
 from cheatproof.sanitize import assert_clean, sanitize
+
+SMOKE_IMAGE = "alpine:3.19"
+SMOKE_CMD = "echo sandbox ok && uname -a"
+SMOKE_TIMEOUT_S = 60
 
 
 def list_nvidia_models(llm: GuardedLLM) -> dict:
@@ -39,22 +43,36 @@ def call_cheap_model(llm: GuardedLLM):
     return resp
 
 
-async def sandbox_hello(budget: Budget) -> None:
+def sandbox_hello(budget: Budget) -> None:
+    # One reservation for the one disposable run below. A session start is not used: it runs `git ls-files` in its
+    # workdir before any command, and alpine has no git repo, so it would fail after reserving a run.
     budget.reserve_sandbox_run()  # the cap check comes before any SDK import or network call
-    from contree_sdk import Contree
-
-    base = await Contree().images.use("alpine:3.19", strict=True)
-    result = await base.run(shell="echo sandbox ok && uname -a", disposable=True)
+    client = SandboxExecutor()._get_client()
+    try:
+        # images.oci finds the tag or imports it from the registry on a miss, as the executor does for task images.
+        # images.use (the executor's path for other names) is lazy: it makes no call, and an untagged name only
+        # fails later at run() with NotFoundError. alpine is about 3 MB, so the import is cheap.
+        base = client.images.oci(SMOKE_IMAGE)
+        done = base.run(shell=SMOKE_CMD, disposable=True, timeout=SMOKE_TIMEOUT_S).wait()
+    except Exception as exc:
+        paid = _halt_for_payment(exc, budget)  # HTTP 402 halts every paid call, as in the executor
+        if paid is not None:
+            raise paid from None
+        raise
+    result = done.result
     print(f"sandbox exit={result.exit_code} stdout={result.stdout.strip()!r}")
+    cost = getattr(result, "cost", None)  # the executor's _check_cost rule: no cost reported, nothing to book
+    if cost is not None:
+        budget.book_sandbox_cost(cost)
 
 
 def run_sandbox_step(budget: Budget) -> None:
     try:
-        asyncio.run(sandbox_hello(budget))
+        sandbox_hello(budget)
     except BudgetExceeded:
         raise  # a tripped cap or a halt must stop the run, never turn into a skipped step
-    except Exception as exc:  # noqa: BLE001 - optional step: report the class and a short, redacted message
-        print(f"sandbox step skipped ({type(exc).__name__}): {sanitize(str(exc))[:200]}")
+    except Exception as exc:  # noqa: BLE001 - optional step: print the class name only, never the message
+        print(f"sandbox step skipped ({type(exc).__name__})")
 
 
 def record_fixtures(out_dir: Path, models_listing: dict, completion: dict) -> None:
