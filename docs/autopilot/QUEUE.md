@@ -380,7 +380,7 @@ DRMacIver__shrinkray-7's gold gate fails with `pytest exited 4: ERROR: found no 
 Done 2026-10-23 (PR #49, branch `t35-ledger-guards`, planner-merge path, not merged): (a) to (d) done with fakes tests, and T27 item 6 (the `.env.example` note) done in the same PR. Full pytest 1976 passed, 1 skipped; ruff clean. Needs the planner to merge.
 Do these as part of T27 items, in one planner-merge PR (`budget.py`, `executor.py`): (a) a missing ledger file refuses to run (`budget.py:272`) unless an explicit init created it (add `cheatproof budget init`, never implicit); (b) ledger `OSError` becomes `BudgetExceeded` (`executor.py:1140`); (c) the halt flag is checked before every exec, including the cost-0 path (`budget.py:413`, `executor.py:1189`); (d) `_halt_for_payment` runs on all exceptions (`executor.py:1130`). Fakes-only tests. T35 and T27 are closed together; T27 keeps its other items.
 
-### T36 Fix results row 8 and the access probe retries — size S — todo (P0, haiku)
+### T36 Fix results row 8 and the access probe retries — size S — done #45 (P0, haiku)
 `docs/results.md` row 8: BoboTiG__ebook-reader-dict-2132 did run sandbox execs; `cost_usd` is Token Factory only, not Sandboxes. Fix the row and any column header that says otherwise. `scripts/sandbox_access.py` lines 45 and 91-104: the probe retries; make it one attempt with a clear failure line (no retry loop that can repeat paid calls). Planner-merge path for the script: open the PR and add a USER item if the planner must merge.
 
 ### T37 Tavily runtime path (`--network-fetch`) — size M — todo (P2, sonnet)
@@ -395,6 +395,9 @@ A GitHub Pages workflow that builds the report site, plus committed sanitized tr
 ### T40 Video script and pitches say Super, fill RESULT markers (P2) — size S — todo — needs T33, T34
 Fill the `[RESULT: ...]` markers in `docs/video/script.md` from the real numbers in `docs/results.md`; replace "Ultra" with Nemotron Super everywhere (also `docs/pitches.md`). Do not claim a result the data does not show.
 
+### T41 Certification rejects a max_steps run that never submitted — size S — done #48 (P0)
+`validate_certificate` accepted `certified: true` when a round's attack hit `max_steps` without a submit. It now applies the `harden._unsubmitted` rule to the before and after rounds: refused unless the hole report shows a grader-confirmed exploit. Build and write validate too. Tests in `tests/test_certify.py`. `harden.py` docstring no longer calls `max_steps` conclusive by itself.
+
 ### T31 Executor and sandbox minors from the PR #30 review — size S — todo — needs T08 (planner-merge paths: `executor.py`, `scripts/sandbox_access.py`)
 Minor findings from the Sonnet review of PR #30 (T23), none blocking. Fix with fakes, then a USER item for the planner to merge.
 1. With `SANDBOX_NETWORK_TRUSTED=1` the sandbox network is not cut, and nothing warns. Print one warning line (no values) when it is on, and note it in `docs/results.md`.
@@ -402,7 +405,7 @@ Minor findings from the Sonnet review of PR #30 (T23), none blocking. Fix with f
 3. The `colima ssh -- df` disk check after every run has a 15 s timeout. Skip it for the Sandboxes backend, which has no local images.
 4. Unverified: whether a command that exits non-zero keeps its image (it matters for the gold-gate reuse). Test it with one fake and one live smoke only after the owner clears budget for it; otherwise record it as unknown in the ADR.
 
-### T32 Do not lose a certificate to the leak guard — size S — todo (P0, haiku; after T34)
+### T32 Do not lose a certificate to the leak guard — size S — done #47 (P0, haiku; after T34)
 Orchestrator 2026-10-23: redact free text with `error_line`'s per-word redaction (`cheatproof/grader.py:506`, `cheatproof/exposure.py:149`) instead of dropping the certificate; this replaces the `certify.py` idea below if that is simpler.
 Batch 2 (PR #38): `Azure__autorest.python-475` ran, but `certificate.exposure_before.future_git_evidence[10]` held a secret-like value and the certificate write was refused (`certificate_write_failed`, $0.0606 spent, result lost). Keep the guard strict, but redact the matching evidence line in `certify.py` before the write (replace the value with a fixed marker, keep the file path and the finding type), so a hole is still reported and replayable. Fakes-only tests next to the existing leak-guard tests; never print the matched value. If `leakcheck.py` or the certificate writer is a planner-merge path, open the PR and add a USER item. Do before the next T08 batch if the routine has the time; it does not block batch 3.
 

@@ -203,6 +203,13 @@ def _word(word: str) -> str:
     return printable if _keep_word(printable) else REDACTED
 
 
+def redact_text(text: str) -> str:
+    """Free text with each secret-like word replaced by REDACTED, as error_line does per word. Only the words change:
+    whitespace, newlines included, is kept as it is, and the other words stay, so a path or finding type survives. A
+    value this misses (a secret split over two words, say) is still refused by the leak guard at certificate write."""
+    return re.sub(r"\S+", lambda match: _word(match.group()), text)
+
+
 def _one_line(text: str, limit: int, keep: str) -> str:
     """Clean text into one line: ANSI codes stripped, host paths replaced by <path>, each word checked for secrets
     on its own, and the lines joined with " | ". At most limit chars. keep="head" cuts the end, keep="tail" the start.

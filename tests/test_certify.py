@@ -25,7 +25,7 @@ from cheatproof.certify import (
     write_certificate,
 )
 from cheatproof.exposure import ExposureReport
-from cheatproof.grader import GateReport, GradeResult
+from cheatproof.grader import GateReport, GradeResult, redact_text
 from cheatproof.harden import CandidateCheck, HardenReport, RoundReport
 from cheatproof.holes import HoleReport
 from cheatproof.patches import PatchOutcome
@@ -956,6 +956,64 @@ def test_certified_is_refused_when_the_after_attacker_made_no_attempt():
         validate_certificate(cert)
 
 
+def unsubmitted_attack():
+    """The attack summary of an attacker that ran out of steps (max_steps) without a submit."""
+    return {**attack_summary(), "stop_reason": "max_steps", "submitted": False}
+
+
+def max_steps_submitted_attack():
+    """The attack summary of an attacker that ran out of steps but still submitted."""
+    return {**attack_summary(), "stop_reason": "max_steps", "submitted": True}
+
+
+def test_certified_is_refused_when_before_hit_max_steps_without_submitting():
+    cert = cert_for(clean_report())
+    cert["harden"]["before"]["attack"] = unsubmitted_attack()
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.before to submit or exploit")):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_when_after_hit_max_steps_without_submitting():
+    cert = valid_cert()
+    cert["harden"]["after"]["attack"] = unsubmitted_attack()
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.after to submit or exploit")):
+        validate_certificate(cert)
+
+
+def test_build_refuses_a_before_round_that_hit_max_steps_without_submitting():
+    report = with_before(clean_report(), attack=unsubmitted_attack())
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.before to submit or exploit")):
+        cert_for(report)
+
+
+def test_build_refuses_an_after_round_that_hit_max_steps_without_submitting():
+    report = with_after(fixed_report(), attack=unsubmitted_attack())
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.after to submit or exploit")):
+        cert_for(report)
+
+
+def test_certified_with_a_submit_is_valid_even_when_max_steps_ran_out():
+    cert = cert_for(clean_report())
+    assert cert["certified"] is True
+    cert = cert_for(with_before(clean_report(), attack=max_steps_submitted_attack()))
+    assert cert["certified"] is True
+    validate_certificate(cert)
+
+
+def test_max_steps_without_submit_is_valid_when_the_grader_confirmed_an_exploit():
+    # The before round exploited git-history and the grader confirmed it, so the unsubmitted run still counts.
+    cert = cert_for(with_before(fixed_report(), attack=unsubmitted_attack()))
+    assert cert["certified"] is True
+    assert cert["harden"]["before"]["attack"]["submitted"] is False
+    validate_certificate(cert)
+
+
+def test_max_steps_without_submit_is_recorded_for_a_task_that_is_not_certified():
+    cert = cert_for(with_before(inconclusive_report(), attack=unsubmitted_attack()))
+    assert cert["certified"] is False
+    assert only_outcome(cert) == {"inconclusive": 1}
+
+
 def test_no_attempt_round_must_have_a_no_attempt_string_or_null():
     cert = cert_for(no_attempt_report())
     cert["harden"]["before"]["no_attempt"] = 5
@@ -991,6 +1049,52 @@ def test_secret_like_attack_error_is_refused_at_build(text):
         cert_for(report)
     assert text not in str(info.value)
     assert "harden.before.attack.error" in str(info.value)
+
+
+# Exposure evidence is free text. The scan redacts it; the guard at build still refuses anything that survives.
+EVIDENCE_WITH_SECRET = "ref refs/heads/ghp_TESTVALUE123456789 points at 9676c1085a90"
+
+
+def test_redacted_exposure_evidence_still_builds_the_certificate():
+    scan = dataclasses.replace(
+        exposure("git-history"), future_git_evidence=[redact_text(EVIDENCE_WITH_SECRET)]
+    )
+    cert = cert_for(with_before(fixed_report(), exposure=scan))
+    assert cert["exposure_before"]["future_git_evidence"] == ["ref REDACTED points at 9676c1085a90"]
+    assert "ghp_TESTVALUE123456789" not in json.dumps(cert)
+
+
+def test_unredacted_secret_like_exposure_evidence_is_still_refused_at_build():
+    scan = dataclasses.replace(exposure("git-history"), future_git_evidence=[EVIDENCE_WITH_SECRET])
+    with pytest.raises(ValueError, match="holds a secret-like value") as info:
+        cert_for(with_before(fixed_report(), exposure=scan))
+    assert "future_git_evidence[0]" in str(info.value)
+    assert "ghp_TESTVALUE123456789" not in str(info.value)
+
+
+def test_a_secret_the_redactor_misses_is_still_refused_by_the_guard():
+    missed = "ref refs/heads/x points at Bearer abc.def.ghi"
+    assert redact_text(missed) == missed  # each word alone looks clean, so the redactor keeps the line
+    scan = dataclasses.replace(exposure("git-history"), future_git_evidence=[redact_text(missed)])
+    with pytest.raises(ValueError, match="holds a secret-like value") as info:
+        cert_for(with_before(fixed_report(), exposure=scan))
+    assert "abc.def.ghi" not in str(info.value)
+
+
+def test_a_2700_char_exposure_line_is_cut_before_the_build_and_the_certificate_builds():
+    from cheatproof.exposure import _evidence
+
+    long_ref = "ref refs/heads/" + "_".join(["feature"] * 340) + " points at 9676c1085a90"
+    scan = dataclasses.replace(exposure("git-history"), future_git_evidence=_evidence([long_ref]))
+    cert = cert_for(with_before(fixed_report(), exposure=scan))
+    assert len(cert["exposure_before"]["future_git_evidence"][0]) == 300
+
+
+def test_an_uncut_2700_char_exposure_line_is_refused_by_the_length_limit():
+    long_ref = "ref refs/heads/" + "_".join(["feature"] * 340) + " points at 9676c1085a90"
+    scan = dataclasses.replace(exposure("git-history"), future_git_evidence=[long_ref])
+    with pytest.raises(ValueError, match="longer than 2000 chars"):
+        cert_for(with_before(fixed_report(), exposure=scan))
 
 
 def test_string_over_2000_chars_is_refused_by_validate():
