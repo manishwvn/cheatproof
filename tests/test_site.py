@@ -334,7 +334,7 @@ def test_a_non_empty_directory_that_is_not_a_site_is_refused_and_left_alone(tmp_
     out.mkdir()
     (out / "keep.txt").write_text("mine", encoding="utf-8")
     with pytest.raises(
-        ValueError, match="output directory is not empty and is not a cheatproof site: notes$"
+        ValueError, match="output directory is not empty and is not a RewardSeal site: notes$"
     ) as info:
         build_site(cert_dir, out)
     assert str(tmp_path) not in str(info.value)  # the name only, no absolute path

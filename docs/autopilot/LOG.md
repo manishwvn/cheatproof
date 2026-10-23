@@ -351,3 +351,9 @@ progress 82% (21/30 tasks done, 6 days to submit)
 - Decision: Nemotron Super stays the attacker (Ultra is dearer); Haiku builds, Sonnet reviews, Opus only orchestrates.
 - Queued from chat-only items: T31 (PR #30 minors), T32 (certificate lost to the leak guard), T27 item for the PR #36 follow-ups. PR #32 minors were already T27 items 1-9.
 - Live ledger `halted` cleared (backup `~/.cheatproof-autopilot/ledger.pre-u25.bak`).
+
+## 2026-10-23 planner (promo credit)
+- Authority, owner relayed by the orchestrator session, verbatim: "yea lets set $10 for now. pass the same to planner. like you told me, I will not be prompting there". Owner earlier, verbatim: "we already have account balance that was give through this hackathon's promo code".
+- Fact verified by the orchestrator in Token Factory > Transactions: the $26.65 balance is "Adjustment: AI Builder Program Credits" (+$26.65, Oct 18), hackathon promo credit, not card money. The $0.71 trial is used first, then the promo.
+- New rule: promo spend is allowed. TOTAL real spend (trial + promo, i.e. Token Factory spend) is capped at $10 for now; the $4 daily cap stays; the account balance must NEVER go negative (a negative balance charges the card).
+- T43: `REAL_SPEND_CAP_USD` (default and hard ceiling $10) replaces the trial-only 0.74 cap in `cheatproof/budget.py`; `trial_spend_usd` ledger field kept and still counting.
