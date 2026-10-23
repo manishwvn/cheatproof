@@ -72,6 +72,8 @@ Since T42 harden and batch also keep, in the ignored traces/ folder and by the s
 (<stem>.before.diff, <stem>.after.diff, <stem>.diff), <stem>.restore.json (the grade's restore set, written before the
 paid run) and <stem>.rounds.json (see cheatproof/keep.py). holes recheck re-runs holes.classify on those files with no
 network, sandbox, model or budget and prints labels and test path names only; a missing piece is named and exits 1.
+A recomputed primary or exploited that differs from rounds.json exits 1 and names the field (an older rounds.json
+without those fields is checked on labels only, and says so).
 
 Exit codes: 0 a certificate was written (certified or not), or the report was printed. 1 the budget was halted or
 capped, the executor refused or was unavailable, the spend could not be checked, or the certificate could not be
@@ -82,7 +84,7 @@ batch.json could not be written; 2 usage error, or a missing setting or no curre
 run that needs it.
 site: 0 the site was written and every certificate loaded; 1 the site was written but some did not load (each
 listed on stderr), or the write failed; 2 the certificates or traces directory is missing, or --out is a non-empty
-directory that is not a cheatproof site.
+directory that is not a RewardSeal site.
 
 Collaborators come from Deps. Tests inject fakes; Deps.default() imports the real ones.
 Contract with certify.score_directory: a dict with int n, n_after, hackable_before, hackable_after, certified,
@@ -1463,7 +1465,7 @@ def cmd_site(args: argparse.Namespace, deps: Deps) -> int:
         result = deps.build_site(cert_dir, args.out, traces_dir=traces)
     except FileNotFoundError as exc:
         return _usage_error(f"site input not found: {sanitize(str(exc))[:ERROR_CHARS]}")
-    except ValueError as exc:  # --out is a non-empty directory that is not a cheatproof site
+    except ValueError as exc:  # --out is a non-empty directory that is not a RewardSeal site
         return _usage_error(sanitize(str(exc))[:ERROR_CHARS])
     except OSError as exc:
         return _failure(exc)
@@ -1487,10 +1489,11 @@ def cmd_budget(args: argparse.Namespace, deps: Deps) -> int:
 
 
 def cmd_holes_recheck(args: argparse.Namespace, deps: Deps) -> int:
-    """T42: re-run the hole classifier offline on the kept diff, trace and restore set. Labels only.
+    """T42: re-run the hole classifier offline on the kept diff, trace and restore set. Labels only on screen.
 
-    No budget, executor, model or network. 0 when the labels were recomputed; 1 when a kept piece is missing or
-    unreadable (the message names it); 2 for a usage error such as a bad stem or an uncached task.
+    No budget, executor, model or network. 0 when the labels were recomputed and the recorded primary and exploited
+    (when kept) agree; 1 when a kept piece is missing or unreadable, or a recorded primary or exploited differs (the
+    message names it, never the values or diff text); 2 for a usage error such as a bad stem or an uncached task.
     """
     from cheatproof import keep  # lazy: keep imports harden
 
@@ -1518,7 +1521,13 @@ def cmd_holes_recheck(args: argparse.Namespace, deps: Deps) -> int:
         return 1
     for line in keep.render(stem, checks):
         print(line)
-    return 0
+    mismatched = keep.mismatched_fields(checks)
+    for field in mismatched:
+        print(
+            f"error: recorded {field} does not match the recomputed {field}: {stem}.rounds.json",
+            file=sys.stderr,
+        )
+    return 1 if mismatched else 0
 
 
 NETWORK_FETCH_HELP = (
