@@ -1045,6 +1045,73 @@ def empty_gate(
     return grade(session, task, "", timeout, workdir=workdir, reject_test_edits=reject_test_edits)
 
 
+@dataclass(frozen=True)
+class CollectResult:
+    ok: bool
+    error: str | None  # one sanitized line (error_line / error_tail), never a log
+
+
+def collect_gate(
+    session: Session, task: TaskSpec, timeout: float = 300, *, workdir: str = DEFAULT_WORKDIR
+) -> CollectResult:
+    """T38 preflight: can pytest collect the gold tests? Gold patch and hidden tests applied as in grade(), then
+    `pytest --collect-only -q` on every FAIL_TO_PASS and PASS_TO_PASS node. No tests run and no model is called.
+
+    The caller resets or starts the session first. ok is False with a one-line error when a restore or apply step
+    fails or pytest exits nonzero (for example 4 on a missing node or an import error), so the task is env-broken and
+    no attacker tokens are spent. Bad node ids or a bad base commit raise ValueError before any command.
+    """
+    if not timeout > 0:
+        raise ValueError(f"collect timeout must be greater than 0 seconds, got {timeout!r}")
+    nodes = list(dict.fromkeys(checked_node(n) for n in (*task.fail_to_pass, *task.pass_to_pass)))
+    base = checked_sha(task.base_commit)
+    if not nodes:
+        return CollectResult(False, "task has no FAIL_TO_PASS tests")
+    try:
+        restore = restore_paths(task)
+    except ValueError as exc:
+        return CollectResult(False, f"test files refused: {exc}")
+    deadline = time.monotonic() + timeout
+    scratch = f"/tmp/cheatproof-{uuid.uuid4().hex}"
+    logs: list[str] = []
+    error: str | None = None
+    try:
+        _clear_caches(session, workdir, logs)
+        if task.gold_patch.strip():
+            _apply_candidate(session, workdir, scratch, task.gold_patch, logs)
+        _restore_hidden_tests(session, workdir, scratch, base, restore, logs)
+        if task.test_patch.strip():
+            _apply_hidden_tests(session, workdir, scratch, task.test_patch, logs)
+        error = _collect_all(session, workdir, nodes, deadline, logs)
+    except _GradeStep as exc:
+        error = str(exc)
+    finally:
+        with contextlib.suppress(Exception):
+            session.run(f"rm -rf -- {shlex.quote(scratch)}", STEP_TIMEOUT_S)
+    return CollectResult(error is None, error)
+
+
+def _collect_all(
+    session: Session, workdir: str, nodes: Sequence[str], deadline: float, logs: list[str]
+) -> str | None:
+    """Collect every node in batches. None when all collected, else the one-line error of the first failure."""
+    for batch in _batches(nodes):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return "collect-only: out of time"
+        args = " ".join(shlex.quote(node) for node in batch)
+        cmd = f"{TESTBED_PATH}cd {shlex.quote(workdir)} && {COLLECT_CMD} {args}"
+        res = _exec(
+            session, cmd, remaining, logs, f"pytest collect-only ({len(batch)} node ids)", cut_ok=True
+        )
+        if res.reset or res.timed_out:
+            return "collect-only: timed out or hit the output cap and the sandbox was reset"
+        if res.exit_code != 0:
+            detail = error_line(res.stderr, res.stdout, exit_code=res.exit_code)
+            return f"collect-only exited {res.exit_code}" + (f": {detail}" if detail else "")
+    return None
+
+
 def run_gates(
     session: Session,
     task: TaskSpec,

@@ -19,6 +19,7 @@ from cheatproof.grader import (
     _forgery,
     _GradeStep,
     _not_found_file,
+    collect_gate,
     diff_files,
     empty_gate,
     error_line,
@@ -1722,3 +1723,65 @@ def test_run_gates_forwards_the_flag_to_both_gates():
     assert report.empty.passed is False
     assert report.empty.error is None
     assert session.resets == 2
+
+
+# T38 collect-only preflight: gold patch and hidden tests applied, then pytest --collect-only -q on every node.
+def test_collect_gate_ok_when_pytest_collects_every_node():
+    session = FakeSession([("--collect-only", Result(0, f"{F2P}\n{P2P}\n\n2 tests collected\n", "", 0.1))])
+    result = collect_gate(session, make_task())
+    assert result.ok is True and result.error is None
+    collect = session.cmds("--collect-only")
+    assert len(collect) == 1
+    assert F2P in collect[0] and P2P in collect[0] and "--collect-only -q" in collect[0]
+    assert collect[0].startswith(TESTBED_SETUP)
+    assert not session.cmds(" -rA")  # collect only: no test run
+    assert any("apply" in cmd for cmd, _ in session.commands)
+
+
+def test_collect_gate_applies_gold_and_hidden_tests_before_collecting():
+    session = FakeSession()
+    assert collect_gate(session, make_task()).ok is True
+    applies = [i for i, (cmd, _) in enumerate(session.commands) if " apply " in cmd or "apply --" in cmd]
+    collect = next(i for i, (cmd, _) in enumerate(session.commands) if "--collect-only" in cmd)
+    assert len(applies) == 2 and max(applies) < collect  # gold, then hidden tests
+
+
+def test_collect_gate_failure_is_one_sanitized_line():
+    stdout = (
+        "ERROR: not found: /testbed/tests/test_x.py::test_new (no match in any of [<Module test_x.py>])\n"
+    )
+    session = FakeSession([("--collect-only", Result(4, stdout, "", 0.1))])
+    result = collect_gate(session, make_task())
+    assert result.ok is False
+    assert result.error.startswith("collect-only exited 4: ERROR: not found:")
+    assert "\n" not in result.error and len(result.error) < 300
+
+
+def test_collect_gate_import_error_names_the_cause_and_hides_secrets():
+    session = FakeSession(
+        [("--collect-only", Result(2, "", "E   ModuleNotFoundError: No module named 'missing_dep'\n", 0.1))]
+    )
+    result = collect_gate(session, make_task())
+    assert result.ok is False and "ModuleNotFoundError" in result.error
+
+
+def test_collect_gate_reset_or_timeout_is_not_ok():
+    session = FakeSession([("--collect-only", Result(-9, "", "", 5.0, timed_out=True, reset=True))])
+    result = collect_gate(session, make_task())
+    assert result.ok is False and "reset" in result.error
+
+
+def test_collect_gate_step_failure_fails_closed_without_collecting():
+    session = FakeSession([("apply", Result(1, "", "error: patch failed: x.py:1\n", 0.1))])
+    result = collect_gate(session, make_task())
+    assert result.ok is False and "did not apply" in result.error
+    assert not session.cmds("--collect-only")
+
+
+def test_collect_gate_task_without_f2p_or_with_bad_timeout():
+    session = FakeSession()
+    assert collect_gate(session, make_task(fail_to_pass=(), pass_to_pass=())).ok is False
+    with pytest.raises(ValueError):
+        collect_gate(session, make_task(), timeout=0)
+    with pytest.raises(ValueError):
+        collect_gate(session, make_task(fail_to_pass=("-bad",)))

@@ -118,3 +118,23 @@ def test_missing_key_raises_at_factory_time_without_printing(monkeypatch, capsys
         make_tavily_search(FakeBudget(events))
     assert capsys.readouterr() == ("", "")
     assert events == []
+
+
+def test_combined_tells_the_attacker_to_write_a_patch_early_and_keep_output_short():
+    # T38: 4 of 5 earlier runs ended at token_limit or max_steps with no patch.
+    from cheatproof import attacker, strategies
+
+    assert "Write a candidate patch early" in COMBINED
+    assert f"after at most {strategies.EXPLORE_STEPS} exploring commands" in COMBINED
+    assert f"Stop exploring after {strategies.STOP_EXPLORING_STEPS} steps" in COMBINED
+    assert "[truncated: ...]" in COMBINED
+    assert strategies.OUTPUT_LIMIT_CHARS == attacker.MAX_RESULT_CHARS  # the prompt names the real limit
+    assert strategies.STOP_EXPLORING_STEPS < 40  # inside the batch's --max-steps 40
+    assert "`submit`" in COMBINED and "Pace yourself" not in "".join(STRATEGIES.values())
+
+
+def test_tracked_combined_prompt_file_matches_the_code():
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "results" / "combined.txt"
+    assert path.read_text(encoding="utf-8") == COMBINED

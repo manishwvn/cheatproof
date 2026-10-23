@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -59,18 +60,36 @@ def _make_folder(folder: Path) -> None:
         os.chmod(folder, PRIVATE_DIR)  # the umask may have narrowed or widened the mode of mkdir
 
 
-def _aside(folder: Path, name: str) -> None:
-    """Rename folder/name to <name>.<UTC time>.old when it exists. Nothing is overwritten or deleted."""
-    target = folder / name
-    if not (target.exists() or target.is_symlink()):
-        return
+def _aside_path(folder: Path, name: str) -> Path:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     aside = folder / f"{name}.{stamp}.old"
     number = 1
     while aside.exists() or aside.is_symlink():
         number += 1
         aside = folder / f"{name}.{stamp}.{number}.old"
-    target.rename(aside)
+    return aside
+
+
+def _aside(folder: Path, name: str) -> None:
+    """Rename folder/name to <name>.<UTC time>.old when it exists. Nothing is overwritten or deleted."""
+    target = folder / name
+    if not (target.exists() or target.is_symlink()):
+        return
+    target.rename(_aside_path(folder, name))
+
+
+def copy_aside(folder: Path, name: str) -> Path | None:
+    """Copy folder/name to <name>.<UTC time>.old (same naming as _aside) and leave the original in place, so the final
+    write is the only thing that replaces it. None when there is no such file. A link is refused. T38: a rerun never
+    destroys the certificate it replaces; *.old files are ignored by the report and the site, which read *.json."""
+    target = folder / name
+    if target.is_symlink():
+        raise OSError(f"refusing to copy through a symbolic link: {name}")
+    if not target.exists():
+        return None
+    aside = _aside_path(folder, name)
+    shutil.copy2(target, aside)
+    return aside
 
 
 def _write(folder: Path, name: str, text: str) -> Path:

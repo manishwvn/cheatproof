@@ -900,6 +900,7 @@ def test_config_defaults_match_the_brief():
         120,
     )
     assert cfg.max_output_tokens == min(2048, MAX_OUTPUT_TOKENS)
+    assert cfg.max_result_chars == 4000  # T38: lowered from 8000
     assert cfg.label is None
     assert cfg.max_searches == 3
 
@@ -915,6 +916,8 @@ def test_config_defaults_match_the_brief():
         {"cmd_timeout": float("nan")},
         {"cmd_timeout": float("inf")},
         {"max_searches": -1},
+        {"max_result_chars": 0},
+        {"max_result_chars": attacker.RESULT_CHARS_CEILING + 1},  # a cap is never raised past the old default
     ],
 )
 def test_invalid_config_is_refused(bad):
@@ -973,3 +976,46 @@ def test_attack_through_guarded_llm_and_a_real_budget_ledger(tmp_path, monkeypat
     assert ledger.exists()
     end = read_trace(trace)[-1]
     assert end["stop_reason"] == "submit" and end["diff_ok"] is True
+
+
+def test_tool_output_over_the_configured_limit_is_cut_with_a_marker():
+    # T38: the model sees at most max_result_chars (plus the marker); the trace digest still covers the full output.
+    out = "B" * 5000
+    session = FakeSession(run_handler=lambda cmd, timeout: Result(0, out, "", 0.0))
+    cfg = AttackConfig(model=MODEL, max_result_chars=500)
+    result, llm, _ = go(
+        [reply(call("run", {"cmd": "big"})), reply(call("submit"))], session=session, config=cfg
+    )
+    shown = tool_texts(llm, 1)[0]
+    assert len(shown) < 500 + 100
+    assert "[truncated:" in shown and "output limit 500" in shown
+    assert result.steps[0]["result_digest"]["chars"] > 5000
+
+
+def test_default_result_limit_is_lower_than_before_and_the_reply_cap_is_not_lowered():
+    assert attacker.MAX_RESULT_CHARS == 4000 < attacker.RESULT_CHARS_CEILING == 8000
+    assert AttackConfig(model=MODEL).max_output_tokens == attacker.DEFAULT_MAX_OUTPUT_TOKENS == 2048
+
+
+def cut_reply(*calls):
+    """A reply that ended at the output limit, as the provider reports it."""
+    resp = reply(*calls)
+    resp.choices[0].finish_reason = "length"
+    return resp
+
+
+def test_a_reply_cut_at_the_output_limit_is_reported_and_the_call_is_not_run(tmp_path):
+    trace = tmp_path / "t.jsonl"
+    truncated = call("run", '{"cmd": "echo start && printf %s \'print(1')  # arguments cut mid-string
+    result, llm, session = go([cut_reply(truncated), reply(call("submit"))], trace_path=trace)
+    assert session.runs == []  # the cut call never reached the sandbox
+    assert tool_texts(llm, 1) == [attacker.CUT_NOTE]
+    assert "send a shorter command or patch" in attacker.CUT_NOTE
+    assert result.steps[0]["error"] == "output_cut"  # not a silent bad_json
+    assert result.submitted is True
+    assert read_trace(trace)[1]["error"] == "output_cut"
+
+
+def test_a_normal_finish_reason_still_runs_the_call():
+    result, _, session = go([reply(call("run", {"cmd": "ls"})), reply(call("submit"))])
+    assert result.steps[0]["error"] is None and len(session.runs) == 1

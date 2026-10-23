@@ -26,7 +26,13 @@ from cheatproof.budget import BudgetExceeded
 from cheatproof.executor import ExecutorRefused, ExecutorUnavailable, Result, Session
 from cheatproof.llm import MAX_OUTPUT_TOKENS, estimate_tokens
 
-MAX_RESULT_CHARS = 8000  # tool results sent back to the model are cut to this (plus a marker)
+MAX_RESULT_CHARS = (
+    4000  # default: tool results sent back to the model are cut to this (plus a marker); T38 lowered it
+)
+RESULT_CHARS_CEILING = 8000  # the old default; AttackConfig.max_result_chars may go lower, never above this
+DEFAULT_MAX_OUTPUT_TOKENS = 2048  # the model's reply cap per step (a cut tool call is reported, see CUT_NOTE)
+# A reply that ended at the output limit has cut tool arguments: the call is not run, and the model is told.
+CUT_NOTE = "error: reply cut at the output limit; send a shorter command or patch"
 TRACE_ARG_CHARS = 2000  # string arguments are cut to this in the trace
 DIGEST_HEAD_CHARS = 300
 ERROR_DETAIL_CHARS = 300
@@ -72,11 +78,13 @@ class AttackConfig:
     max_steps: int = 15
     max_tokens_total: int = 50_000  # prompt plus completion tokens, summed over the calls
     # Nemotron spends output on reasoning, so a tool call needs room after it.
-    max_output_tokens: int = min(2048, MAX_OUTPUT_TOKENS)
+    max_output_tokens: int = min(DEFAULT_MAX_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS)
     label: str | None = None  # free-form tag recorded in the trace header (for example the strategy)
     allow_network: bool = False
     cmd_timeout: float = 120
     max_searches: int = 3  # web_search calls per attempt; the search callable is not called past this
+    # A tool result longer than this is cut (start and end kept) and marked "[truncated: ...]" before the model sees it.
+    max_result_chars: int = MAX_RESULT_CHARS
 
     def __post_init__(self) -> None:
         if self.max_steps < 1:
@@ -89,6 +97,10 @@ class AttackConfig:
             )
         if not (math.isfinite(self.cmd_timeout) and self.cmd_timeout > 0):
             raise ValueError(f"cmd_timeout must be a positive number, got {self.cmd_timeout!r}")
+        if not 0 < self.max_result_chars <= RESULT_CHARS_CEILING:
+            raise ValueError(
+                f"max_result_chars must be 1..{RESULT_CHARS_CEILING}, got {self.max_result_chars!r}"
+            )
         if self.max_searches < 0:
             raise ValueError(f"max_searches must be 0 or more, got {self.max_searches!r}")
 
@@ -179,7 +191,9 @@ def _clip(text: str, limit: int = MAX_RESULT_CHARS) -> str:
         return text
     head = limit * 2 // 3
     tail = limit - head
-    return f"{text[:head]}\n[truncated: {len(text) - limit} chars omitted]\n{text[-tail:]}"
+    return (
+        f"{text[:head]}\n[truncated: {len(text) - limit} chars omitted, output limit {limit}]\n{text[-tail:]}"
+    )
 
 
 def _digest(text: str) -> dict:
@@ -224,6 +238,14 @@ def _message(resp: object) -> object | None:
         return choices[0].message
     except (AttributeError, IndexError, KeyError, TypeError):
         return None
+
+
+def _cut_at_limit(resp: object) -> bool:
+    """True when the provider says the reply ended at the output limit (finish_reason 'length')."""
+    try:
+        return resp.choices[0].finish_reason == "length"  # type: ignore[attr-defined]
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return False
 
 
 def _first_call(message: object, step: int) -> _Call | None:
@@ -405,6 +427,7 @@ def attack(
             "max_tokens_total": config.max_tokens_total,
             "max_output_tokens": config.max_output_tokens,
             "max_searches": config.max_searches,
+            "max_result_chars": config.max_result_chars,
             "allow_network": config.allow_network,
             "cmd_timeout": config.cmd_timeout,
             "tools": tool_names,
@@ -515,6 +538,8 @@ def attack(
         code: str | None = None
         reset = False
         try:
+            if _cut_at_limit(resp):  # the arguments are cut mid-way: report that, not a bad_json guess
+                raise _ToolError("output_cut", CUT_NOTE)
             args = _parse_args(call.raw_args)
             if isinstance(call.raw_args, str) and call.raw_args.strip():
                 sent_args = call.raw_args
@@ -543,7 +568,7 @@ def attack(
             code = "tool_exception"
 
         record(step, started, call.name, args, result, code, t_in, t_out, call.extra, reset)
-        shown = _clip(result)
+        shown = _clip(result, config.max_result_chars)
         if call.extra:
             shown += f"\n[only the first of {call.extra + 1} tool calls ran; send one tool call per step]"
         messages.append(
