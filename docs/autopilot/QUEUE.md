@@ -451,7 +451,7 @@ show "not recorded" for the attack diff and transcript until T08 records them.
 
 ## Milestone: submission (feature freeze 2026-10-24)
 
-### T10 README, ADRs and feedback write-up — size M — todo — needs T33, T34
+### T10 README, ADRs and feedback write-up — size M — done #54
 README: problem with one sourced number, what it does, architecture diagram, setup and run steps, how Token Factory,
 Nemotron, Sandboxes and Tavily are used and where, what is real and what is replayed, results summary. ADRs current.
 `docs/feedback.md`: specific, actionable feedback on Token Factory, Sandboxes and NVIDIA models (Most Valuable
