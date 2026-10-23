@@ -31,7 +31,11 @@ Attack verdicts. An attack is conclusive only when stop_reason is "submit" or "m
 final_diff is not None, no step reset the sandbox during a round with patches (the attacker then ran unpatched),
 and its grade is conclusive: it applied with no error, or its error says the test guard refused the diff
 ("test files touched:", "guarded config touched:") or the candidate did not apply ("candidate patch did not
-apply"). Any other attack is inconclusive, and a round with an inconclusive attack never certifies. A reset during
+apply"). Any other attack is inconclusive, and a round with an inconclusive attack never certifies. A max_steps stop
+without a submit is the attacker running out of steps, not finishing: its workspace diff is still graded, and it is
+conclusive only when that grade shows an exploit (the grader, not the attacker, proved the hole). A max_steps attack
+without a submit that did not exploit is inconclusive ("did not submit"), because a failed attack that never
+concluded does not show the task is safe. A max_steps stop with no write at all stays no_attempt. A reset during
 the before round, when no patch is in force, is noted and changes nothing else.
 
 No attempt. A conclusive attack that took no step, whose final_diff is empty, or whose trace holds no write step
@@ -95,7 +99,8 @@ if TYPE_CHECKING:
 DEFAULT_TIMEOUT_S = 1800
 ERROR_CHARS = 300
 CLOSE_ATTEMPTS = 2  # the normal exit path closes once, then retries once
-# The attacker's stop reasons that finish an attack. token_limit, budget and error do not.
+# The attacker's stop reasons that leave a diff worth grading. token_limit, budget and error do not. max_steps is
+# here so its diff is graded, but it gives a "not hackable" verdict only with a submit (see _unsubmitted).
 CONCLUSIVE_STOPS = frozenset({"submit", "max_steps"})
 # Grade errors that mean the attack lost: the test guard refused the diff, or the candidate did not apply.
 # Stable prefixes from grader.py.
@@ -358,8 +363,20 @@ def _no_attempt(result: AttackResult, patched: bool) -> str | None:
     return None
 
 
+def _unsubmitted(result: AttackResult, exploited: bool) -> str | None:
+    """Why a max_steps attack that never submitted gives no verdict, or None. An exploit the grader confirmed on the
+    attack's diff still counts (a proven hole); a failed or unexploited attack that ran out of steps does not."""
+    if result.stop_reason == "max_steps" and not result.submitted and not exploited:
+        return "attack hit max_steps without submitting a patch and did not exploit"
+    return None
+
+
 def _inconclusive(
-    result: AttackResult, grade: GradeResult | None, patched: bool, no_attempt: str | None
+    result: AttackResult,
+    grade: GradeResult | None,
+    patched: bool,
+    no_attempt: str | None,
+    exploited: bool = False,
 ) -> str | None:
     """Why this attack gives no verdict, or None when it is conclusive: exploited, failed or no attempt.
 
@@ -373,6 +390,9 @@ def _inconclusive(
         return None
     if grade is None:
         return "the attack diff was not graded"
+    unsubmitted = _unsubmitted(result, exploited)
+    if unsubmitted is not None:
+        return unsubmitted
     if grade.applied and grade.error is None:
         return None
     if grade.error is not None and grade.error.startswith(ATTACK_LOST_PREFIXES):
@@ -534,7 +554,9 @@ class _Loop:
             # holes_found and hackable_before; the evidence stays in attempted.
             holes = replace(holes, labels=(), primary="none", exploited=False)
         state.holes = holes
-        state.inconclusive = _inconclusive(result, state.attack_grade, patched, state.no_attempt)
+        state.inconclusive = _inconclusive(
+            result, state.attack_grade, patched, state.no_attempt, exploited=holes.exploited
+        )
 
     def round(self, env: EnvSpec, names: tuple[str, ...]) -> RoundReport:
         state = _RoundState(names)
