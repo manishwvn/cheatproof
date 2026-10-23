@@ -2,7 +2,7 @@
 
 Decided 2026-10-18 after three research rounds and judge panels (earlier candidates live in git history). Judging:
 four equal criteria scored 1–5 (Technological Implementation, Design, Potential Impact, Quality of Idea); ties go
-to Technological Implementation. Budget: about $25 of Token Factory credits, in-app cap $20.
+to Technological Implementation. Budget: free Token Factory credits only (trial and hackathon promo), in-app real-spend cap $10 total, $4 a day.
 
 ## One line
 The first closed loop that finds reward hacks in SWE environments, patches them, and certifies that each patched
