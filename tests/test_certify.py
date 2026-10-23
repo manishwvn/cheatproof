@@ -25,7 +25,7 @@ from cheatproof.certify import (
     write_certificate,
 )
 from cheatproof.exposure import ExposureReport
-from cheatproof.grader import GateReport, GradeResult
+from cheatproof.grader import GateReport, GradeResult, redact_text
 from cheatproof.harden import CandidateCheck, HardenReport, RoundReport
 from cheatproof.holes import HoleReport
 from cheatproof.patches import PatchOutcome
@@ -991,6 +991,36 @@ def test_secret_like_attack_error_is_refused_at_build(text):
         cert_for(report)
     assert text not in str(info.value)
     assert "harden.before.attack.error" in str(info.value)
+
+
+# Exposure evidence is free text. The scan redacts it; the guard at build still refuses anything that survives.
+EVIDENCE_WITH_SECRET = "ref refs/heads/ghp_TESTVALUE123456789 points at 9676c1085a90"
+
+
+def test_redacted_exposure_evidence_still_builds_the_certificate():
+    scan = dataclasses.replace(
+        exposure("git-history"), future_git_evidence=[redact_text(EVIDENCE_WITH_SECRET)]
+    )
+    cert = cert_for(with_before(fixed_report(), exposure=scan))
+    assert cert["exposure_before"]["future_git_evidence"] == ["ref REDACTED points at 9676c1085a90"]
+    assert "ghp_TESTVALUE123456789" not in json.dumps(cert)
+
+
+def test_unredacted_secret_like_exposure_evidence_is_still_refused_at_build():
+    scan = dataclasses.replace(exposure("git-history"), future_git_evidence=[EVIDENCE_WITH_SECRET])
+    with pytest.raises(ValueError, match="holds a secret-like value") as info:
+        cert_for(with_before(fixed_report(), exposure=scan))
+    assert "future_git_evidence[0]" in str(info.value)
+    assert "ghp_TESTVALUE123456789" not in str(info.value)
+
+
+def test_a_secret_the_redactor_misses_is_still_refused_by_the_guard():
+    missed = "ref refs/heads/x points at Bearer abc.def.ghi"
+    assert redact_text(missed) == missed  # each word alone looks clean, so the redactor keeps the line
+    scan = dataclasses.replace(exposure("git-history"), future_git_evidence=[redact_text(missed)])
+    with pytest.raises(ValueError, match="holds a secret-like value") as info:
+        cert_for(with_before(fixed_report(), exposure=scan))
+    assert "abc.def.ghi" not in str(info.value)
 
 
 def test_string_over_2000_chars_is_refused_by_validate():

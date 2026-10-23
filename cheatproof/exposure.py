@@ -27,6 +27,7 @@ from cheatproof.grader import (
     checked_sha,
     error_tail,
     git_command,
+    redact_text,
     restore_paths,
     restored_conftest,
 )
@@ -87,6 +88,10 @@ def scan(session: Session, task: TaskSpec, *, workdir: str = DEFAULT_WORKDIR) ->
         git_evidence = _git_history(session, base, workdir)
     tests = _writable_tests(session, task, workdir)
     network, network_evidence = _network(session)
+    # Evidence is free text (a ref name is set by the task repo), so each secret-like word goes to REDACTED.
+    # The path and finding type stay. The leak guard still refuses any value this misses.
+    git_evidence = [redact_text(line) for line in git_evidence]
+    network_evidence = [redact_text(line) for line in network_evidence]
     holes = [
         label
         for label, hit in (

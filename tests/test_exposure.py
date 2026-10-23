@@ -127,6 +127,25 @@ def test_git_evidence_names_what_was_found():
     assert report.future_git_evidence == ["3 commit(s) past base reachable from refs"]
 
 
+# A ref name comes from the task repo, so it is free text: a secret-like word in it is redacted at scan time.
+SECRET_REF = "refs/heads/ghp_TESTVALUE123456789"
+
+
+def test_secret_like_ref_name_is_redacted_and_the_rest_of_the_line_is_kept():
+    report = scan(session_with(("for-each-ref", Result(0, f"{OTHER}||{SECRET_REF}\n", "", 0.0))), make_task())
+    assert report.holes == [HOLE_GIT_HISTORY]
+    assert report.future_git_evidence == [f"ref REDACTED points at {OTHER[:12]}"]
+    assert "ghp_TESTVALUE123456789" not in " ".join(report.future_git_evidence)
+
+
+def test_path_style_ref_name_is_not_redacted():
+    report = scan(
+        session_with(("for-each-ref", Result(0, f"{OTHER}||refs/heads/fix/tests/test_calc.py\n", "", 0.0))),
+        make_task(),
+    )
+    assert report.future_git_evidence == [f"ref refs/heads/fix/tests/test_calc.py points at {OTHER[:12]}"]
+
+
 def test_all_three_holes_are_listed_in_order():
     report = scan(
         session_with(
