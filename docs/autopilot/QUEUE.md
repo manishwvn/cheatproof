@@ -376,7 +376,8 @@ DRMacIver__shrinkray-7's gold gate fails with `pytest exited 4: ERROR: found no 
 ### T34 `max_steps` without a submit is inconclusive — size S — todo (P0, sonnet; do before T32 lands)
 `cheatproof/harden.py:99` puts `max_steps` in `CONCLUSIVE_STOPS`, and `harden.py:614` can then certify a task whose attacker never submitted. A `max_steps` stop without a submitted patch must be inconclusive and never certified; keep `no_attempt` for no write at all. Update `docs/results.md` counts if any row changes. Tests in `tests/test_harden.py`.
 
-### T35 Ledger refusal and halt ordering — size S — todo (P0, haiku) — merged into T27
+### T35 Ledger refusal and halt ordering — size S — done #49 (P0, haiku) — merged into T27
+Done 2026-10-23 (PR #49, branch `t35-ledger-guards`, planner-merge path, not merged): (a) to (d) done with fakes tests, and T27 item 6 (the `.env.example` note) done in the same PR. Full pytest 1976 passed, 1 skipped; ruff clean. Needs the planner to merge.
 Do these as part of T27 items, in one planner-merge PR (`budget.py`, `executor.py`): (a) a missing ledger file refuses to run (`budget.py:272`) unless an explicit init created it (add `cheatproof budget init`, never implicit); (b) ledger `OSError` becomes `BudgetExceeded` (`executor.py:1140`); (c) the halt flag is checked before every exec, including the cost-0 path (`budget.py:413`, `executor.py:1189`); (d) `_halt_for_payment` runs on all exceptions (`executor.py:1130`). Fakes-only tests. T35 and T27 are closed together; T27 keeps its other items.
 
 ### T36 Fix results row 8 and the access probe retries — size S — todo (P0, haiku)
@@ -419,6 +420,7 @@ Review of PR #32 (`cheatproof/budget.py` and the Sandboxes cost path, planner-me
    fails when CI crosses UTC midnight (main run 39696924691, 2026-10-21 23:59 UTC; rerun green). Compute the date at
    assert time or freeze the clock.
 `budget.py` is a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
+Note 2026-10-23 (T35, PR #49): items (a) to (d) of T35 were done there, and item 6 (the `.env.example` note) too. Items 1 to 5 and 7 to 9 are still open for T27.
 
 PR #36 review follow-ups (Sonnet, 2026-10-23, low): in `scripts/smoke.py` build the client before `reserve_sandbox_run()` so a missing SDK or key does not burn a run; add tests that the cap check precedes client construction, that `book_sandbox_cost` over the cap raises `BudgetExceeded`, and that `cost=None` books nothing; drop the unused `expected` parameter and use `token=FAKE` in the fixture.
 
