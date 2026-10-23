@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -77,7 +78,8 @@ BATCH_KEYS = frozenset(
         "updated",
     }
 )
-NOT_RUN_KEYS = frozenset({"instance_id", "reason", "error"})
+NOT_RUN_KEYS = frozenset({"instance_id", "reason", "error"})  # always written by cli batch
+NOT_RUN_OPTIONAL_KEYS = frozenset({"cost_usd"})  # written only when a paid run's spend was measured
 BATCH_NOT_LOADED = "batch record not loaded"
 BATCH_NOT_AVAILABLE = "selection record not available"
 SEE_ERRORS = '(see <a href="#errors">errors</a>).'
@@ -85,7 +87,7 @@ UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
 # C0 controls except tab and newline, DEL, C1 controls and bidi controls. _cell shows each one as [U+XXXX].
 CONTROL_OR_BIDI = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 MARKER = ".cheatproof-site"  # build_site writes it; only a directory that holds it may hold an earlier site
-MARKER_TEXT = "cheatproof site, written by cheatproof.site.build_site\n"
+MARKER_TEXT = "RewardSeal site, written by cheatproof.site.build_site\n"
 NOJEKYLL = ".nojekyll"  # empty: GitHub Pages serves the files as they are, without Jekyll
 TRANSCRIPT_NOTE = (
     "Tool results are shown as digests only. This transcript is matched to the certificate by file name "
@@ -190,7 +192,7 @@ def build_site(
     """Write the site for the certificates in cert_dir into out_dir and return what was written.
 
     Raises FileNotFoundError when cert_dir is not a directory, and ValueError when out_dir is a non-empty directory
-    that is not a cheatproof site (nothing is written then). A file that fails to load, or repeats an instance id, is
+    that is not a RewardSeal site (nothing is written then). A file that fails to load, or repeats an instance id, is
     listed in errors and on the index, and the rest still build. The transcript of env/<name>.html is read from
     traces_dir as the module docstring describes. batch_file is the selection record; when None it is
     cert_dir.parent/batch.json, and a missing default file is not an error. A bad batch record is listed in errors.
@@ -211,7 +213,7 @@ def build_site(
     summary = score([entry.cert for entry in entries]) if entries else None
     index = out / "index.html"
     body = _index_body(entries, errors, len(cert_errors), summary, batch)
-    _write(index, _document("Cheatproof report", body))
+    _write(index, _document("RewardSeal report", body))
     pages = []
     for entry in entries:
         page = env_dir / f"{entry.name}.html"
@@ -220,7 +222,7 @@ def build_site(
             for name in ROUNDS
         }
         body = _env_body(entry.cert, _transcript_body(traces_dir, entry), diffs)
-        _write(page, _document(f"Cheatproof: {entry.cert['task']['instance_id']}", body))
+        _write(page, _document(f"RewardSeal: {entry.cert['task']['instance_id']}", body))
         pages.append(page)
     return SiteResult(index=index, pages=pages, errors=errors)
 
@@ -316,11 +318,25 @@ def _is_str_list(value: Any) -> bool:
 
 
 def _is_not_run(item: Any) -> bool:
-    return (
-        isinstance(item, dict)
-        and set(item) == NOT_RUN_KEYS
-        and all(isinstance(item[key], str) for key in NOT_RUN_KEYS)
-    )
+    if not isinstance(item, dict):
+        return False
+    keys = set(item)
+    if not NOT_RUN_KEYS <= keys <= NOT_RUN_KEYS | NOT_RUN_OPTIONAL_KEYS:
+        return False
+    if not all(isinstance(item[key], str) for key in NOT_RUN_KEYS):
+        return False
+    return "cost_usd" not in item or _is_cost(item["cost_usd"])
+
+
+def _is_cost(value: Any) -> bool:
+    """A finite, non-negative number. A huge integer does not convert to float: that is refused, not raised."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        number = float(value)
+    except OverflowError:  # int too large for a float, as in 10**400
+        return False
+    return math.isfinite(number) and number >= 0
 
 
 def _want(condition: bool, message: str) -> None:
@@ -362,7 +378,7 @@ def _write(path: Path, text: str) -> None:
 
 
 def _prepare_out_dir(out: Path) -> None:
-    """Refuse a non-empty directory that is not a cheatproof site. In one that is, remove the old env/*.html pages.
+    """Refuse a non-empty directory that is not a RewardSeal site. In one that is, remove the old env/*.html pages.
 
     A symlink named *.html in env/ is unlinked as a link: its target is not touched, and no page is written through it.
     """
@@ -371,7 +387,7 @@ def _prepare_out_dir(out: Path) -> None:
     if not (out / MARKER).is_file():
         if any(out.iterdir()):
             name = out.resolve().name  # the name only: no absolute path reaches the message
-            raise ValueError(f"output directory is not empty and is not a cheatproof site: {name}")
+            raise ValueError(f"output directory is not empty and is not a RewardSeal site: {name}")
         return
     env_dir = out / "env"
     if env_dir.is_symlink():  # cleanup and pages must stay inside the site directory
@@ -563,7 +579,7 @@ def _index_body(
     """excluded counts the certificate files left out (errors also holds a bad batch record, which is not one)."""
     head = [
         "<header>",
-        "<h1>Cheatproof hackability report</h1>",
+        "<h1>RewardSeal hackability report</h1>",
         f'<p class="banner" role="note">{_cell(BANNER)}</p>',
         "</header>",
     ]

@@ -119,7 +119,7 @@ Routine 2026-10-20 19:24: PR #27 does all items except 7 (`COST_BASIS` is valida
 schema/fixture change). Sonnet "fix first" (silent resets could fake "not hackable"), one Haiku fix round, Opus
 approve. CI `test` green; `dependencies` red until PR #26 (certifi) is merged.
 
-### T24 Rename the product to RewardSeal (user-facing text only) — size M — todo
+### T24 Rename the product to RewardSeal (user-facing text only) — size M — text done #53 (package rename deferred)
 Scope change 2026-10-23 (orchestrator): rename USER-FACING TEXT ONLY now (README, report site text, CLI help strings and
 docs, video script, pitches). Do NOT rename the Python package, the console script or any import in this task; that stays a later
 option. The grep rule below applies to user-facing files only.
@@ -387,10 +387,11 @@ Do these as part of T27 items, in one planner-merge PR (`budget.py`, `executor.p
 ### T38 Batch 3 preparation (P1, only after P0 is merged) — size M — todo — needs T33, T34, T35, T32, T36
 Goal: at least one `certified=True` with a completed re-attack, and at least one git-history hole. (1) Pick tasks where the exposure scan shows `future_git` true; add a collect-only preflight that runs `pytest --collect-only -q` on the gold tests and skips the task as `env-broken` before any attacker tokens are spent. (2) Add a "write a candidate patch early" nudge to the attacker prompt and tighter output limits, because 4 of 5 runs ended at `token_limit` or `max_steps`. (3) Target the git-history leak first (CycloneDX-348 style). Use the remaining trial headroom (about $0.36 counted); do not raise any cap. Run the batch as T08 describes (chunks of at most 3, halt, U26). The orchestrator audits before the run: finish this task's code, then STOP and wait; do not start the paid batch until the orchestrator says so.
 
-### T39 Pages workflow and sanitized hero traces (P2, haiku wires, sonnet writes) — size M — todo
+### T39 Pages workflow and sanitized hero traces (P2, haiku wires, sonnet writes) — size M — done #52
 A GitHub Pages workflow that builds the report site, plus committed sanitized traces for the hero attack, so the demo URL is live when the owner flips the repo public. No public flip by the routine. Traces pass `leakcheck`.
+Done (#52): `.github/workflows/pages.yml` builds `cli site` from committed certificates on push to main; deploy runs only after a successful build, on a public repo, with Pages enabled (a preflight check; no continue-on-error). `docs/site.md`, `tests/test_pages_workflow.py`. The site schema accepts the `cost_usd` that `cli batch` writes on a not-run row; the committed site build exits 0. Hero trace NOT added: no committed certificate is the hero attack, and a site transcript attaches by certificate stem, so a hand-made trace would misattribute. Owner decides (traced hero run via T08, or a replay certificate).
 
-### T40 Video script and pitches say Super, fill RESULT markers (P2) — size S — todo — needs T33, T34
+### T40 Video script and pitches say Super, fill RESULT markers (P2) — size S — placeholders done #53, fill after batch 3 — needs T33, T34
 Fill the `[RESULT: ...]` markers in `docs/video/script.md` from the real numbers in `docs/results.md`; replace "Ultra" with Nemotron Super everywhere (also `docs/pitches.md`). Do not claim a result the data does not show.
 
 ### T41 Certification rejects a max_steps run that never submitted — size S — done #48 (P0)
@@ -404,6 +405,8 @@ Owner 2026-10-23 (see LOG): the $26.65 balance is hackathon promo credit, not ca
 
 ### T45 Ledger init, 402 and halted-key minors from the audit (planner-merge: `budget.py`, `executor.py`, `llm.py`) — size S — done #57
 `budget.create_ledger` refuses a fresh ledger while a stale `ledger.lock` or a `*.bak` sits beside it (kind names only, nothing written); `force_fresh` (`init_ledger_from_env` too) overrides it and never overwrites. The CLI `budget init --force-fresh` flag is not wired yet (`cli.py` is off-limits here). `executor._http_status` also reads `exc.response.status_code`. `GuardedLLM` halts on a 402 with the fixed-text pattern of `_halt_for_payment` and raises `BudgetExceeded` from None. The ledger `halted` key is required (missing = corrupt, refused); `_charge` uses `s.get`. Tests in `tests/test_budget.py`, `tests/test_sandbox_executor.py`.
+### T44 Certification fails closed on malformed attack fields — size S — done #55 (MED audit finding)
+T41's `_check_certified` treated a missing or mistyped `attack` or `holes` as "not unsubmitted", so a malformed certified certificate passed. Now a `certified: true` certificate needs, in every attack round (before and after): `attack` a Mapping, `attack.stop_reason` in {submit, max_steps}, `attack.submitted` a bool, `holes` a Mapping with a bool `exploited`; a max_steps round also needs submitted or exploited (same rule as `harden._unsubmitted`). Anything else is refused with a fixed message naming the field, never the value. Non-certified certificates are unaffected; `results/certificates/*.json` (all certified=false) still validate. Real writers (`harden._attack_summary`, `HoleReport.to_dict`) already emit these fields; `tests/test_cli.py` fake rounds now carry an attack summary. Tests in `tests/test_certify.py`.
 
 ### T31 Executor and sandbox minors from the PR #30 review — size S — todo — needs T08 (planner-merge paths: `executor.py`, `scripts/sandbox_access.py`)
 Minor findings from the Sonnet review of PR #30 (T23), none blocking. Fix with fakes, then a USER item for the planner to merge.
@@ -451,7 +454,7 @@ show "not recorded" for the attack diff and transcript until T08 records them.
 
 ## Milestone: submission (feature freeze 2026-10-24)
 
-### T10 README, ADRs and feedback write-up — size M — todo — needs T33, T34
+### T10 README, ADRs and feedback write-up — size M — done #54
 README: problem with one sourced number, what it does, architecture diagram, setup and run steps, how Token Factory,
 Nemotron, Sandboxes and Tavily are used and where, what is real and what is replayed, results summary. ADRs current.
 `docs/feedback.md`: specific, actionable feedback on Token Factory, Sandboxes and NVIDIA models (Most Valuable

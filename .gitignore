@@ -9,6 +9,8 @@ runs/
 # Raw attacker step args: never committed unsanitized
 results/traces/
 results/reports/
+# Local site build (cli site default output; CI builds it, never commits it)
+results/site/
 # Python
 .venv/
 __pycache__/

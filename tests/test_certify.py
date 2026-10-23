@@ -1014,6 +1014,86 @@ def test_max_steps_without_submit_is_recorded_for_a_task_that_is_not_certified()
     assert only_outcome(cert) == {"inconclusive": 1}
 
 
+MISSING = object()
+
+
+def _break_round(cert, which, path, value):
+    """Set or remove (value is MISSING) one field of the before or after round."""
+    rnd = cert["harden"][which]
+    target = rnd
+    for key in path[:-1]:
+        target = target[key]
+    if value is MISSING:
+        target.pop(path[-1], None)
+    else:
+        target[path[-1]] = value
+
+
+@pytest.mark.parametrize("which", ["before", "after"])
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("attack",), None, "attack to be an object"),
+        (("attack",), "submit", "attack to be an object"),
+        (("attack", "stop_reason"), MISSING, "attack.stop_reason to be submit or max_steps"),
+        (("attack", "stop_reason"), None, "attack.stop_reason to be submit or max_steps"),
+        (("attack", "stop_reason"), "token_limit", "attack.stop_reason to be submit or max_steps"),
+        (("attack", "stop_reason"), ["submit"], "attack.stop_reason to be submit or max_steps"),
+        (("attack", "submitted"), MISSING, "attack.submitted to be a bool"),
+        (("attack", "submitted"), None, "attack.submitted to be a bool"),
+        (("attack", "submitted"), 1, "attack.submitted to be a bool"),
+        (("attack", "submitted"), "true", "attack.submitted to be a bool"),
+        (("holes", "exploited"), MISSING, "holes.exploited to be a bool"),
+        (("holes", "exploited"), None, "holes.exploited to be a bool"),
+        (("holes", "exploited"), 0, "holes.exploited to be a bool"),
+        (("holes", "exploited"), "false", "holes.exploited to be a bool"),
+    ],
+)
+def test_certified_is_refused_when_an_attack_field_is_missing_or_mistyped(which, path, value, message):
+    cert = valid_cert()
+    _break_round(cert, which, path, value)
+    with pytest.raises(ValueError, match=re.escape(f"certified requires harden.{which}.{message}")):
+        validate_certificate(cert)
+
+
+def test_certified_is_refused_when_the_before_holes_are_null():
+    cert = cert_for(clean_report())
+    cert["harden"]["before"]["holes"] = None
+    with pytest.raises(ValueError, match=re.escape("certified requires harden.before.holes to be an object")):
+        validate_certificate(cert)
+
+
+def test_malformed_attack_field_is_named_without_printing_its_value():
+    cert = valid_cert()
+    cert["harden"]["before"]["attack"]["stop_reason"] = "LEAKY-VALUE-123"
+    with pytest.raises(ValueError) as caught:
+        validate_certificate(cert)
+    assert "harden.before.attack.stop_reason" in str(caught.value)
+    assert "LEAKY-VALUE-123" not in str(caught.value)
+
+
+def test_malformed_attack_fields_are_allowed_when_the_certificate_is_not_certified():
+    cert = cert_for(inconclusive_report())
+    assert cert["certified"] is False
+    cert["harden"]["before"]["attack"] = {"stop_reason": "token_limit"}
+    validate_certificate(cert)
+    cert["harden"]["before"]["attack"] = None
+    validate_certificate(cert)
+
+
+def test_build_refuses_a_certified_report_whose_round_lacks_the_attack_summary():
+    with pytest.raises(ValueError, match=re.escape("harden.before.attack to be an object")):
+        cert_for(with_before(clean_report(), attack=None))
+
+
+@pytest.mark.parametrize("attack_value", [max_steps_submitted_attack(), unsubmitted_attack()])
+def test_certified_max_steps_that_submitted_or_exploited_passes_the_strict_check(attack_value):
+    # The unsubmitted case passes only because the before round (fixed_report) shows a grader-confirmed exploit.
+    cert = cert_for(with_before(fixed_report(), attack=attack_value))
+    assert cert["certified"] is True
+    validate_certificate(cert)
+
+
 def test_no_attempt_round_must_have_a_no_attempt_string_or_null():
     cert = cert_for(no_attempt_report())
     cert["harden"]["before"]["no_attempt"] = 5
