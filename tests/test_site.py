@@ -991,6 +991,61 @@ def test_a_batch_that_breaks_the_schema_is_refused_with_its_field_named(tmp_path
     assert "n run" not in index
 
 
+@pytest.mark.parametrize("cost", [0, 0.0, 0.15, 1], ids=["int-zero", "zero", "fraction", "int"])
+def test_a_not_run_row_with_a_measured_cost_is_accepted(tmp_path, cost):
+    cert_dir = fixture_dir(tmp_path)
+    row = {"instance_id": "owner__repo-4", "reason": "budget", "error": "daily cap", "cost_usd": cost}
+    put_batch(tmp_path, batch_record(not_run=[row]))
+    result = build_site(cert_dir, tmp_path / "site")
+    assert result.errors == []
+    assert "batch record not loaded" not in read(result.index)
+
+
+@pytest.mark.parametrize("cost", [-0.1, "0.15", True, None], ids=["negative", "string", "bool", "null"])
+def test_a_not_run_row_with_a_bad_cost_is_refused(tmp_path, cost):
+    cert_dir = fixture_dir(tmp_path)
+    row = {"instance_id": "owner__repo-4", "reason": "budget", "error": "daily cap", "cost_usd": cost}
+    put_batch(tmp_path, batch_record(not_run=[row]))
+    result = build_site(cert_dir, tmp_path / "site")
+    assert result.errors == [("batch.json", "batch record field not_run has the wrong type")]
+
+
+def test_a_batch_file_written_by_the_batch_writer_loads_with_no_errors(tmp_path):
+    """The record is written by cli._Batch, the writer cli batch uses, so the reader and writer share the shape."""
+    from cheatproof import cli
+
+    cert_dir = fixture_dir(tmp_path)
+    path = tmp_path / "batch.json"
+    state = {
+        "schema_version": 1,
+        "source": ["swe-rebench"],
+        "selection_rule": "per source, the n lowest by score",
+        "scanned": 5,
+        "valid": 4,
+        "skipped": {"no test patch": 1},
+        "selected": 4,
+        "selected_ids": ["owner__repo-1", "owner__repo-2", "owner__repo-3", "owner__repo-4"],
+        "run": 0,
+        "already_certified": 0,
+        "not_run": [],
+        "started": "2026-10-22T09:43:42Z",
+        "updated": "2026-10-22T09:43:42Z",
+    }
+    batch = cli._Batch(path, state, lambda: "2026-10-22T09:59:57Z")
+    batch.done("owner__repo-1: run")  # run += 1 and the record is saved
+    batch.not_run(
+        "owner__repo-3", "budget", "daily cap reached", 0.15
+    )  # a measured spend: cost_usd is written
+    batch.not_run("owner__repo-4", "disk", "free disk is 2.0 GB")  # no spend measured: no cost_usd key
+    assert {"cost_usd" in row for row in json.loads(path.read_text(encoding="utf-8"))["not_run"]} == {
+        True,
+        False,
+    }
+    result = build_site(cert_dir, tmp_path / "site", batch_file=path)
+    assert result.errors == []
+    assert "batch record not loaded" not in read(result.index)
+
+
 def test_a_batch_missing_a_key_or_with_an_extra_key_is_refused(tmp_path):
     cert_dir = fixture_dir(tmp_path)
     missing = batch_record()

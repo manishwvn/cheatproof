@@ -53,11 +53,24 @@ def test_every_action_is_pinned_by_full_sha_with_a_version_comment():
         assert PINNED_USES.match(line), line
 
 
-def test_deploy_is_skipped_on_a_private_repo_and_fails_softly():
+def test_deploy_needs_a_successful_build_on_a_public_repo():
     deploy = _job_block("deploy")
-    assert "if: ${{ !github.event.repository.private }}" in deploy
-    assert "continue-on-error: true" in deploy
-    assert "continue-on-error" not in _job_block("build")
+    assert "needs: build" in deploy
+    assert "if: ${{ !github.event.repository.private && needs.build.result == 'success' }}" in deploy
+
+
+def test_a_failed_site_build_is_never_tolerated():
+    build = _job_block("build")
+    assert "uv run python -m cheatproof.cli site --certs results/certificates --out results/site" in build
+    for tolerance in ("set +e", "|| true", "continue-on-error", "exit 1"):
+        assert tolerance not in build
+    assert "continue-on-error" not in WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_deploy_runs_only_when_the_pages_check_finds_pages_enabled():
+    deploy = _job_block("deploy")
+    assert "gh api" in deploy and "HTTP 404" in deploy
+    assert "steps.pages.outputs.enabled == 'true'" in deploy
 
 
 def test_build_does_not_enable_pages_or_call_a_model():
@@ -67,9 +80,11 @@ def test_build_does_not_enable_pages_or_call_a_model():
     assert "results/certificates" in text
 
 
-def test_site_builds_every_committed_certificate_without_traces(tmp_path):
+def test_site_builds_every_committed_certificate_without_traces_and_with_no_errors(tmp_path):
     certs = ROOT / "results" / "certificates"
-    result = build_site(certs, tmp_path / "site", batch_file=ROOT / "results" / "batch.json")
+    # The CLI's own defaults: the batch record is cert_dir.parent / batch.json, and there are no traces.
+    result = build_site(certs, tmp_path / "site")
+    assert result.errors == []  # so cli site exits 0 and the workflow deploys
     assert result.index.is_file()
     assert len(result.pages) == len(list(certs.glob("*.json")))
     for page in result.pages:
