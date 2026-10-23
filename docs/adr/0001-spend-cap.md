@@ -1,21 +1,30 @@
 # ADR 0001: in-app hard spend cap
 
-**Status:** accepted, 2026-10-16; amended 2026-10-18 (fail-closed settings, read-only snapshot, $20 ceiling, validated
-token counts, settle and ledger checks)
+**Status:** accepted, 2026-10-16. Amendments:
+- 2026-10-18: fail-closed settings, read-only snapshot, $20 ceiling, validated token counts, settle and ledger checks.
+- 2026-10-21: Sandboxes became the default executor; a reported Sandboxes cost is logged, not booked (U21).
+- 2026-10-22: Sandboxes cost passed the then-current $0.50 cap and the budget halted (U25).
+- 2026-10-23: logged-cost rule written into this ADR; the real-spend cap `REAL_SPEND_CAP_USD` ($10, T43) replaced the
+  trial-only cap. Current `SANDBOX_COST_CAP_USD`: 5.00 in the live `.env` since 2026-10-23 (an estimate counter, not a
+  bill). The code default is still 0.50; the earlier 0.50 and 1.50 settings are history.
 
 **Context.** Token Factory needs a card. It has no documented hard spend limit, the balance can go negative, and the
-card is auto-charged at month start or at a billing threshold. The project must stay inside free credits, including
-during public judging (Dec 1–15) when anyone can trigger runs.
+card is auto-charged at month start or at a billing threshold. The project must stay inside free credits (the $1 trial
+and the hackathon promo credit, not card money), including during public judging (Dec 1–15) when anyone can trigger runs.
 
 **Decision.** Every paid call goes through `cheatproof/budget.py`:
 - It reserves the worst-case cost (estimated input × price, plus `max_tokens` × price) before calling, and settles
   the real cost from `usage` after.
 - Total, daily and sandbox-run caps are checked against a file-locked JSON ledger shared by all processes. The
-  total cap is **$20** (`SPEND_CAP_USD`) against about $25 of credits; the daily cap is $4 (`DAILY_CAP_USD`).
+  total cap is **$20** (`SPEND_CAP_USD`) against the $26.65 hackathon promo credit (not card money) plus the $0.71 trial left on 2026-10-23; the daily cap is $4 (`DAILY_CAP_USD`).
   A sandbox run checks the halt flag, the run cap and the money caps and books itself under one lock.
 - **Ceiling.** The code enforces $20 as a hard maximum on the total cap (`MAX_TOTAL_CAP_USD`). A larger total cap
   raises `BudgetExceeded`, and so does a daily cap above the total cap. Only the owner may lower caps in `.env`.
   Raising the ceiling needs a code change through planner merge.
+- **Real-spend cap (T43, 2026-10-23).** `REAL_SPEND_CAP_USD` caps TOTAL real Token Factory spend (trial + promo credit).
+  Default and hard ceiling $10 (`MAX_REAL_SPEND_CAP_USD`); a set value above 10, zero, negative or invalid raises
+  `BudgetExceeded`, never a higher cap. It counts in the ledger field `trial_spend_usd` (name kept so the live ledger
+  keeps counting). The old `TRIAL_CREDIT_CAP_USD`, if set, is an extra, stricter cap. The balance must never go negative.
 - **Fail closed.** `SPEND_CAP_USD` and `DAILY_CAP_USD` are required, with no default. Each must parse as a finite
   number above 0. Every price (`MODEL_PRICES_JSON`, `SANDBOX_RUN_USD`) must be finite and above 0, and
   `SANDBOX_RUN_CAP` a whole number of 0 or more. A missing, empty, nan, inf, zero, negative or oversized money value,
@@ -36,11 +45,17 @@ during public judging (Dec 1–15) when anyone can trigger runs.
 - Output size is bounded (`MAX_OUTPUT_TOKENS`).
 
 **Consequences.** Spend estimates err high, so the app may stop early; that is intended. Prices must be recorded from
-the console (`MODEL_PRICES_JSON`) to avoid stopping far too early. Sandbox cost is capped by run count until a
-per-run price is known. A ledger that fails these checks stops all paid calls until a person fixes it by hand.
+the console (`MODEL_PRICES_JSON`) to avoid stopping far too early. Sandbox runs are bounded by run count and by the
+logged-cost rule in the 2026-10-23 amendment below. A ledger that fails these checks stops all paid calls until a person fixes it by hand.
 
-## 2026-10-21 update
-Token Factory Sandboxes work, and they are the default executor (`EXECUTOR` unset means `sandbox`). Beta sandbox runs
-are count-only: `budget.reserve_sandbox_run()` books $0, so the money caps do not move, and each run counts against
-`SANDBOX_RUN_CAP`. `SANDBOX_RUN_USD` is still parsed and validated, but not charged. This amends the Decision and the
-Consequences above: sandbox cost is bounded by run count, and no per-run price is charged until one is documented.
+## 2026-10-21 update (amended 2026-10-23)
+Token Factory Sandboxes work, and they are the default executor (`EXECUTOR` unset means `sandbox`). A sandbox run books
+no Token Factory money: the money caps and the trial counter do not move. Each run counts against `SANDBOX_RUN_CAP`.
+`SANDBOX_RUN_USD` is still parsed and validated, but not charged.
+
+**Logged-cost rule (replaces the earlier "books $0, count-only" wording).** The Sandboxes API reports a non-zero
+`resources.cost` on `done.result.cost`. The budget logs each reported cost in a separate Sandboxes section of the ledger
+(`sandbox_cost_usd`, never added to the Token Factory totals) and halts once the logged sum passes
+`SANDBOX_COST_CAP_USD` (default $0.50; an invalid value falls back to $0.50, never to no cap). A malformed cost halts.
+HTTP 402 still halts. The reported cost is an estimate: on 2026-10-23 the Nebius console showed no Sandboxes billing
+line, so the cap is a guard, not a bill. The live cap was first set to $1.50 that day; the live `.env` now has $5.00.

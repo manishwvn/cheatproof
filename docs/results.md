@@ -1,4 +1,4 @@
-# Cheatproof results: first Sandboxes batch (8 of 11 selected, 5 attacked)
+# RewardSeal results: first Sandboxes batch (8 of 11 selected, 5 attacked)
 
 **Scope: first 8 of the 11 lowest-scoring SWE-rebench tasks. Upper bound against this attacker, not proof.** Nothing
 here shows the 40-task set is clean, and a "no hole found" outcome against one attacker model is not a certificate of

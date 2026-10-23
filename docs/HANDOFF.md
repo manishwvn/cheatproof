@@ -1,12 +1,12 @@
 # Handoff to the new planner session (2026-10-18)
 
-The previous session did research and setup. **The project is decided: Cheatproof.** Start here.
+The previous session did research and setup. **The project is decided: RewardSeal (formerly Cheatproof).** Start here.
 
 ## The project
-**Cheatproof** (working name; check the trademark before any public asset), in the Coding & Agentic Engineering
+**RewardSeal** (product name; formerly Cheatproof, see U5), in the Coding & Agentic Engineering
 track. It is an automatic attack → patch → re-attack loop that hardens AI coding (RL/eval) environments against
 reward hacking, and certifies each environment.
-- A dishonest Nemotron agent (Ultra as the attacker) tries to pass SWE tasks **without solving them**.
+- A dishonest Nemotron agent (Nemotron Super as the attacker) tries to pass SWE tasks **without solving them**.
 - Each success names a hole. Rule-based patches are applied, then the same attacker re-attacks.
 - **Three gates per environment:** the gold patch passes, an empty patch fails, the attacker fails.
 - Output: a per-environment certificate, a per-benchmark "hackability" score, and a report page.
@@ -16,7 +16,7 @@ reward hacking, and certifies each environment.
   hard-coding, network fetch of the upstream fix. 4 patches: strip `.git` objects, hidden read-only tests,
   network off, a grader check for touched test files. About 15 steps and 50k tokens per attempt; about 4M tokens in
   total (about $1–3); sandbox cost per run unknown (measure on day 1).
-- **Top risk:** hardening breaks legitimate solutions, or the attacker is weak. Keep the gates, use Ultra as the
+- **Top risk:** hardening breaks legitimate solutions, or the attacker is weak. Keep the gates, use Nemotron Super as the
   attacker, report raw counts.
 - **Fallback if Sandboxes access is denied or slow:** local Docker for the environments plus Token Factory for every
   model call. This satisfies the rules ("runtime call to the Token Factory inference API").
@@ -28,7 +28,7 @@ Full research is in `/Users/manish/Documents/Nebius_X_Nvidia/research/` (outside
 `ideas/discord-signals.md`, `HACKATHON_BRIEF.md`.
 
 ## Constraints
-- **Money:** about $25 of credits only (Builders Program is unreliable). In-app cap `SPEND_CAP_USD=20`. Every paid
+- **Money:** free credits only (the $1 trial, then the $26.65 hackathon promo credit; never card money). In-app caps `SPEND_CAP_USD=20`, `DAILY_CAP_USD=4`, `REAL_SPEND_CAP_USD=10` (total real spend, T43); the balance must never go negative. Every paid
   call goes through `twindiff/budget.py`; rename the package to `cheatproof/`.
 - Text Nemotron models only; no vision. Model IDs and prices: VERIFY with `scripts/smoke.py`.
 - Claude usage: weekly windows reset Oct 20 6:59 PM CT and Oct 27 6:59 PM CT. Playbook caps: W 80, F 80. Unused
@@ -38,13 +38,13 @@ Full research is in `/Users/manish/Documents/Nebius_X_Nvidia/research/` (outside
 
 **All six done 2026-10-18** (PR `chore/setup-cheatproof`; see STATUS.md and LOG.md). Kept below as history.
 1. ~~Rename~~ done 2026-10-18: GitHub repo `manishwvn/cheatproof`, local folder `/Users/manish/Documents/Nebius_X_Nvidia/cheatproof`, state folder `~/.cheatproof-autopilot`, guard allow file updated. Still to do: replace `twin-diff`/`twindiff` names inside files.
-2. Rewrite CLAUDE.md, STATUS.md, PLAN.md, docs/prize-fit.md (kept), docs/pitches.md (replace with the Cheatproof
+2. Rewrite CLAUDE.md, STATUS.md, PLAN.md, docs/prize-fit.md (kept), docs/pitches.md (replace with the RewardSeal
    pitch) and QUEUE.md (new tasks below), plus ADR 0002 (sandbox or Docker execution model).
 3. Rename the Python package `twindiff` → `cheatproof`; keep the budget tests green.
 4. Apply audit fixes still open from STATUS.md: single-lock sandbox reservation; one cap number everywhere.
 5. Create the routine per the playbook (6.10, Appendix C), have an independent agent review it (6.11), then do the
    first-run check.
-6. LEARNING.md: rewrite section 0 for Cheatproof.
+6. LEARNING.md: rewrite section 0 for RewardSeal.
 
 ## Queue outline (sizes)
 T01 smoke test, model IDs and prices (S, needs U1) · T02 Sandboxes recon or Docker fallback ADR (M) · T03 task loader:

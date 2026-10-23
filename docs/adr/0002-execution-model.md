@@ -1,7 +1,7 @@
 # ADR 0002: execution model (Token Factory Sandboxes, local Docker as fallback)
 
-**Status:** accepted, 2026-10-18. Facts marked `VERIFY` are confirmed by T02 with recorded fixtures. The final
-executor is chosen at the go/no-go on 2026-10-21.
+**Status:** accepted, 2026-10-18; Sandboxes chosen as the default executor on 2026-10-21. Remaining `VERIFY` marks in
+the Context section are the original assumptions, kept for history.
 
 ## Context
 Cheatproof runs untrusted code on purpose: a dishonest agent gets a shell inside each SWE environment, and the gold,
@@ -36,8 +36,9 @@ Session.close()
    least `MIN_FREE_DISK_GB` (10) at every session start and reset, local image or not; at most `DOCKER_IMAGE_CAP` (6)
    distinct images, checked only before a pull; small pure-Python images first. With 16 GB free, the Docker fallback
    covers a subset, not all 40 tasks, until the owner frees disk (U7).
-3. Every session start calls `budget.reserve_sandbox_run()` on both backends. Sandbox runs book $0 and count only
-   against `SANDBOX_RUN_CAP`, not the money caps. All model calls go through `cheatproof/llm.py` on either backend.
+3. Every Sandboxes session start calls `budget.reserve_sandbox_run()`; a Docker start calls
+   `budget.reserve_local_run()`. Neither books Token Factory money. Sandbox runs count against `SANDBOX_RUN_CAP` and
+   their reported cost is logged and capped by `SANDBOX_COST_CAP_USD` (ADR 0001, 2026-10-23 amendment). All model calls go through `cheatproof/llm.py` on either backend.
 4. The network-fetch attack is the only experiment that turns network on; it runs on its own branch or container.
 
 ## Options considered
@@ -70,12 +71,14 @@ result `truncated`. `Session.diff()` builds the patch from a fresh index read fr
 commit made in the sandbox cannot hide a change. It raises above 8 MiB instead of truncating. `run()` caps the timeout
 at 1800 s and wraps the command in `timeout -s KILL` when the image has it. If the host must kill `docker exec` (10 s
 after that timeout), the result is `timed_out` and the sandbox is reset: the container and every process in it are
-removed, and files written earlier in the session are lost. Sandbox VERIFY items: network-off via `unshare` confirmed live 2026-10-21. `images.oci` swebench tag resolution and non-zero-exit image persistence stay VERIFY.
+removed, and files written earlier in the session are lost. Sandbox VERIFY items: network-off via `unshare` confirmed live 2026-10-21. `images.oci` swebench tag resolution and non-zero-exit image persistence were confirmed live on 2026-10-21 (QUEUE T23).
 
 ## 2026-10-21 update
 - Go/no-go: Token Factory Sandboxes work. `sandbox` is the default `EXECUTOR`; `EXECUTOR=docker` stays the explicit
   local fallback.
-- Sandbox runs are count-only at $0 (ADR 0001, 2026-10-21 update).
+- Sandbox runs book no Token Factory money. They count against `SANDBOX_RUN_CAP`, and each reported cost is logged and
+  capped by `SANDBOX_COST_CAP_USD` (ADR 0001, logged-cost rule). The reported cost is an estimate; the console showed no
+  Sandboxes billing on 2026-10-23.
 - Network is off with `unshare -rn` (with `-n` fallback). A probe runs at session start and fails closed if it cannot confirm that.
 - swebench images come from `images.oci`. No swebench images are pulled locally, to protect disk.
 - Sandboxes cannot delete images server-side, so image cleanup is not available through the executor.

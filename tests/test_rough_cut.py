@@ -54,8 +54,8 @@ def test_real_script_parses_under_limit_and_shows_model_id_early():
     assert beats[0].start == 0
     assert rc.check_total(beats) < rc.LIMIT_SECONDS
     early = [b for b in beats if b.start < 20]
-    assert any("nvidia/Nemotron-3-Ultra-550b-a55b" in b.on_screen for b in early)
-    model_beats = [b for b in beats if "nvidia/Nemotron-3-Ultra-550b-a55b" in b.on_screen]
+    assert any("nvidia/nemotron-3-super-120b-a12b" in b.on_screen for b in early)
+    model_beats = [b for b in beats if "nvidia/nemotron-3-super-120b-a12b" in b.on_screen]
     assert model_beats
     assert all(b.start + b.duration <= 20 for b in model_beats)
 
