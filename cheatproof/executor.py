@@ -733,7 +733,8 @@ class DockerSession(Session):
         # The guards come first: a refusal pulls nothing and counts no run. pull says whether the image must be pulled.
         pull = self._executor._preflight(self._env.image)
         # Local Docker is free: books $0 and counts only toward LOCAL_RUN_CAP, not the money caps.
-        self._budget.reserve_local_run()  # before any pull and the container; BudgetExceeded propagates
+        with _ledger_io():
+            self._budget.reserve_local_run()  # before any pull and the container; BudgetExceeded propagates
         if pull:
             self._executor._pull(self._env.image)  # its own clock; a failed pull is ExecutorUnavailable
         self._name, self._cid = self._executor._create(self._env)
@@ -757,6 +758,9 @@ class DockerSession(Session):
             raise RuntimeError("session is closed")
         if self._cid is None:
             raise RuntimeError("no live sandbox: an earlier reset() failed; call reset() again")
+        # Every Docker exec (run, write_file, diff) goes through here, so a halt stops each one, free or paid.
+        with _ledger_io():
+            self._budget.check_not_halted()
         return self._cid
 
     def _destroy(self) -> None:
@@ -995,11 +999,23 @@ def _describe_error(exc: BaseException) -> str:
     return type(exc).__name__ if status is None else f"{type(exc).__name__} (HTTP {status})"
 
 
+@contextlib.contextmanager
+def _ledger_io():
+    """A ledger OSError during a run is a refusal, not a raw error: the run stops, and no paid call goes out past it."""
+    try:
+        yield
+    except OSError as exc:
+        raise BudgetExceeded(
+            f"spend ledger could not be read or written ({type(exc).__name__}); refusing to run"
+        ) from None
+
+
 def _halt_for_payment(exc: BaseException, budget: Budget) -> BudgetExceeded | None:
     """HTTP 402 halts every paid call (CLAUDE.md rule 1). Returns the error to raise, or None for any other status."""
     if _http_status(exc) != 402:
         return None
-    budget.halt("HTTP 402 from Sandboxes: payment required")
+    with _ledger_io():
+        budget.halt("HTTP 402 from Sandboxes: payment required")
     return BudgetExceeded("HTTP 402 from Sandboxes; the budget is halted")
 
 
@@ -1105,7 +1121,8 @@ class SandboxSession(Session):
         # container is already gone at that point. Only a successful reset revives the session.
         self._cur = None
         self._verified = None
-        self._budget.reserve_sandbox_run()  # a paid session books one run before any import or exec
+        with _ledger_io():
+            self._budget.reserve_sandbox_run()  # a paid session books one run before any import or exec
         if self._base_image is None:
             image = self._executor._resolve_image(self._env.image, self._budget)
             self._base_image = image
@@ -1127,14 +1144,15 @@ class SandboxSession(Session):
     def _translate(self, exc: Exception, timeout: float | None = None) -> Exception | None:
         """The error to raise for an SDK error, or None for any other exception (the caller re-raises that one).
         Never carries the SDK error's text: its repr holds the URL and headers. HTTP 402 halts the budget."""
+        # HTTP 402 halts on any exception, not only SDK errors (T35 d). Checked first, so no other branch can skip it.
+        paid = _halt_for_payment(exc, self._budget)
+        if paid is not None:
+            return paid
         sdk = _sdk_exceptions()
         if sdk is None or not isinstance(exc, sdk.ContreeError):
             return None
         if timeout is not None and isinstance(exc, sdk.OperationTimedOutError):
             return _SandboxTimeout(f"sandbox operation timed out after {timeout:g}s")
-        paid = _halt_for_payment(exc, self._budget)
-        if paid is not None:
-            return paid
         return RuntimeError(f"sandbox call failed: {_describe_error(exc)}")
 
     def _check_cost(self, res: object) -> None:
@@ -1143,7 +1161,8 @@ class SandboxSession(Session):
         cost = getattr(res, "cost", None)
         if cost is None:
             return
-        self._budget.book_sandbox_cost(cost)
+        with _ledger_io():
+            self._budget.book_sandbox_cost(cost)
 
     def _digest(self, image, path: str) -> str | None:
         """sha256 of a file in an image, read by the host over the SDK. None when the file is absent."""
@@ -1189,6 +1208,8 @@ class SandboxSession(Session):
         image = self._cur
         if image is None:
             raise RuntimeError("no live sandbox: the last reset() or call failed; call reset() again")
+        with _ledger_io():
+            self._budget.check_not_halted()  # before every exec, the cost-0 ones included: a halt stops the next call
         if wrap and self._netns:
             self._verify_wrapper(image)
             argv = [*self._netns, *argv]

@@ -946,7 +946,7 @@ class FakeOpenAIClient:
         return self.replies.pop(0)
 
 
-def test_attack_through_guarded_llm_and_a_real_budget_ledger(tmp_path, monkeypatch):
+def test_attack_through_guarded_llm_and_a_real_budget_ledger(tmp_path, monkeypatch, init_ledger):
     ledger = tmp_path / "ledger.json"
     monkeypatch.setenv("SPEND_LEDGER", str(ledger))
     monkeypatch.setenv("SPEND_CAP_USD", "1")

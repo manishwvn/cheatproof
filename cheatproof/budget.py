@@ -14,7 +14,9 @@ against SANDBOX_RUN_CAP. Each cost a Sandboxes result reports is logged in the l
 never in the Token Factory totals, and the budget halts once the logged sum passes SANDBOX_COST_CAP_USD.
 The trial cap (TRIAL_CREDIT_CAP_USD) limits Token Factory spend counted from when it is set. Local Docker
 runs and Tavily calls book no money; they only count against their caps. A ledger that does not match
-this shape is refused the same way, never repaired. snapshot() only reads the ledger and never writes it.
+this shape is refused the same way, never repaired. A missing ledger is refused too: only create_ledger (the
+`budget init` CLI command) creates one, so a run never starts on a ledger nobody made. snapshot() only reads the
+ledger and never writes it.
 """
 
 from __future__ import annotations
@@ -189,6 +191,40 @@ def _env_prices() -> dict[str, Price]:
     return prices
 
 
+def fresh_ledger() -> dict:
+    """A zeroed ledger with every field the reader expects. Only create_ledger writes one."""
+    return {
+        "total_usd": 0.0,
+        "days": {},
+        "sandbox_runs": 0,
+        "local_runs": 0,
+        "tavily_calls": 0,
+        "halted": None,
+        "sandbox_cost_usd": 0.0,
+        "sandbox_cost_days": {},
+        "trial_spend_usd": 0.0,
+    }
+
+
+def create_ledger(path: Path) -> Path:
+    """Create the zeroed ledger at path, the only way a ledger comes into being. An existing file is refused, never
+    overwritten. The ledger lock is held, so a concurrent writer cannot slip in between the check and the create."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_suffix(".lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if path.exists():
+            raise BudgetExceeded(f"ledger {path} already exists; refusing to overwrite it")
+        with open(path, "x") as f:
+            f.write(json.dumps(fresh_ledger(), indent=2, sort_keys=True))
+    return path
+
+
+def init_ledger_from_env() -> Path:
+    """Create the zeroed ledger at SPEND_LEDGER (see create_ledger). Fails closed when SPEND_LEDGER is unset or relative."""
+    return create_ledger(_ledger_path())
+
+
 class Budget:
     def __init__(
         self,
@@ -270,7 +306,10 @@ class Budget:
 
     def _read(self) -> dict:
         if not self.ledger.exists():
-            return {"total_usd": 0.0, "days": {}, "sandbox_runs": 0, "halted": None}
+            # Never created implicitly: a missing ledger would read as zero spend and let a run start unbooked.
+            raise BudgetExceeded(
+                f"ledger {self.ledger} does not exist; run `python -m cheatproof.cli budget init` once to create it"
+            )
         try:
             state = json.loads(self.ledger.read_text())
         except ValueError:
@@ -317,6 +356,12 @@ class Budget:
         if halted is not None and not isinstance(halted, bool) and not (isinstance(halted, str) and halted):
             raise BudgetExceeded(f"ledger {self.ledger} has an invalid halted value; fix it by hand")
         return state
+
+    def check_not_halted(self) -> None:
+        """Refuse while the ledger says halted. Read-only. Called before every exec, paid or free, so a halt stops the next one."""
+        halted = self.snapshot().get("halted")
+        if halted:
+            raise BudgetExceeded(f"budget halted: {halted}")
 
     def reserve(self, model: str, input_tokens: int, max_output_tokens: int) -> Hold:
         return self._reserve_usd(model, _priced(self.price(model), input_tokens, max_output_tokens))
@@ -411,6 +456,7 @@ class Budget:
             self.halt("a Sandboxes result reported a cost that is not a finite number of 0 or more")
             raise BudgetExceeded("a Sandboxes result reported a malformed cost; the budget is halted")
         if usd == 0:
+            self.check_not_halted()  # a free result writes nothing, but a halted budget still stops here
             return  # a free result changes nothing, so nothing is written
         day = date.today().isoformat()
         with self._locked() as s:
