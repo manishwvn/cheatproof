@@ -19,3 +19,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
+# Raw diffs and old certificate copies: never committed (tracked digests are results/diffs/*.diff.json)
+results/certificates/*.old
+results/diffs/*.before.diff
+results/diffs/*.after.diff
+results/diffs/*.diff

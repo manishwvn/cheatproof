@@ -73,27 +73,21 @@ BATCH_KEYS = frozenset(
         "selected_ids",
         "run",
         "already_certified",
-        "not_run",
-        "started",
-        "updated",
-    }
-)
-# Keys cli batch writes beyond the schema 1 core (T38, T37, T47). Optional, so an older record still loads.
-BATCH_OPTIONAL_KEYS = frozenset(
-    {
         "chunk_size",
-        "network_fetch",
-        "network_fetch_done",
         "rerun_ids",
         "rerun_done",
         "env_broken_ids",
         "next_chunk_pending",
         "finished",
         "pending_ids",
-        "recon",
-        "runs",
+        "not_run",
+        "started",
+        "updated",
     }
 )
+# cli batch writes network_fetch and network_fetch_done from --network-fetch on (T37), and recon and runs from T47. A record from an earlier run lacks them, so they are optional;
+# when present they are type-checked like the rest.
+BATCH_OPTIONAL_KEYS = frozenset({"network_fetch", "network_fetch_done", "recon", "runs"})
 NOT_RUN_KEYS = frozenset({"instance_id", "reason", "error"})  # always written by cli batch
 NOT_RUN_OPTIONAL_KEYS = frozenset({"cost_usd"})  # written only when a paid run's spend was measured
 BATCH_NOT_LOADED = "batch record not loaded"
@@ -344,6 +338,17 @@ def _is_not_run(item: Any) -> bool:
     return "cost_usd" not in item or _is_cost(item["cost_usd"])
 
 
+def _is_runs(value: Any) -> bool:
+    """The T47 run rows cli batch writes: objects with an instance id, and a recon of "exposure" or null."""
+    return isinstance(value, list) and all(
+        isinstance(row, dict)
+        and isinstance(row.get("instance_id"), str)
+        and row.get("recon") in ("exposure", None)
+        and ("recon_types" not in row or _is_str_list(row["recon_types"]))
+        for row in value
+    )
+
+
 def _is_cost(value: Any) -> bool:
     """A finite, non-negative number. A huge integer does not convert to float: that is refused, not raised."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -361,20 +366,13 @@ def _want(condition: bool, message: str) -> None:
 
 
 def _check_batch(data: Any) -> None:
-    """Raise ValueError unless data is a schema 1 batch record. Every key is required and no other key is allowed.
-    Each value is checked for its type. The messages name a field, never a value, because the record is untrusted.
+    """Raise ValueError unless data is a schema 1 batch record. Every BATCH_KEYS key is required, BATCH_OPTIONAL_KEYS
+    may be absent, and no other key is allowed. Each value is checked for its type. The messages name a field, never a
+    value, because the record is untrusted.
     """
     _want(isinstance(data, dict), "batch record must be a JSON object")
     _want(not BATCH_KEYS - set(data), "batch record is missing a key")
     _want(not set(data) - BATCH_KEYS - BATCH_OPTIONAL_KEYS, "batch record has an unknown key")
-    _want(data.get("recon") in ("exposure", None), "batch record field recon has the wrong type")
-    runs = data.get("runs", [])
-    _want(
-        isinstance(runs, list)
-        and all(isinstance(r, dict) and isinstance(r.get("instance_id"), str) for r in runs)
-        and all(r.get("recon") in ("exposure", None) for r in runs),
-        "batch record field runs has the wrong type",
-    )
     version = data["schema_version"]
     _want(_is_count(version) and version == BATCH_SCHEMA_VERSION, "batch record schema_version must be 1")
     types_ok = {
@@ -386,6 +384,20 @@ def _check_batch(data: Any) -> None:
         "skipped": isinstance(data["skipped"], dict) and all(_is_count(n) for n in data["skipped"].values()),
         "not_run": isinstance(data["not_run"], list) and all(_is_not_run(item) for item in data["not_run"]),
         **{key: _is_count(data[key]) for key in ("scanned", "valid", "selected", "run", "already_certified")},
+        "chunk_size": _is_count(data["chunk_size"]) and data["chunk_size"] >= 1,
+        **{
+            key: _is_str_list(data[key])
+            for key in ("rerun_ids", "rerun_done", "env_broken_ids", "pending_ids")
+        },
+        **{key: isinstance(data[key], bool) for key in ("next_chunk_pending", "finished")},
+        **{
+            key: _is_str_list(data[key]) if key == "network_fetch_done" else isinstance(data[key], bool)
+            for key in ("network_fetch", "network_fetch_done")
+            if key in data
+        },
+        # T47: recon is the batch setting, "exposure" or null. runs holds one object per run (the writer's rows).
+        **({"recon": data["recon"] in ("exposure", None)} if "recon" in data else {}),
+        **({"runs": _is_runs(data["runs"])} if "runs" in data else {}),
     }
     wrong = sorted(key for key, ok in types_ok.items() if not ok)
     if wrong:
@@ -757,7 +769,9 @@ def _strategy_html(attacker: Any) -> str:
     """The strategy label, then a visible recon=exposure tag when the attacker got the exposure scan (T47)."""
     attacker = _map(attacker)
     text = _cell(attacker.get("strategy") if attacker.get("strategy") is not None else "not recorded")
-    tag = ' <span class="label">recon=exposure</span>' if attacker.get("recon") == "exposure" else ""
+    kinds = attacker.get("recon_types")
+    shown = f" ({', '.join(_cell(k) for k in kinds)})" if isinstance(kinds, list) and kinds else ""
+    tag = f' <span class="label">recon=exposure{shown}</span>' if attacker.get("recon") == "exposure" else ""
     return f"{text}{tag}"
 
 
@@ -1001,6 +1015,8 @@ def _round_block(label: str, rnd: Any, diff: str | None) -> str:
             ("Submitted", attack.get("submitted")),
             ("Auto-submitted by the harness", attack.get("auto_submitted", "not recorded")),
             ("Recon", attack.get("recon") or "none"),
+            ("Recon finding types", attack.get("recon_types") or "none"),
+            ("Outcome", attack.get("outcome") or "none"),
             ("Steps", attack.get("steps")),
             ("Tokens in", attack.get("tokens_in")),
             ("Tokens out", attack.get("tokens_out")),

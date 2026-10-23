@@ -34,6 +34,11 @@ _FINDING = {
 }
 
 
+def recon_types(report: ExposureReport) -> list[str]:
+    """The finding types a recon text for this scan names (the scan's hole labels), or [] when it names none."""
+    return list(report.holes)
+
+
 def forbidden_snippets(*patches: str) -> tuple[str, ...]:
     """Added or removed lines of patch texts (gold patch, test patch), long enough to count as a leak."""
     found: dict[str, None] = {}

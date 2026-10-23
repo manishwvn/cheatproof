@@ -1105,7 +1105,7 @@ def _run_tasks(
 
 def _run_row(instance_id: str, written: _Written) -> dict[str, Any]:
     """The batch.json row of one run (T47): the strategy and the recon label are visible next to the result."""
-    from cheatproof.certify import recon_label  # lazy, as in _harden_one
+    from cheatproof.certify import recon_kinds, recon_label  # lazy, as in _harden_one
 
     report = written.report
     attacks = [rnd.attack for rnd in (report.before, report.after) if rnd is not None and rnd.attack]
@@ -1113,6 +1113,7 @@ def _run_row(instance_id: str, written: _Written) -> dict[str, Any]:
         "instance_id": instance_id,
         "strategy": written.strategy,
         "recon": recon_label(report),
+        "recon_types": recon_kinds(report),
         "certified": bool(report.certified),
         "stop_reasons": [a.get("stop_reason") for a in attacks],
         "auto_submitted": any(a.get("auto_submitted") is True for a in attacks),

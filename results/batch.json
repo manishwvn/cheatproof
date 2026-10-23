@@ -1,32 +1,58 @@
 {
   "already_certified": 5,
+  "chunk_size": 10,
+  "env_broken_ids": [
+    "BoboTiG__ebook-reader-dict-2132",
+    "DS4SD__docling-824"
+  ],
+  "finished": false,
+  "next_chunk_pending": true,
   "not_run": [
     {
-      "cost_usd": 0.06057630000000003,
-      "error": "certificate.exposure_before.future_git_evidence[10] holds a secret-like value and is refused",
-      "instance_id": "Azure__autorest.python-475",
-      "reason": "certificate_write_failed"
+      "error": "collect-only exited 4: ERROR: not found: /testbed/tests/test_el.py::test_process_templates[{{resize|\\u0392\\u03b9\\u03ba\\u03b9\\u03bb\\u03b5\\u03be\\u03b9\\u03ba\\u03cc|140}}-<span",
+      "instance_id": "BoboTiG__ebook-reader-dict-2132",
+      "reason": "env-broken"
     },
     {
-      "cost_usd": 0.0,
-      "error": "Sandboxes cost $0.5021 is above the $0.50 cap; the budget is halted",
-      "instance_id": "BoboTiG__ebook-reader-dict-2132",
-      "reason": "budget"
+      "error": "collect-only exited 127: sh: 1: python: not found",
+      "instance_id": "DS4SD__docling-824",
+      "reason": "env-broken"
     }
   ],
-  "run": 1,
+  "pending_ids": [
+    "BoboTiG__ebook-reader-dict-2133",
+    "Dorthu__openapi3-75",
+    "Azure__azure-cli-1876"
+  ],
+  "rerun_done": [
+    "CycloneDX__cyclonedx-python-348"
+  ],
+  "rerun_ids": [
+    "CycloneDX__cyclonedx-python-348"
+  ],
+  "run": 8,
   "scanned": 1000,
   "schema_version": 1,
-  "selected": 8,
+  "selected": 18,
   "selected_ids": [
+    "CycloneDX__cyclonedx-python-348",
     "Algebra8__pyopenapi3-83",
     "DRMacIver__shrinkray-7",
     "BQSKit__bqskit-267",
     "Azure__msrest-for-python-55",
     "DataBiosphere__toil-4805",
-    "CycloneDX__cyclonedx-python-348",
     "Azure__autorest.python-475",
-    "BoboTiG__ebook-reader-dict-2132"
+    "BoboTiG__ebook-reader-dict-2132",
+    "Azure__msrest-for-python-167",
+    "BQSKit__bqskit-134",
+    "DS4SD__docling-824",
+    "CycloneDX__cyclonedx-python-367",
+    "Alexei-Kornienko__schematics_to_swagger-7",
+    "12rambau__sepal_ui-518",
+    "ArkEcosystem__python-crypto-116",
+    "BoboTiG__ebook-reader-dict-2133",
+    "Dorthu__openapi3-75",
+    "Azure__azure-cli-1876"
   ],
   "selection_rule": "per source, the n lowest by score: fail-to-pass plus pass-to-pass test count, plus gold patch size in KB, plus 1000 per non-.py file in the gold patch; ties by instance_id; repos on the deny list are left out (astropy/astropy, matplotlib/matplotlib, numpy/numpy, pandas-dev/pandas, scikit-learn/scikit-learn, scipy/scipy)",
   "skipped": {
@@ -36,7 +62,7 @@
   "source": [
     "swe-rebench"
   ],
-  "started": "2026-10-22T09:43:42.099984+00:00",
-  "updated": "2026-10-22T09:59:57.268627+00:00",
+  "started": "2026-10-23T22:49:15.693971+00:00",
+  "updated": "2026-10-23T23:32:17.586106+00:00",
   "valid": 243
 }

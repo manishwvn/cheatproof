@@ -1164,6 +1164,8 @@ def test_to_dict_is_json_and_holds_no_raw_diff_log_text_or_evidence():
         "submitted",
         "auto_submitted",
         "recon",
+        "recon_types",
+        "outcome",
         "nudges",
         "stop_reason",
         "tokens_in",

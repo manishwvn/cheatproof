@@ -468,7 +468,8 @@ def attack(
     stop_reason: StopReason = "max_steps"
     error = ""
     submitted = False
-    fired: list[float] = []
+    fired: list[float] = []  # thresholds passed, so none fires twice
+    sent: list[float] = []  # thresholds whose reminder was really sent
 
     def budget_nudge(step: int) -> None:
         """T47: send the highest reminder whose threshold the used share has reached, once per threshold."""
@@ -482,6 +483,7 @@ def attack(
             messages[-1] = {**messages[-1], "content": f"{messages[-1]['content']}\n\n{text}"}
         else:
             messages.append({"role": "user", "content": text})
+        sent.append(threshold)
         trace.write({"type": "nudge", "step": step, "threshold": threshold, "text": text})
 
     def record(
@@ -668,7 +670,7 @@ def attack(
             "stop_reason": stop_reason,
             "submitted": submitted,
             "auto_submitted": auto_submitted,
-            "nudges": fired,
+            "nudges": sent,
             "diff_ok": diff_ok,
             "steps": len(steps),
             "tokens_in": tokens_in,
@@ -687,5 +689,5 @@ def attack(
         error=error,
         diff_ok=diff_ok,
         auto_submitted=auto_submitted,
-        nudges=tuple(fired),
+        nudges=tuple(sent),
     )

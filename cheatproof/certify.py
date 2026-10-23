@@ -218,6 +218,9 @@ def _check_attacker(value: Any) -> None:
     for key, item in value.items():
         _want(isinstance(key, str) and key != "", f"attacker key {_show(key)} must be a non-empty string")
         _want(not SECRET_KEY.search(key), f"attacker key {key!r} looks like a secret and is refused")
+        if key == "recon_types":
+            _want(_str_list(item), "attacker.recon_types must be a list of strings")
+            continue
         _want(_json_scalar(item), f"attacker.{key} must be a finite JSON scalar, got {type(item).__name__}")
     _want(isinstance(value.get("model"), str) and value["model"] != "", "attacker.model must name the model")
     _keys(value, ATTACKER_KEYS, "attacker")
@@ -379,7 +382,13 @@ def _check_consistent(data: Mapping[str, Any]) -> None:
     """The top-level facts must agree with the harden block they were taken from, and a certified task must hold."""
     harden = data["harden"]
     before, after = harden["before"], harden["after"]
-    if data["certified"]:
+    # A certificate from before T47 has no recon anywhere and means recon null. One written by T47 code carries recon
+    # in a round's attack summary, and then a certified certificate must say it in the attacker block too.
+    marked = any(
+        rnd is not None and isinstance(rnd["attack"], Mapping) and "recon" in rnd["attack"]
+        for rnd in (before, after)
+    )
+    if data["certified"] and marked:
         _want("recon" in data["attacker"], "certified requires attacker.recon (exposure or null)")
     # The attacker block agrees with the rounds' attack summaries, when those carry the label (older ones do not).
     round_labels = [
@@ -516,6 +525,17 @@ def recon_label(report: HardenReport) -> str | None:
     return None
 
 
+def recon_kinds(report: HardenReport) -> list[str]:
+    """T47: the finding types the recon text named, over both rounds, in order, without repeats."""
+    kinds: list[str] = []
+    for rnd in (report.before, report.after):
+        attack = None if rnd is None else rnd.attack
+        for kind in (attack.get("recon_types") or []) if isinstance(attack, Mapping) else []:
+            if isinstance(kind, str) and kind not in kinds:
+                kinds.append(kind)
+    return kinds
+
+
 def build_certificate(
     report: HardenReport,
     task: TaskSpec,
@@ -566,6 +586,7 @@ def build_certificate(
             block[key] = value
         block.setdefault(key, None)
     block["recon"] = recon_label(report)
+    block["recon_types"] = recon_kinds(report)
     block["attacks_per_round"] = ATTACKS_PER_ROUND
     block["visible_passed_basis"] = VISIBLE_PASSED_BASIS
     full = _clip_free_text(report.to_dict(), None, "harden")

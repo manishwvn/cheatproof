@@ -97,8 +97,8 @@ from cheatproof.budget import Budget, BudgetExceeded
 from cheatproof.executor import EnvSpec, Executor, ExecutorRefused, ExecutorUnavailable, Session
 from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, ExposureReport
 from cheatproof.grader import GateReport, GradeResult, error_line
-from cheatproof.holes import HoleReport
-from cheatproof.recon import RECON_EXPOSURE, forbidden_snippets, recon_text
+from cheatproof.holes import UNCLASSIFIED, HoleReport, gold_match
+from cheatproof.recon import RECON_EXPOSURE, forbidden_snippets, recon_text, recon_types
 
 if TYPE_CHECKING:
     from cheatproof.attacker import AttackResult
@@ -114,6 +114,8 @@ CLOSE_ATTEMPTS = 2  # the normal exit path closes once, then retries once
 CONCLUSIVE_STOPS = frozenset({"submit", "max_steps"})
 # Stops where the attacker ran out of budget instead of finishing: no "not hackable" verdict without a submit.
 RAN_OUT_STOPS = ("max_steps", "token_limit")
+LEGIT_FIX = "legit_fix"  # attack summary outcome: the passing diff is a fix like the gold one, not an exploit
+LEGIT_FIX_REASON = "passes the hidden tests like the gold fix; not an exploit (legit_fix)"
 # Grade errors that mean the attack lost: the test guard refused the diff, or the candidate did not apply.
 # Stable prefixes from grader.py.
 ATTACK_LOST_PREFIXES = ("test files touched:", "guarded config touched:", "candidate patch did not apply")
@@ -432,12 +434,16 @@ def _visible_passed(grade: GradeResult) -> bool | None:
     return grade.p2p_passed == grade.p2p_total
 
 
-def _attack_summary(result: AttackResult, recon: str | None = None) -> dict[str, Any]:
+def _attack_summary(
+    result: AttackResult, recon: str | None = None, recon_kinds: list[str] | None = None
+) -> dict[str, Any]:
     diff = result.final_diff
     return {
         "submitted": result.submitted,
         "auto_submitted": _auto_submitted(result),
         "recon": recon,
+        "recon_types": list(recon_kinds or []),
+        "outcome": None,  # "legit_fix" when the passing diff is a fix, not an exploit (see _legit_fix)
         "nudges": [int(t * 100) for t in getattr(result, "nudges", ())],
         "stop_reason": result.stop_reason,
         "tokens_in": result.tokens_in,
@@ -535,6 +541,16 @@ class _Loop:
         self._fresh(box, state)
         return self._grade_here(box.session, state.patches, patch)
 
+    def _legit_fix(self, result: AttackResult, diff: str | None, holes: HoleReport) -> str | None:
+        """T47: the inconclusive reason when the attack passed the hidden tests with no label but "unclassified" and
+        either matches the gold fix or was auto-submitted (no submit, no exploit label). None otherwise: a pass with a
+        real label (test-edit, git-history, network, grader-forgery) is a hole as before."""
+        if not holes.exploited or holes.labels != (UNCLASSIFIED,):
+            return None
+        if _auto_submitted(result) or gold_match(diff, self.task).matched:
+            return LEGIT_FIX_REASON
+        return None
+
     def _recon_text(self, state: _RoundState) -> str | None:
         """T47: the recon for this round's attack, from this round's own scan (the after round rescans after the
         patches, so it reports what is still open). None when recon is off or the scan found no hole."""
@@ -558,7 +574,8 @@ class _Loop:
         # Without recon the attack function is called as before, with the session only.
         result = self.attack_fn(box.session) if text is None else self.attack_fn(box.session, recon=text)
         self.attacks.append(result)
-        state.attack = _attack_summary(result, RECON_EXPOSURE if text is not None else None)
+        kinds = recon_types(state.exposure) if text is not None and state.exposure is not None else []
+        state.attack = _attack_summary(result, RECON_EXPOSURE if text is not None else None, kinds)
         patched = bool(state.patches)
         if not patched and _reset_during(result):
             self.notes.append(
@@ -590,8 +607,20 @@ class _Loop:
             # An attack that made no attempt is not a hole, whatever classify saw in its diff. The labels stay out of
             # holes_found and hackable_before; the evidence stays in attempted.
             holes = replace(holes, labels=(), primary="none", exploited=False)
+        legit = None if state.no_attempt is not None else self._legit_fix(result, diff, holes)
+        if legit is not None:
+            # T47: a passing diff with no real exploit label is a fix, not a hole. It is not a hole found, and it is
+            # never a "not hackable" verdict either, so the round is inconclusive.
+            holes = replace(
+                holes,
+                labels=(),
+                primary="none",
+                exploited=False,
+                attempted=tuple(label for label in holes.attempted if label != UNCLASSIFIED),
+            )
+            state.attack = {**(state.attack or {}), "outcome": LEGIT_FIX}
         state.holes = holes
-        state.inconclusive = _inconclusive(
+        state.inconclusive = legit or _inconclusive(
             result, state.attack_grade, patched, state.no_attempt, exploited=holes.exploited
         )
 

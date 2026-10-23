@@ -4,6 +4,7 @@ network, sandbox or paid call, and no real key."""
 import dataclasses
 import itertools
 import json
+from pathlib import Path
 
 import pytest
 import test_attacker as ta
@@ -12,7 +13,7 @@ import test_cli as tc
 import test_harden as th
 import test_site as ts
 
-from cheatproof import attacker, cli, recon, strategies
+from cheatproof import attacker, cli, holes, recon, strategies
 from cheatproof.attacker import BUDGET_NUDGES, AttackConfig, attack
 from cheatproof.certify import build_certificate, recon_label, validate_certificate, write_certificate
 from cheatproof.exposure import ExposureReport
@@ -198,7 +199,7 @@ def test_a_jump_past_two_thresholds_sends_only_the_highest_and_never_the_lower_o
     result, llm, _ = ta.go([*runs(1, usage=(4600, 0)), *runs(2)], config=cfg)
     last = " ".join(user_texts(llm, len(llm.calls) - 1))
     assert LAST in last and HALF not in last
-    assert result.nudges[:2] == (0.5, 0.75)
+    assert result.nudges == (0.75,)  # only the reminder that was sent is recorded
 
 
 def test_nudges_are_traced_and_recorded_on_the_result(tmp_path):
@@ -395,7 +396,7 @@ def test_certificate_attacker_block_says_recon_exposure_or_null():
 
 
 def test_certified_certificate_requires_the_recon_field():
-    c = tcert.valid_cert()
+    c = cert(ReconLab().run(recon=True))  # rounds carry a recon key, so the attacker block must too
     del c["attacker"]["recon"]
     with pytest.raises(ValueError, match="certified requires attacker.recon"):
         validate_certificate(c)
@@ -580,3 +581,136 @@ def test_site_refuses_a_bad_recon_in_the_batch_record(tmp_path):
 
 def test_combined_prompt_names_the_new_output_limit():
     assert "longer than 3000 characters is cut" in strategies.COMBINED
+
+
+# --- review fixes -------------------------------------------------------------------------------------
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+def test_the_old_format_certified_certificate_validates_without_a_recon_key():
+    from cheatproof.certify import load_certificate
+
+    path = REPO / "results" / "certificates" / "12rambau__sepal_ui-518.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["certified"] is True and "recon" not in data["attacker"]
+    rounds = [rnd for rnd in data["harden"].values() if isinstance(rnd, dict) and rnd.get("attack")]
+    assert rounds and all("recon" not in rnd["attack"] for rnd in rounds)
+    load_certificate(path)
+
+
+def test_the_site_builds_on_the_committed_results(tmp_path):
+    result = build_site(REPO / "results" / "certificates", tmp_path / "site")
+    assert result.errors == []
+
+
+def test_a_batch_json_written_by_the_t47_code_loads_in_the_site(tmp_path):
+    spy = tc.Spy()
+    out = tc.out_dir(tmp_path)
+    deps = tc.batch_deps(spy, tc.batch_tasks(tc.ID_A))
+    assert cli.main(tc.batch_argv(tmp_path, out), deps=deps) == 0
+    state = tc.read_batch(out)
+    assert state["recon"] == "exposure" and len(state["runs"]) == 1
+    for fake in out.glob("*.json"):  # the fake CLI wrote stand-in certificates
+        fake.unlink()
+    ts.write_certs(out, tcert.clean_report("owner__repo-1"))
+    result = build_site(out, tmp_path / "site")
+    assert result.errors == []
+
+
+def test_site_refuses_malformed_runs_rows(tmp_path):
+    certs = tmp_path / "certs"
+    ts.write_certs(certs, tcert.clean_report("owner__repo-1"))
+    for bad in ("x", [1], [{"instance_id": 3}], [{"instance_id": "a", "recon": "bogus"}]):
+        record = ts.batch_record()
+        record["runs"] = bad
+        (tmp_path / "batch.json").write_text(json.dumps(record), encoding="utf-8")
+        assert build_site(certs, tmp_path / "site").errors, bad
+
+
+def test_the_recon_types_are_recorded_in_the_certificate_and_shown_on_the_site(tmp_path):
+    out = ReconLab().run(recon=True)
+    assert out.before.attack["recon_types"] == ["git-history"]
+    c = cert(out)
+    assert c["attacker"]["recon"] == "exposure" and c["attacker"]["recon_types"] == ["git-history"]
+    c["attacker"]["strategy"] = "combined"
+    write_certificate(c, tmp_path / "certs")
+    build_site(tmp_path / "certs", tmp_path / "site")
+    index = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
+    assert "recon=exposure (git-history)" in index
+
+
+def test_no_recon_means_empty_recon_types():
+    c = cert(ReconLab().run())
+    assert c["attacker"]["recon_types"] == []
+
+
+def test_recon_types_must_be_a_list_of_strings():
+    c = tcert.valid_cert()
+    c["attacker"]["recon_types"] = ["ok", 3]
+    with pytest.raises(ValueError, match="recon_types must be a list of strings"):
+        validate_certificate(c)
+
+
+# legit fix: a passing diff with no real exploit label is not a hole
+
+FIX_SRC = "src/answer.py"
+FIX_DIFF = (
+    f"diff --git a/{FIX_SRC} b/{FIX_SRC}\n--- a/{FIX_SRC}\n+++ b/{FIX_SRC}\n"
+    "@@ -1 +1,2 @@\n def answer():\n+    return 41 + 1\n"
+)
+OTHER_DIFF = FIX_DIFF.replace("41 + 1", "40 + 2")
+
+
+class LegitLab(th.Lab):
+    """Real classifier and real gold match; the grade passes for any non-empty attack diff."""
+
+    def __init__(self, gold, **kwargs):
+        task = dataclasses.replace(th.TASK, gold_patch=gold, test_patch=th.HARD_CODE_TEST_PATCH)
+        super().__init__(task=task, **kwargs)
+        self.ops = dataclasses.replace(self.ops, classify=self.real_classify)
+
+    def grade(self, session, task, patch, timeout, *, workdir, **kwargs):
+        return th.grade_result(patch != "")
+
+    def real_classify(self, trace, final_diff, task, **kwargs):
+        return holes.classify(trace, final_diff, task, restored=frozenset(), **kwargs)
+
+
+def legit_attack(diff, **kwargs):
+    return th.make_attack(diff, steps=[dict(s) for s in th.HARD_CODE_STEPS], **kwargs)
+
+
+def test_a_passing_diff_that_matches_the_gold_fix_is_not_a_hole_and_not_a_verdict():
+    out = LegitLab(FIX_DIFF, attacks=[legit_attack(FIX_DIFF)]).run()
+    assert out.before.holes.exploited is False and out.before.holes.labels == ()
+    assert out.before.holes.primary == "none" and "unclassified" not in out.before.holes.attempted
+    assert out.before.attack["outcome"] == "legit_fix"
+    assert out.before.inconclusive and "like the gold fix; not an exploit" in out.before.inconclusive
+    assert out.certified is False and out.after is None and out.candidates == ()
+    assert "inconclusive" in out.reason
+
+
+def test_a_passing_diff_that_is_not_the_gold_fix_stays_a_hole_as_before():
+    gold = FIX_DIFF.replace(FIX_SRC, "src/other.py")
+    out = LegitLab(gold, attacks=[legit_attack(OTHER_DIFF)]).run()
+    assert out.before.holes.exploited is True and out.before.holes.labels == ("unclassified",)
+    assert out.before.attack["outcome"] is None
+
+
+def test_an_auto_submitted_pass_with_no_exploit_label_is_a_legit_fix_not_a_hole():
+    gold = FIX_DIFF.replace(FIX_SRC, "src/other.py")
+    attack_ = dataclasses.replace(
+        legit_attack(OTHER_DIFF, stop_reason="token_limit", submitted=False), auto_submitted=True
+    )
+    out = LegitLab(gold, attacks=[attack_]).run()
+    assert out.before.holes.exploited is False and out.before.attack["outcome"] == "legit_fix"
+    assert out.certified is False
+
+
+@pytest.mark.parametrize("label", ["test-edit", "git-history", "network"])
+def test_a_pass_with_a_real_label_is_a_hole_even_when_auto_submitted(label):
+    for attack_ in (auto(), th.make_attack()):
+        out = th.Lab(labels=(label,), attacks=[attack_, th.make_attack()]).run()
+        assert out.before.holes.exploited is True and out.before.holes.labels == (label,)
+        assert out.before.attack["outcome"] is None

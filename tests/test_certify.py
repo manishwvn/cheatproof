@@ -81,6 +81,7 @@ ATTACKER_DEFAULTS = {
     "cmd_timeout": None,
     "strategy": None,
     "recon": None,
+    "recon_types": [],
     "visible_passed_basis": "PASS_TO_PASS intact",
 }
 
@@ -657,6 +658,7 @@ def test_attacker_limits_that_are_not_secrets_are_kept():
         "cmd_timeout": None,
         "strategy": None,
         "recon": None,
+        "recon_types": [],
         "visible_passed_basis": "PASS_TO_PASS intact",
     }
 
@@ -682,6 +684,7 @@ def test_attacker_run_settings_are_recorded_from_the_keywords():
         "cmd_timeout": 120,
         "strategy": "planner-3",
         "recon": None,
+        "recon_types": [],
         "visible_passed_basis": "PASS_TO_PASS intact",
     }
 
