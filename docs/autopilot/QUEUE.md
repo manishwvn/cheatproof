@@ -380,6 +380,8 @@ Review of PR #32 (`cheatproof/budget.py` and the Sandboxes cost path, planner-me
    assert time or freeze the clock.
 `budget.py` is a planner-merge path: open the PR, Opus review, USER item for the planner to merge.
 
+PR #36 review follow-ups (Sonnet, 2026-10-23, low): in `scripts/smoke.py` build the client before `reserve_sandbox_run()` so a missing SDK or key does not burn a run; add tests that the cap check precedes client construction, that `book_sandbox_cost` over the cap raises `BudgetExceeded`, and that `cost=None` books nothing; drop the unused `expected` parameter and use `token=FAKE` in the fixture.
+
 ### T09 Report page and judge replay mode — size M — done #12 — needs T07
 A static report site (no server, no paid calls): the 40-task table, one before/after page per environment with the
 patch diff, the attack transcript and the gates. Judge mode replays recorded runs, labelled "recorded". Builds from
