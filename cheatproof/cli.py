@@ -1218,16 +1218,16 @@ def build_parser() -> argparse.ArgumentParser:
     site = sub.add_parser("site", help="build the static report site from certificates; no paid calls")
     site.add_argument("--certs", type=Path, default=DEFAULT_CERT_DIR, help="certificates directory")
     site.add_argument("--out", type=Path, default=DEFAULT_SITE_DIR, help="directory for the site")
-    budget = sub.add_parser("budget", help="spend ledger tools; no paid calls")
-    budget_sub = budget.add_subparsers(dest="budget_command", required=True)
-    budget_sub.add_parser(
-        "init", help="create the zeroed spend ledger at SPEND_LEDGER; refuses an existing file"
-    )
     site.add_argument(
         "--traces",
         type=Path,
         help="directory of <certificate file stem>.jsonl attacker traces (default: traces/ beside the "
         "certificates, when it exists)",
+    )
+    budget = sub.add_parser("budget", help="spend ledger tools; no paid calls")
+    budget_sub = budget.add_subparsers(dest="budget_command", required=True)
+    budget_sub.add_parser(
+        "init", help="create the zeroed spend ledger at SPEND_LEDGER; refuses an existing file"
     )
     return parser
 

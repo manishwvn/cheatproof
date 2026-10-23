@@ -1,3 +1,4 @@
+import errno
 import json
 import math
 import os
@@ -1014,3 +1015,65 @@ def test_halt_is_checked_by_check_not_halted_and_on_the_free_cost_path(tmp_path)
     with pytest.raises(BudgetExceeded, match="budget halted"):
         b.book_sandbox_cost(0)
     assert (tmp_path / "ledger.json").read_text() == before
+
+
+# --- T35 review: every ledger OSError is a refusal inside Budget; create_ledger is all-or-nothing ------------------
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda b: b.reserve("m", 1, 1),
+        lambda b: b.reserve_sandbox_run(),
+        lambda b: b.halt("x"),
+        lambda b: b.book_sandbox_cost(0.1),
+        lambda b: b.check_not_halted(),
+        lambda b: b.snapshot(),
+    ],
+)
+def test_a_ledger_that_cannot_be_read_or_written_refuses_without_the_os_text(tmp_path, call):
+    (tmp_path / "ledger.json").unlink()
+    (
+        tmp_path / "ledger.json"
+    ).mkdir()  # a directory where the ledger file should be: every read and write fails
+    b = make_budget(tmp_path)
+    with pytest.raises(BudgetExceeded, match="could not be read or written") as err:
+        call(b)
+    assert str(tmp_path) not in str(err.value)  # the type name only, never the path
+
+
+def test_a_failed_ledger_write_refuses_and_keeps_the_old_ledger(tmp_path, monkeypatch):
+    before = (tmp_path / "ledger.json").read_text()
+
+    def full_disk(src, dst):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(os, "replace", full_disk)
+    b = make_budget(tmp_path)
+    with pytest.raises(BudgetExceeded, match="could not be read or written"):
+        b.halt("x")
+    assert (tmp_path / "ledger.json").read_text() == before
+
+
+@pytest.mark.parametrize("step", ["fsync", "link"])
+def test_create_ledger_failing_write_leaves_no_partial_file(tmp_path, monkeypatch, step):
+    def full_disk(*args, **kwargs):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(os, step, full_disk)
+    target = tmp_path / "new" / "ledger.json"
+    with pytest.raises(BudgetExceeded, match="could not be read or written"):
+        create_ledger(target)
+    assert not target.exists()
+    assert [p.name for p in (tmp_path / "new").iterdir()] == ["ledger.lock"]  # no temp file left behind
+
+
+def test_create_ledger_link_refusal_says_already_exists(tmp_path, monkeypatch):
+    def taken(src, dst):
+        raise FileExistsError(errno.EEXIST, "File exists")
+
+    monkeypatch.setattr(os, "link", taken)
+    target = tmp_path / "new" / "ledger.json"
+    with pytest.raises(BudgetExceeded, match="already exists"):
+        create_ledger(target)
+    assert [p.name for p in (tmp_path / "new").iterdir()] == ["ledger.lock"]

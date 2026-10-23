@@ -25,8 +25,9 @@ import fcntl
 import json
 import math
 import os
+import tempfile
 from collections.abc import Callable
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -206,17 +207,45 @@ def fresh_ledger() -> dict:
     }
 
 
+def _unwritable(exc: OSError) -> BudgetExceeded:
+    """A ledger OSError as a refusal. Only the exception type name leaves: never the OS text or the path."""
+    return BudgetExceeded(
+        f"spend ledger could not be read or written ({type(exc).__name__}); refusing to run"
+    )
+
+
+def _write_new_file(path: Path, text: str) -> None:
+    """Write text to a new file at path, all or nothing. A temp file in the same directory is fsynced, then hard-linked
+    to path: link refuses an existing path, so nothing is overwritten. The temp file is always removed."""
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            raise BudgetExceeded(f"ledger {path} already exists; refusing to overwrite it") from None
+    finally:
+        with suppress(FileNotFoundError):
+            tmp.unlink()
+
+
 def create_ledger(path: Path) -> Path:
     """Create the zeroed ledger at path, the only way a ledger comes into being. An existing file is refused, never
     overwritten. The ledger lock is held, so a concurrent writer cannot slip in between the check and the create."""
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path.with_suffix(".lock"), "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        if path.exists():
-            raise BudgetExceeded(f"ledger {path} already exists; refusing to overwrite it")
-        with open(path, "x") as f:
-            f.write(json.dumps(fresh_ledger(), indent=2, sort_keys=True))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path.with_suffix(".lock"), "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if path.exists():
+                raise BudgetExceeded(f"ledger {path} already exists; refusing to overwrite it")
+            _write_new_file(path, json.dumps(fresh_ledger(), indent=2, sort_keys=True))
+    except OSError as exc:
+        raise _unwritable(exc) from None
     return path
 
 
@@ -288,10 +317,17 @@ class Budget:
 
     @contextmanager
     def _lock(self):
-        self.ledger.parent.mkdir(parents=True, exist_ok=True)
-        # Append mode creates the lock file without truncating it.
-        with open(self.ledger.with_suffix(".lock"), "a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+        with ExitStack() as stack:
+            try:
+                self.ledger.parent.mkdir(parents=True, exist_ok=True)
+                # Append mode creates the lock file without truncating it.
+                lock = stack.enter_context(open(self.ledger.with_suffix(".lock"), "a"))
+            except OSError as exc:
+                raise _unwritable(exc) from None
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            except OSError as exc:
+                raise _unwritable(exc) from None
             yield
 
     @contextmanager
@@ -301,17 +337,24 @@ class Budget:
             state = self._read()
             yield state
             tmp = self.ledger.with_suffix(".tmp")
-            tmp.write_text(json.dumps(state, indent=2, sort_keys=True))
-            os.replace(tmp, self.ledger)
+            try:
+                tmp.write_text(json.dumps(state, indent=2, sort_keys=True))
+                os.replace(tmp, self.ledger)
+            except OSError as exc:
+                raise _unwritable(exc) from None
 
     def _read(self) -> dict:
-        if not self.ledger.exists():
-            # Never created implicitly: a missing ledger would read as zero spend and let a run start unbooked.
-            raise BudgetExceeded(
-                f"ledger {self.ledger} does not exist; run `python -m cheatproof.cli budget init` once to create it"
-            )
         try:
-            state = json.loads(self.ledger.read_text())
+            if not self.ledger.exists():
+                # Never created implicitly: a missing ledger would read as zero spend and let a run start unbooked.
+                raise BudgetExceeded(
+                    f"ledger {self.ledger} does not exist; run `python -m cheatproof.cli budget init` once to create it"
+                )
+            raw = self.ledger.read_text()
+        except OSError as exc:
+            raise _unwritable(exc) from None
+        try:
+            state = json.loads(raw)
         except ValueError:
             raise BudgetExceeded(f"ledger {self.ledger} is not valid JSON; fix it by hand") from None
         if not isinstance(state, dict) or not all(k in state for k in ("total_usd", "days", "sandbox_runs")):
@@ -484,9 +527,16 @@ class Budget:
         A cleared `halted` flag therefore stays cleared.
         """
         lock_path = self.ledger.with_suffix(".lock")
-        if not lock_path.exists():
-            # No writer has ever locked this ledger, so there is nothing to wait for.
-            return self._read()
-        with open(lock_path) as lock:
-            fcntl.flock(lock, fcntl.LOCK_SH)
+        with ExitStack() as stack:
+            try:
+                # No writer has ever locked this ledger when there is no lock file, so there is nothing to wait for.
+                lock = stack.enter_context(open(lock_path)) if lock_path.exists() else None
+            except OSError as exc:
+                raise _unwritable(exc) from None
+            if lock is None:
+                return self._read()
+            try:
+                fcntl.flock(lock, fcntl.LOCK_SH)
+            except OSError as exc:
+                raise _unwritable(exc) from None
             return self._read()

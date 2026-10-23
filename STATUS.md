@@ -21,6 +21,7 @@
   1332 tests.
   Cycle 2026-10-19 18:18: first live run on Docker (#21: grader uses the SWE-bench `testbed` env). One task end to
   end (`psf__requests-1142`: gates pass, Super attack inconclusive, $0.0146); batch stopped at 5.9 GB free disk (U14).
+- **T35 (PR #49, not merged):** Fresh machine: run `python -m cheatproof.cli budget init` once; a lost halt is forgotten by a later init.
 - **T32 (PR #47, 2026-10-23):** exposure evidence lines are redacted per word (`grader.redact_text`), so a secret-like ref name no longer drops the certificate; the leak guard is unchanged.
 - **Handoff 2026-10-23:** read `docs/autopilot/HANDOFF.md` first. T01 is done (#36); T08 batch 3 is queued, then the routine halts the budget (U26). T31 and T32 are new.
 - **Next for the routine:** U21 closed: Sandboxes cost is logged, and the budget halts only past `SANDBOX_COST_CAP_USD`

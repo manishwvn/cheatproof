@@ -1014,3 +1014,20 @@ def test_a_ledger_oserror_while_booking_a_cost_becomes_budget_exceeded(tmp_path,
     monkeypatch.setattr(Budget, "book_sandbox_cost", broken_book)
     with pytest.raises(BudgetExceeded, match="could not be read or written"):
         session.run("x", timeout=5)
+
+
+def test_a_402_the_ledger_cannot_halt_gives_a_fixed_message_with_no_sdk_error(tmp_path, monkeypatch):
+    budget = real_budget(tmp_path)
+    box, _, session = make(budget=budget)
+    box.raise_on = lambda argv: leaky_error(402)
+
+    def refused_halt(self, reason):
+        raise BudgetExceeded("ledger gone")
+
+    monkeypatch.setattr(Budget, "halt", refused_halt)
+    with pytest.raises(BudgetExceeded) as err:
+        session.run("x", timeout=5)
+    assert str(err.value) == "HTTP 402; ledger could not be halted"
+    assert err.value.__context__ is None  # the SDK error is never the context
+    assert err.value.__cause__ is None
+    assert FAKE_SECRET not in repr(err.value)
