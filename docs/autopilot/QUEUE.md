@@ -379,7 +379,7 @@ DRMacIver__shrinkray-7's gold gate fails with `pytest exited 4: ERROR: found no 
 ### T35 Ledger refusal and halt ordering — size S — todo (P0, haiku) — merged into T27
 Do these as part of T27 items, in one planner-merge PR (`budget.py`, `executor.py`): (a) a missing ledger file refuses to run (`budget.py:272`) unless an explicit init created it (add `cheatproof budget init`, never implicit); (b) ledger `OSError` becomes `BudgetExceeded` (`executor.py:1140`); (c) the halt flag is checked before every exec, including the cost-0 path (`budget.py:413`, `executor.py:1189`); (d) `_halt_for_payment` runs on all exceptions (`executor.py:1130`). Fakes-only tests. T35 and T27 are closed together; T27 keeps its other items.
 
-### T36 Fix results row 8 and the access probe retries — size S — todo (P0, haiku)
+### T36 Fix results row 8 and the access probe retries — size S — done #45 (P0, haiku)
 `docs/results.md` row 8: BoboTiG__ebook-reader-dict-2132 did run sandbox execs; `cost_usd` is Token Factory only, not Sandboxes. Fix the row and any column header that says otherwise. `scripts/sandbox_access.py` lines 45 and 91-104: the probe retries; make it one attempt with a clear failure line (no retry loop that can repeat paid calls). Planner-merge path for the script: open the PR and add a USER item if the planner must merge.
 
 ### T37 Tavily runtime path (`--network-fetch`) — size M — todo (P2, sonnet)
