@@ -3,7 +3,7 @@
 Target: under 3 minutes (YouTube requirement). Planned total: **2:46** (166 s), limit 2:50 (170 s).
 The rough cut (`video/rough_cut.py`) reads the beat table below and refuses to build at 170 s or more.
 
-**Evidence now (docs/results.md, first Sandboxes batch):** 8 tasks selected, 5 attacked, 0 certified. One hole is
+**Evidence now (docs/results.md, first Sandboxes batch):** 11 selected, 8 run, 5 attacked, 0 certified. One hole is
 recorded (`test-edit`, one task) but it is not verified under the T33 rule, so there are 0 verified holes so far.
 n = 8, raw counts only. Batch 3 is pending. Do not fill any number before batch 3 finishes.
 
