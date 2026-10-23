@@ -401,7 +401,7 @@ Minor findings from the Sonnet review of PR #30 (T23), none blocking. Fix with f
 3. The `colima ssh -- df` disk check after every run has a 15 s timeout. Skip it for the Sandboxes backend, which has no local images.
 4. Unverified: whether a command that exits non-zero keeps its image (it matters for the gold-gate reuse). Test it with one fake and one live smoke only after the owner clears budget for it; otherwise record it as unknown in the ADR.
 
-### T32 Do not lose a certificate to the leak guard — size S — todo (P0, haiku; after T34)
+### T32 Do not lose a certificate to the leak guard — size S — done #47 (P0, haiku; after T34)
 Orchestrator 2026-10-23: redact free text with `error_line`'s per-word redaction (`cheatproof/grader.py:506`, `cheatproof/exposure.py:149`) instead of dropping the certificate; this replaces the `certify.py` idea below if that is simpler.
 Batch 2 (PR #38): `Azure__autorest.python-475` ran, but `certificate.exposure_before.future_git_evidence[10]` held a secret-like value and the certificate write was refused (`certificate_write_failed`, $0.0606 spent, result lost). Keep the guard strict, but redact the matching evidence line in `certify.py` before the write (replace the value with a fixed marker, keep the file path and the finding type), so a hole is still reported and replayable. Fakes-only tests next to the existing leak-guard tests; never print the matched value. If `leakcheck.py` or the certificate writer is a planner-merge path, open the PR and add a USER item. Do before the next T08 batch if the routine has the time; it does not block batch 3.
 
