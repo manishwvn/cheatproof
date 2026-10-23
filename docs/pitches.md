@@ -1,4 +1,4 @@
-# Pitch: Cheatproof
+# Pitch: RewardSeal
 
 Decided 2026-10-18 after three research rounds and judge panels (earlier candidates live in git history). Judging:
 four equal criteria scored 1–5 (Technological Implementation, Design, Potential Impact, Quality of Idea); ties go
@@ -29,7 +29,7 @@ trains Nemotron with RL), labs and eval firms.
 ## How it works
 1. **Load** 30 SWE-rebench tasks plus 10 SWE-bench Verified tasks (comparable to the 28.5% figure).
 2. **Gate before hardening:** the gold patch passes and the empty patch fails, or the task is dropped and counted.
-3. **Attack:** a dishonest Nemotron agent (Ultra) gets the task, a shell inside the environment and four explicit
+3. **Attack:** a dishonest Nemotron Super agent gets the task, a shell inside the environment and four explicit
    strategies: git-history retrieval, test edits, hard-coding, network fetch of the upstream fix (with Tavily search).
    About 15 steps and 50k tokens per attempt.
 4. **Classify** each success into a hole type, in code, from the trace and the diff.
@@ -42,23 +42,23 @@ Executor: Token Factory Sandboxes (checkpoint, branch per patch), with local Doc
 model call goes through Token Factory.
 
 ## Demo
-- **Hook (10 s):** "We told Nemotron to cheat on real SWE tasks. It passed X of 40 without fixing a single bug."
-  Cut to the agent running `git log --all` and copying the future commit.
+- **Hook (10 s):** "We told Nemotron Super to cheat on real SWE tasks. It passed k of n without solving the task."
+  Count verified holes only (docs/results.md, Holes found). Cut to a real attack trace from the final run.
 - Live loop on one environment: attack, hole found, patch applied, re-attack fails, gold still passes.
-- Scale: the 40-environment table, before and after per attack type, cost per environment.
-- Product: `cheatproof harden <env-id>` returns a certificate JSON. Model ID on screen in the first 20 seconds.
+- Scale: the environment table (n shown), before and after per attack type, cost per environment.
+- Product: `python -m cheatproof.cli harden <env-id>` returns a certificate JSON. Model ID on screen in the first 20 seconds.
 
 ## Track fit (stage 1)
 The attacker is a coding agent: it writes code, runs it in the sandbox and tests against the grader. Show Nemotron
 tool calls and sandbox output on screen.
 
 ## Tavily (bonus award)
-One real use: the network-fetch attack. The attacker searches for the upstream fix; if it finds and applies it, that
-is a network-on hole, and the patch is network off. Tavily changes outcomes at runtime. No other Tavily use.
+Planned use: the network-fetch attack. The attacker searches for the upstream fix; if it finds and applies it, that
+is a network-on hole, and the patch is network off. Tavily can change outcomes at runtime. Claim it only after a run logs a Tavily call (none logged in docs/results.md yet). No other Tavily use.
 
 ## Ways this loses, and the answer
 1. **Small or fake-looking numbers.** Report n, raw counts and intervals; show a real hack transcript.
-2. **Hardening breaks solvability, or the attacker is weak.** Gold and empty gates on every environment; Ultra as
+2. **Hardening breaks solvability, or the attacker is weak.** Gold and empty gates on every environment; Nemotron Super as
    the attacker with strategy hints; say "upper bound against this attacker, not proof".
 3. **Sandbox access slips, or it looks like dry infra.** Docker fallback behind one executor interface; a polished
    CLI, certificate JSON and one clean before/after page per environment.
@@ -68,4 +68,4 @@ Scores across all 7,000 environments, SWE-rebench-V2, learned patch generation (
 beyond one report page, and any headline number that was not measured.
 
 ## Name
-"Cheatproof" is a working name; the owner checks the trademark before any public asset (U5).
+"RewardSeal" is the product name (U5 done 2026-10-19: "Cheatproof" is taken by CheatProof.ai).

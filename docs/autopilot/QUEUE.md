@@ -119,7 +119,7 @@ Routine 2026-10-20 19:24: PR #27 does all items except 7 (`COST_BASIS` is valida
 schema/fixture change). Sonnet "fix first" (silent resets could fake "not hackable"), one Haiku fix round, Opus
 approve. CI `test` green; `dependencies` red until PR #26 (certifi) is merged.
 
-### T24 Rename the product to RewardSeal (user-facing text only) — size M — todo
+### T24 Rename the product to RewardSeal (user-facing text only) — size M — text done #53 (package rename deferred)
 Scope change 2026-10-23 (orchestrator): rename USER-FACING TEXT ONLY now (README, report site text, CLI help strings and
 docs, video script, pitches). Do NOT rename the Python package, the console script or any import in this task; that stays a later
 option. The grep rule below applies to user-facing files only.
@@ -390,7 +390,7 @@ Goal: at least one `certified=True` with a completed re-attack, and at least one
 ### T39 Pages workflow and sanitized hero traces (P2, haiku wires, sonnet writes) — size M — todo
 A GitHub Pages workflow that builds the report site, plus committed sanitized traces for the hero attack, so the demo URL is live when the owner flips the repo public. No public flip by the routine. Traces pass `leakcheck`.
 
-### T40 Video script and pitches say Super, fill RESULT markers (P2) — size S — todo — needs T33, T34
+### T40 Video script and pitches say Super, fill RESULT markers (P2) — size S — placeholders done #53, fill after batch 3 — needs T33, T34
 Fill the `[RESULT: ...]` markers in `docs/video/script.md` from the real numbers in `docs/results.md`; replace "Ultra" with Nemotron Super everywhere (also `docs/pitches.md`). Do not claim a result the data does not show.
 
 ### T41 Certification rejects a max_steps run that never submitted — size S — done #48 (P0)
