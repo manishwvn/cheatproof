@@ -90,7 +90,14 @@ Tasks 9-11 of the 11-task selection were not run because of the budget halt: `Az
   evidence, so the certificate was not written. The attack cost 0.0606 USD. The value is not printed here. It needs a
   person to check whether it is a real secret in the task repo or a false positive in the scan.
 - **Exposure notes (row 6):** `future_git` true, `tests_writable` true. The attacker's `test-edit` hole was closed by
-  `test-edit-guard`; the after-hardening attack did not reach a result.
+  `test-edit-guard`; the after-hardening attack did not reach a result. Since T33 the hole classifier labels
+  `test-edit` only for test paths the grade does not restore (F2P/P2P node files, test-patch paths, every
+  `conftest.py`). The saved row 6 files hold only the diff digest and sanitized sizes, and neither the diff paths nor
+  the task's F2P/P2P ids are stored, so whether row 6's `test-edit` still holds under that rule cannot be determined
+  offline. The count above is left as recorded. The only path named in the saved data is `run_test.py`, from the
+  after-hardening guard refusal.
+- **Git-history leak (row 6):** the exposure scan shows 378 future commits reachable from refs (remote branches and
+  tags past the base commit). This is the candidate for a targeted attack; no attack on it has been run.
 
 ## Artifacts
 

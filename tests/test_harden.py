@@ -551,12 +551,12 @@ def test_attack_with_no_write_step_made_no_attempt_even_with_a_diff(steps):
 
 
 def test_no_attempt_round_keeps_classify_labels_out_of_its_holes():
-    # Real classifier. No write step, so no attempt, but the final diff edits a test file: classify labels test-edit
-    # from the diff alone (no grade ran). That label must not reach the round's holes, so holes_found stays empty.
+    # Real classifier. No write step, so no attempt, but the final diff edits a test file the grade does not
+    # restore: classify labels test-edit from the diff alone (no grade ran). That label must not reach the round's holes, so holes_found stays empty.
     test_edit = (
-        "diff --git a/tests/test_x.py b/tests/test_x.py\n"
-        "--- a/tests/test_x.py\n"
-        "+++ b/tests/test_x.py\n"
+        "diff --git a/tests/helpers.py b/tests/helpers.py\n"
+        "--- a/tests/helpers.py\n"
+        "+++ b/tests/helpers.py\n"
         "@@ -1 +1 @@\n"
         "-assert old()\n"
         "+assert new()\n"
