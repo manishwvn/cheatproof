@@ -2,7 +2,7 @@
 
 Prints one line: ACCESS OK, NO ACCESS (<error class> [HTTP status]), ERROR <error class>, or ERROR budget halted (...).
 Exit 0 when the run prints ok, 2 when the API refuses access (401/403), 1 on any other failure.
-There is exactly one attempt per invocation: no retry, because a probe may bill. Each invocation books one sandbox run
+One attempt per invocation by this script; the contree_sdk may retry 429/timeout inside spawn. Each invocation books one sandbox run
 in the budget before the attempt. A 402 halts the budget and exits 1. A reported run cost is logged in the ledger; a
 cost that takes the logged Sandboxes sum past SANDBOX_COST_CAP_USD halts the budget and exits 1.
 Never prints the key, the project ID, IDs or raw error text: only exception class names and HTTP status codes.

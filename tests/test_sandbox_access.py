@@ -1,6 +1,7 @@
 """sandbox_access.check_access with fakes only: no SDK network call, no .env read, no budget file."""
 
 import importlib.util
+import time
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,16 @@ sandbox_access = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sandbox_access)
 
 FAKE_SECRET = "FAKE-SECRET-7f3a91-do-not-print"
+
+
+@pytest.fixture(autouse=True)
+def no_sleep(monkeypatch):
+    """The probe makes one attempt and never sleeps. A retry loop that calls time.sleep fails here."""
+
+    def _forbidden(seconds):
+        raise AssertionError(f"sandbox_access must not sleep (asked for {seconds}s)")
+
+    monkeypatch.setattr(time, "sleep", _forbidden)
 
 
 class TransientError(Exception):
