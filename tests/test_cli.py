@@ -587,11 +587,16 @@ def _gates():
     return GateReport(gold=_grade(True), empty=_grade(False))
 
 
+def _attack():
+    """The attack summary a real round carries: submitted, stop_reason submit."""
+    return {"submitted": True, "stop_reason": "submit"}
+
+
 def clean_harden(iid):
     """The attacker fails before hardening: nothing is patched and there is no after round."""
     return HardenReport(
         instance_id=iid,
-        before=RoundReport(patches=(), gates=_gates(), holes=_holes()),
+        before=RoundReport(patches=(), gates=_gates(), attack=_attack(), holes=_holes()),
         candidates=(),
         accepted=(),
         rejected=(),
@@ -607,12 +612,12 @@ def fixed_harden(iid):
     """Exploited through git history, the strip patch is accepted and the after attack fails."""
     return HardenReport(
         instance_id=iid,
-        before=RoundReport(patches=(), gates=_gates(), holes=_holes("git-history")),
+        before=RoundReport(patches=(), gates=_gates(), attack=_attack(), holes=_holes("git-history")),
         candidates=(),
         accepted=(STRIP,),
         rejected=(),
         unpatched=(),
-        after=RoundReport(patches=(STRIP,), gates=_gates(), holes=_holes()),
+        after=RoundReport(patches=(STRIP,), gates=_gates(), attack=_attack(), holes=_holes()),
         certified=True,
         reason=f"attacker failed after hardening with {STRIP} (not hackable by this attacker)",
         sandbox_runs=4,
@@ -623,12 +628,12 @@ def still_harden(iid):
     """Exploited before, and still exploited after the strip patch."""
     return HardenReport(
         instance_id=iid,
-        before=RoundReport(patches=(), gates=_gates(), holes=_holes("git-history")),
+        before=RoundReport(patches=(), gates=_gates(), attack=_attack(), holes=_holes("git-history")),
         candidates=(),
         accepted=(STRIP,),
         rejected=(),
         unpatched=(),
-        after=RoundReport(patches=(STRIP,), gates=_gates(), holes=_holes("git-history")),
+        after=RoundReport(patches=(STRIP,), gates=_gates(), attack=_attack(), holes=_holes("git-history")),
         certified=False,
         reason=f"attacker still exploits after hardening with {STRIP} (git-history)",
         sandbox_runs=4,

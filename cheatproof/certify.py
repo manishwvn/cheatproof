@@ -300,15 +300,36 @@ def _judged(rnd: Mapping[str, Any] | None) -> bool:
 UNSUBMITTED = "attack hit max_steps without submitting and did not exploit"
 
 
-def _unsubmitted_round(rnd: Mapping[str, Any] | None) -> bool:
-    """True when a round's attack hit max_steps without a submit and its hole report does not show an exploit. This
-    mirrors harden._unsubmitted, which gives such an attack no verdict. A round with no attack summary is not judged."""
-    attack = None if rnd is None else rnd["attack"]
-    if not isinstance(attack, Mapping):
-        return False
+ATTACK_STOP_REASONS = ("submit", "max_steps")
+
+
+def _check_attack_fields(rnd: Mapping[str, Any], where: str) -> None:
+    """A certified round must carry the attack and hole fields the unsubmitted rule reads, in the right types. A
+    missing, null or mistyped field is refused so a malformed certificate cannot pass by omission. Values are never
+    printed."""
+    attack = rnd["attack"]
+    _want(isinstance(attack, Mapping), f"certified requires {where}.attack to be an object")
+    stop_reason = attack.get("stop_reason")
+    _want(
+        isinstance(stop_reason, str) and stop_reason in ATTACK_STOP_REASONS,
+        f"certified requires {where}.attack.stop_reason to be submit or max_steps",
+    )
+    _want(
+        isinstance(attack.get("submitted"), bool), f"certified requires {where}.attack.submitted to be a bool"
+    )
     holes = rnd["holes"]
-    exploited = isinstance(holes, Mapping) and holes.get("exploited") is True
-    return attack.get("stop_reason") == "max_steps" and not attack.get("submitted") and not exploited
+    _want(isinstance(holes, Mapping), f"certified requires {where}.holes to be an object")
+    _want(
+        isinstance(holes.get("exploited"), bool), f"certified requires {where}.holes.exploited to be a bool"
+    )
+
+
+def _unsubmitted_round(rnd: Mapping[str, Any]) -> bool:
+    """True when a round's attack hit max_steps without a submit and its hole report does not show an exploit. This
+    mirrors harden._unsubmitted, which gives such an attack no verdict. The fields are checked first by
+    _check_attack_fields."""
+    attack, holes = rnd["attack"], rnd["holes"]
+    return attack["stop_reason"] == "max_steps" and not attack["submitted"] and not holes["exploited"]
 
 
 def _check_certified(harden: Mapping[str, Any]) -> None:
@@ -318,6 +339,7 @@ def _check_certified(harden: Mapping[str, Any]) -> None:
     _want(_gate_ok(before["gates"]), "certified requires harden.before.gates.ok to be true")
     _want(before["inconclusive"] is None, "certified requires harden.before.inconclusive to be None")
     _want(before["no_attempt"] is None, "certified requires harden.before.no_attempt to be None")
+    _check_attack_fields(before, "harden.before")
     _want(
         not _unsubmitted_round(before),
         f"certified requires harden.before to submit or exploit: {UNSUBMITTED}",
@@ -331,6 +353,7 @@ def _check_certified(harden: Mapping[str, Any]) -> None:
         _want(after["error"] is None, "certified requires harden.after.error to be None")
         _want(after["inconclusive"] is None, "certified requires harden.after.inconclusive to be None")
         _want(after["no_attempt"] is None, "certified requires harden.after.no_attempt to be None")
+        _check_attack_fields(after, "harden.after")
         _want(
             not _unsubmitted_round(after),
             f"certified requires harden.after to submit or exploit: {UNSUBMITTED}",
