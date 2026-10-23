@@ -27,23 +27,53 @@ def _job_block(name: str) -> str:
     return text[start : start + match.start()] if match else text[start:]
 
 
-def test_triggers_are_push_to_main_and_manual_only():
+def test_triggers_are_main_push_pull_request_build_and_manual():
     text = WORKFLOW.read_text(encoding="utf-8")
     assert re.search(
-        r"^on:\n  push:\n    branches: \[main\]\n  workflow_dispatch:\n", text, flags=re.MULTILINE
+        r"^on:\n  push:\n    branches: \[main\]\n  pull_request:[^\n]*\n  workflow_dispatch:\n",
+        text,
+        flags=re.MULTILINE,
     )
-    assert "pull_request" not in text
 
 
-def test_top_level_permissions_are_minimal():
+def test_every_workflow_file_parses_as_yaml():
+    """A parse error in any workflow fails here, before a push turns into a failed run."""
+    import yaml
+
+    files = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    assert files
+    for path in files:
+        try:
+            yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            raise AssertionError(f"{path.name} does not parse as YAML: {exc}") from None
+
+
+def _permissions(block: str) -> set[tuple[str, str]]:
+    """The (scope, level) pairs of a permissions block given as text, for the top level or one job."""
+    return set(re.findall(r"^\s+(\w[\w-]*): (\w+)$", block, flags=re.MULTILINE))
+
+
+def test_top_level_permissions_are_contents_read_only():
     text = WORKFLOW.read_text(encoding="utf-8")
     top = re.search(r"^permissions:\n((?:  .+\n)+)", text, flags=re.MULTILINE)
     assert top is not None
-    assert set(re.findall(r"^  (\w[\w-]*): (\w+)$", top.group(1), flags=re.MULTILINE)) == {
+    assert _permissions(top.group(1)) == {("contents", "read")}
+
+
+def _job_permissions(name: str) -> set[tuple[str, str]]:
+    """The scopes a job declares under its own permissions: key (empty when it declares none)."""
+    match = re.search(r"^    permissions:\n((?:      .+\n)+)", _job_block(name), flags=re.MULTILINE)
+    return _permissions(match.group(1)) if match else set()
+
+
+def test_pages_and_id_token_write_are_declared_by_the_deploy_job_only():
+    assert _job_permissions("deploy") == {
         ("contents", "read"),
         ("pages", "write"),
         ("id-token", "write"),
     }
+    assert _job_permissions("build") == {("contents", "read")}
 
 
 def test_every_action_is_pinned_by_full_sha_with_a_version_comment():
@@ -53,10 +83,14 @@ def test_every_action_is_pinned_by_full_sha_with_a_version_comment():
         assert PINNED_USES.match(line), line
 
 
-def test_deploy_needs_a_successful_build_on_a_public_repo():
+def test_deploy_needs_a_successful_build_on_a_public_main_push_or_dispatch():
     deploy = _job_block("deploy")
     assert "needs: build" in deploy
-    assert "if: ${{ !github.event.repository.private && needs.build.result == 'success' }}" in deploy
+    gate = (
+        "if: ${{ !github.event.repository.private && github.event_name != 'pull_request' "
+        "&& github.ref == 'refs/heads/main' && needs.build.result == 'success' }}"
+    )
+    assert gate in deploy
 
 
 def test_a_failed_site_build_is_never_tolerated():

@@ -1001,13 +1001,42 @@ def test_a_not_run_row_with_a_measured_cost_is_accepted(tmp_path, cost):
     assert "batch record not loaded" not in read(result.index)
 
 
-@pytest.mark.parametrize("cost", [-0.1, "0.15", True, None], ids=["negative", "string", "bool", "null"])
-def test_a_not_run_row_with_a_bad_cost_is_refused(tmp_path, cost):
+COST_TYPE_MESSAGE = "batch record field not_run has the wrong type"
+
+
+def _record_text_with_cost(token: str) -> str:
+    """The batch record as JSON text, with one not-run row whose cost_usd is the literal token (not a Python value)."""
+    row = {"instance_id": "owner__repo-4", "reason": "budget", "error": "daily cap", "cost_usd": 0}
+    text = json.dumps(batch_record(not_run=[row]))
+    assert text.count('"cost_usd": 0') == 1
+    return text.replace('"cost_usd": 0', f'"cost_usd": {token}')
+
+
+@pytest.mark.parametrize(
+    ("token", "message"),
+    [
+        (
+            "1" + "0" * 400,
+            COST_TYPE_MESSAGE,
+        ),  # 10**400: an int too large for a float (OverflowError if converted)
+        ("1e999", COST_TYPE_MESSAGE),  # parses to infinity
+        ("NaN", "batch record is not valid JSON"),  # _refuse_constant raises ValueError, read as bad JSON
+        ("-1", COST_TYPE_MESSAGE),
+        ("-0.1", COST_TYPE_MESSAGE),
+        ("true", COST_TYPE_MESSAGE),
+        ('"0.15"', COST_TYPE_MESSAGE),
+        ("null", COST_TYPE_MESSAGE),
+    ],
+    ids=["int-10-pow-400", "inf-1e999", "nan", "negative-int", "negative-float", "bool", "string", "null"],
+)
+def test_a_not_run_cost_that_is_not_a_finite_non_negative_number_is_listed_not_raised(
+    tmp_path, token, message
+):
     cert_dir = fixture_dir(tmp_path)
-    row = {"instance_id": "owner__repo-4", "reason": "budget", "error": "daily cap", "cost_usd": cost}
-    put_batch(tmp_path, batch_record(not_run=[row]))
-    result = build_site(cert_dir, tmp_path / "site")
-    assert result.errors == [("batch.json", "batch record field not_run has the wrong type")]
+    put_batch(tmp_path, _record_text_with_cost(token))
+    result = build_site(cert_dir, tmp_path / "site")  # must not raise
+    assert result.errors == [("batch.json", message)]
+    assert "batch record not loaded" in read(result.index)
 
 
 def test_a_batch_file_written_by_the_batch_writer_loads_with_no_errors(tmp_path):

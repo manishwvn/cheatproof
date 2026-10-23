@@ -325,15 +325,18 @@ def _is_not_run(item: Any) -> bool:
         return False
     if not all(isinstance(item[key], str) for key in NOT_RUN_KEYS):
         return False
-    if "cost_usd" in item:
-        cost = item["cost_usd"]
-        return (
-            isinstance(cost, (int, float))
-            and not isinstance(cost, bool)
-            and math.isfinite(cost)
-            and cost >= 0
-        )
-    return True
+    return "cost_usd" not in item or _is_cost(item["cost_usd"])
+
+
+def _is_cost(value: Any) -> bool:
+    """A finite, non-negative number. A huge integer does not convert to float: that is refused, not raised."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        number = float(value)
+    except OverflowError:  # int too large for a float, as in 10**400
+        return False
+    return math.isfinite(number) and number >= 0
 
 
 def _want(condition: bool, message: str) -> None:
