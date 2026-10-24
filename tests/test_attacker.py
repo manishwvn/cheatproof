@@ -5,11 +5,13 @@ import shlex
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
+import openai
 import pytest
 
 from cheatproof import attacker
 from cheatproof.attacker import CAP_RESET_NOTE, NUDGE, AttackConfig, attack, build_tools
-from cheatproof.budget import Budget, BudgetExceeded
+from cheatproof.budget import Budget, BudgetExceeded, create_ledger
 from cheatproof.executor import DiskRefused, ExecutorRefused, ExecutorUnavailable, Result, Session
 from cheatproof.llm import MAX_OUTPUT_TOKENS, GuardedLLM, estimate_tokens
 
@@ -946,7 +948,10 @@ class FakeOpenAIClient:
 
     def _create(self, **kwargs):
         self.requests.append(kwargs)
-        return self.replies.pop(0)
+        item = self.replies.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item
 
 
 def test_attack_through_guarded_llm_and_a_real_budget_ledger(tmp_path, monkeypatch, init_ledger):
@@ -976,6 +981,132 @@ def test_attack_through_guarded_llm_and_a_real_budget_ledger(tmp_path, monkeypat
     assert ledger.exists()
     end = read_trace(trace)[-1]
     assert end["stop_reason"] == "submit" and end["diff_ok"] is True
+
+
+def _guarded_attack(tmp_path, monkeypatch, replies, trace=None, config=CFG):
+    if not (tmp_path / "ledger.json").exists():
+        create_ledger(tmp_path / "ledger.json")
+    monkeypatch.setenv("SPEND_LEDGER", str(tmp_path / "ledger.json"))
+    monkeypatch.setenv("SPEND_CAP_USD", "1")
+    monkeypatch.setenv("DAILY_CAP_USD", "1")
+    monkeypatch.setenv("MODEL_PRICES_JSON", json.dumps({MODEL: [1.0, 2.0]}))
+    budget = Budget.from_env()
+    client = FakeOpenAIClient(replies)
+    llm = GuardedLLM(budget, client=client, sleep=lambda s: None, rand=lambda: 0.0)
+    return attack(llm, FakeSession(), SYSTEM, TASK, config, trace_path=trace), client, budget
+
+
+RETRY_SECRET = "FAKE-PROVIDER-TEXT-do-not-print"
+
+
+def _unavailable():
+    req = httpx.Request("POST", "https://example.invalid/v1/chat/completions")
+    return openai.InternalServerError(
+        f"busy {RETRY_SECRET}", response=httpx.Response(503, request=req), body={"k": RETRY_SECRET}
+    )
+
+
+def _step_estimate(request):
+    return estimate_tokens(request["messages"], request["tools"])
+
+
+def test_t56_transient_503s_are_retried_inside_the_attack_and_counted(tmp_path, monkeypatch, init_ledger):
+    trace = tmp_path / "trace.jsonl"
+    replies = [_unavailable(), _unavailable(), reply(call("submit", {}, "c1"), usage=(150, 10))]
+    result, client, _ = _guarded_attack(tmp_path, monkeypatch, replies, trace)
+    assert result.submitted is True and result.stop_reason == "submit"
+    assert result.llm_retries == 2 and len(client.requests) == 3
+    assert read_trace(trace)[-1]["llm_retries"] == 2
+
+
+def test_t56_three_503s_end_the_attack_as_an_error_after_two_retries(tmp_path, monkeypatch, init_ledger):
+    replies = [_unavailable(), _unavailable(), _unavailable()]
+    result, client, budget = _guarded_attack(tmp_path, monkeypatch, replies)
+    assert result.stop_reason == "error" and result.llm_retries == 2 and len(client.requests) == 3
+    assert result.error == "llm call failed: InternalServerError (HTTP 503)"
+    assert budget.snapshot()["halted"] is None
+
+
+def test_t56_attack_totals_include_the_failed_attempts_at_their_worst_case(
+    tmp_path, monkeypatch, init_ledger
+):
+    trace = tmp_path / "trace.jsonl"
+    replies = [_unavailable(), _unavailable(), reply(call("submit", {}, "c1"), usage=(150, 10))]
+    result, client, _ = _guarded_attack(tmp_path, monkeypatch, replies, trace)
+    est_in, max_out = _step_estimate(client.requests[0]), CFG.max_output_tokens
+    assert result.tokens_in == 150 + 2 * est_in and result.tokens_out == 10 + 2 * max_out
+    step = result.steps[0]
+    assert step["tokens_in"] == 150 + 2 * est_in and step["tokens_out"] == 10 + 2 * max_out
+    end = read_trace(trace)[-1]
+    assert end["tokens_in"] == result.tokens_in and end["tokens_out"] == result.tokens_out
+
+
+def test_t56_an_attack_that_ends_on_exhausted_retries_counts_all_three_attempts(
+    tmp_path, monkeypatch, init_ledger
+):
+    trace = tmp_path / "trace.jsonl"
+    result, client, _ = _guarded_attack(tmp_path, monkeypatch, [_unavailable()] * 3, trace)
+    est_in = _step_estimate(client.requests[0])
+    assert result.stop_reason == "error" and result.llm_retries == 2
+    assert result.tokens_in == 3 * est_in and result.tokens_out == 3 * CFG.max_output_tokens
+    assert RETRY_SECRET not in result.error and RETRY_SECRET not in trace.read_text()
+
+
+def test_t56_failed_attempts_count_toward_max_tokens_total(tmp_path, monkeypatch, init_ledger):
+    run_reply = lambda: reply(call("run", {"cmd": "ls"}, "c1"), usage=(100, 20))
+    # Baseline: no failures. Find what step 2 needs, then give the attack exactly that much room.
+    base, client, _ = _guarded_attack(tmp_path, monkeypatch, [run_reply(), reply(call("submit", {}, "c2"))])
+    assert base.stop_reason == "submit"
+    room = 100 + 20 + _step_estimate(client.requests[1]) + CFG.max_output_tokens
+    exact = AttackConfig(model=MODEL, max_tokens_total=room)
+    sub = tmp_path / "again"
+    sub.mkdir()
+    ok_result, _, _ = _guarded_attack(
+        sub, monkeypatch, [run_reply(), reply(call("submit", {}, "c2"))], config=exact
+    )
+    assert ok_result.stop_reason == "submit"  # with no failed attempt the same room is enough
+    sub2 = tmp_path / "failed"
+    sub2.mkdir()
+    replies = [_unavailable(), _unavailable(), run_reply(), reply(call("submit", {}, "c2"))]
+    result, client2, _ = _guarded_attack(sub2, monkeypatch, replies, config=exact)
+    assert (
+        result.stop_reason == "token_limit" and len(result.steps) == 1
+    )  # the two failed attempts used the room
+    assert len(client2.requests) == 3
+
+
+def test_t56_the_per_attack_retry_ceiling_ends_the_attack_as_an_error(tmp_path, monkeypatch, init_ledger):
+    assert attacker.LLM_RETRY_CEILING == 6
+    replies = []
+    for i in range(5):
+        replies += [_unavailable(), _unavailable(), reply(call("run", {"cmd": "ls"}, f"c{i}"))]
+    replies.append(reply(call("submit", {}, "cs")))
+    result, client, _ = _guarded_attack(tmp_path, monkeypatch, replies)
+    # Four calls of two retries each is 8 > 6: the fifth call is never made.
+    assert result.stop_reason == "error" and result.submitted is False
+    assert result.llm_retries == 8 and len(client.requests) == 12
+    assert "retry ceiling" in result.error
+
+
+def test_t56_the_ceiling_is_not_reached_at_exactly_the_limit(tmp_path, monkeypatch, init_ledger):
+    replies = []
+    for i in range(3):
+        replies += [_unavailable(), _unavailable(), reply(call("run", {"cmd": "ls"}, f"c{i}"))]
+    replies.append(reply(call("submit", {}, "cs")))
+    result, _, _ = _guarded_attack(tmp_path, monkeypatch, replies)
+    assert result.stop_reason == "submit" and result.llm_retries == 6
+
+
+def test_t56_a_402_halts_the_attack_with_no_retry(tmp_path, monkeypatch, init_ledger):
+    req = httpx.Request("POST", "https://example.invalid/v1/chat/completions")
+    gone = openai.APIStatusError("gone", response=httpx.Response(402, request=req), body=None)
+    with pytest.raises(BudgetExceeded):
+        _guarded_attack(tmp_path, monkeypatch, [gone, reply(call("submit"))])
+
+
+def test_t56_a_client_without_a_retry_counter_reports_zero():
+    result, _, _ = go([reply(call("submit"))])
+    assert result.llm_retries == 0
 
 
 def test_tool_output_over_the_configured_limit_is_cut_with_a_marker():

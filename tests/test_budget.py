@@ -1322,7 +1322,9 @@ def test_http_402_the_ledger_cannot_halt_gives_a_fixed_message(tmp_path, monkeyp
 
 def test_a_non_402_llm_error_still_raises_the_sdk_error(tmp_path):
     b = make_budget(tmp_path, total=10, daily=10)
-    llm = GuardedLLM(b, client=fake_client(FakeCompletions(error=status_error(500))))
+    completions = FakeCompletions(error=status_error(500))
+    llm = GuardedLLM(b, client=fake_client(completions), sleep=lambda s: None)  # T56: a 5xx is retried twice
     with pytest.raises(openai.APIStatusError):
         llm.chat("m", [{"role": "user", "content": "hi"}], max_tokens=10)
+    assert completions.calls == 3
     assert b.snapshot()["halted"] is None  # a 5xx halts nothing

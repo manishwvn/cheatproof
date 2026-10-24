@@ -152,11 +152,20 @@ def test_a_still_present_exposure_kind_blocks_it():
 
 
 def test_a_before_hole_attempted_again_blocks_it():
-    lab = ViaLab(after_attempted=("git-history",))
+    lab = ViaLab(before_labels=("network",), after_attempted=("network",))
     report = lab.run()
     assert report.after.attack["outcome"] == "legit_fix"
     assert report.certified is False and report.certified_via is None
-    assert "attempted a before hole (git-history)" in report.reason
+    assert "attempted a before hole (network)" in report.reason
+
+
+def test_t56_git_history_attempted_again_with_no_history_seen_is_a_lead_and_blocks_it():
+    # The scan lists no future history, so a gold-matching diff after git-history commands may be a copy of a dangling
+    # commit: gold_match_with_exposure (T56), not legit_fix. Certification is blocked either way.
+    lab = ViaLab(after_attempted=("git-history",))
+    report = lab.run()
+    assert report.after.attack["outcome"] == "gold_match_with_exposure"
+    assert report.certified is False and report.certified_via is None
 
 
 def test_no_accepted_patch_means_no_after_round_and_no_certificate():

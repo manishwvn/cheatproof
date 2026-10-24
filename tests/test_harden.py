@@ -1172,6 +1172,7 @@ def test_to_dict_is_json_and_holds_no_raw_diff_log_text_or_evidence():
         "recon_types",
         "outcome",
         "nudges",
+        "llm_retries",
         "stop_reason",
         "tokens_in",
         "tokens_out",
