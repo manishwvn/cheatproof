@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import random
@@ -27,12 +28,24 @@ JITTER_S = 1.0
 # and it has already been counted as a rejected prompt. Timeouts and dropped connections (APIConnectionError, which
 # APITimeoutError extends) are retried.
 RETRY_STATUSES = frozenset({500, 502, 503, 504})
+# Worst-case wall time of one chat() call: (MAX_RETRIES + 1) requests of up to REQUEST_TIMEOUT_S each, plus the waits
+# (2 s + 6 s + up to 2 s of jitter): 3 x 120 + 10 = 370 s. CHAT_WALL_CAP_S is the hard limit, checked on the clock before
+# each retry: a retry is not started when its wait plus one more full request would pass the cap.
+REQUEST_TIMEOUT_S = 120.0
+CHAT_WALL_CAP_S = 400.0
 
 
 def _transient(err: BaseException) -> bool:
     if isinstance(err, openai.APIStatusError):
         return err.status_code in RETRY_STATUSES
     return isinstance(err, openai.APIConnectionError)
+
+
+def _tag(err: BaseException, retries: int, failed: int) -> None:
+    """Note on the error how many retries a chat call made and how many attempts failed (see chat_counted)."""
+    with contextlib.suppress(Exception):  # an error that takes no attributes is raised as it is
+        err.llm_retries = retries  # type: ignore[attr-defined]
+        err.llm_failed = failed  # type: ignore[attr-defined]
 
 
 def estimate_tokens(messages: list[dict], tools: list[dict] | None = None) -> int:
@@ -49,18 +62,22 @@ class GuardedLLM:
         max_retries: int = MAX_RETRIES,
         sleep: Callable[[float], None] = time.sleep,
         rand: Callable[[], float] = random.random,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.budget = budget
         self.max_retries = max(0, min(int(max_retries), MAX_RETRIES))  # a cap that can only go down
-        self.retries = 0  # retries made so far, over all calls; the attacker reports the change per attack
+        self.retries = (
+            0  # all retries made so far; a statistic only. Per-call counts come back from chat_counted
+        )
         self._sleep = sleep
         self._rand = rand
+        self._clock = clock
         self._client = client or openai.OpenAI(
             # No SDK retries: each retry could be billed while only one reservation is held.
             base_url=BASE_URL,
             api_key=os.environ["NEBIUS_API_KEY"],
             max_retries=0,
-            timeout=120.0,
+            timeout=REQUEST_TIMEOUT_S,
         )
 
     def list_models(self) -> list[str]:
@@ -69,24 +86,40 @@ class GuardedLLM:
         return [m.id for m in page.data]
 
     def chat(self, model: str, messages: list[dict], max_tokens: int, **kwargs):
+        return self.chat_counted(model, messages, max_tokens, **kwargs)[0]
+
+    def chat_counted(self, model: str, messages: list[dict], max_tokens: int, **kwargs):
+        """chat() that also returns how many retries this one call made: (response, retries). Each retry follows one
+        failed attempt that was reserved and kept at its worst case, so the caller can count them in its own totals.
+        A call that raises tags the error with `llm_retries` (retries made) and `llm_failed` (attempts that failed with
+        a transient error, the last one included when the retries ran out), both ints; callers read them with getattr."""
         if not 0 < max_tokens <= MAX_OUTPUT_TOKENS:
             raise ValueError(f"max_tokens must be 1..{MAX_OUTPUT_TOKENS}")
         if kwargs.keys() - ALLOWED_KWARGS:
             raise ValueError(f"unsupported options: {sorted(kwargs.keys() - ALLOWED_KWARGS)}")
+        started = self._clock()
         attempt = 0
         while True:
             try:
-                return self._chat_once(model, messages, max_tokens, kwargs)
+                return self._chat_once(model, messages, max_tokens, kwargs), attempt
             except Exception as err:
-                # BudgetExceeded (cap, halt, 402) and every 4xx are final: _transient is False for them.
-                if attempt >= self.max_retries or not _transient(err):
+                transient = _transient(err)
+                delay = RETRY_DELAYS_S[min(attempt, len(RETRY_DELAYS_S) - 1)] + JITTER_S * min(
+                    1.0, max(0.0, self._rand())
+                )
+                # BudgetExceeded (cap, halt, 402) and every 4xx are final: _transient is False for them. A retry that
+                # could not finish inside the wall-clock cap is not started.
+                over_clock = self._clock() - started + delay + REQUEST_TIMEOUT_S > CHAT_WALL_CAP_S
+                if attempt >= self.max_retries or not transient or over_clock:
+                    _tag(err, attempt, attempt + (1 if transient else 0))
                     raise
                 failed = type(err).__name__
             # Outside the except block, so a halt raised below carries no SDK error as its context.
-            self.budget.check_not_halted()  # a halt set meanwhile stops the retry before it waits
-            delay = RETRY_DELAYS_S[min(attempt, len(RETRY_DELAYS_S) - 1)] + JITTER_S * min(
-                1.0, max(0.0, self._rand())
-            )
+            try:
+                self.budget.check_not_halted()  # a halt set meanwhile stops the retry before it waits
+            except BudgetExceeded as halted:
+                _tag(halted, attempt, attempt)
+                raise
             attempt += 1
             self.retries += 1
             # Class name and attempt number only: never the message, the request or the provider text.

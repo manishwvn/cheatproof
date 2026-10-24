@@ -8,7 +8,7 @@ import openai
 import pytest
 
 from cheatproof import llm as llm_module
-from cheatproof.budget import Budget, BudgetExceeded, Price
+from cheatproof.budget import Budget, BudgetExceeded, Price, create_ledger
 from cheatproof.llm import MAX_RETRIES, GuardedLLM
 
 pytestmark = pytest.mark.usefixtures("init_ledger")
@@ -101,6 +101,69 @@ def test_503_three_times_stops_after_two_retries_and_raises_the_last_error(tmp_p
     assert script.calls == 3 and llm.retries == 2 and len(reserves) == 3 and len(sleeps) == 2
     assert budget.snapshot()["halted"] is None
     assert budget.snapshot()["total_usd"] == pytest.approx(3 * one_hold_usd())  # nothing refunded
+
+
+def test_the_error_after_the_last_failed_attempt_is_tagged_and_stderr_has_no_sdk_text(tmp_path, capsys):
+    script = Script(unavailable(), unavailable(), unavailable())
+    _, llm, _ = make(tmp_path, script)
+    with pytest.raises(openai.InternalServerError) as raised:
+        llm.chat("m", MESSAGES, max_tokens=100)
+    assert raised.value.llm_retries == 2 and raised.value.llm_failed == 3
+    err = capsys.readouterr().err
+    assert SECRET not in err and "err " not in err and "example.invalid" not in err
+    assert err.count("llm retry") == 2
+
+
+def test_chat_counted_returns_the_retries_of_that_call_only(tmp_path):
+    script = Script(unavailable(), unavailable(), ok(), ok())
+    _, llm, _ = make(tmp_path, script)
+    assert llm.chat_counted("m", MESSAGES, max_tokens=10)[1] == 2
+    assert llm.chat_counted("m", MESSAGES, max_tokens=10)[1] == 0  # not a running total
+    assert llm.retries == 2
+
+
+def test_errors_that_are_not_retried_are_tagged_with_what_was_retried_before(tmp_path):
+    script = Script(unavailable(), status(402))
+    _, llm, _ = make(tmp_path, script)
+    with pytest.raises(BudgetExceeded) as raised:
+        llm.chat("m", MESSAGES, max_tokens=10)
+    assert raised.value.llm_retries == 1 and raised.value.llm_failed == 1
+    other = tmp_path / "other"  # the first call halted this ledger, so the 401 gets a new one
+    other.mkdir()
+    create_ledger(other / "ledger.json")
+    script = Script(status(401))
+    _, llm, _ = make(other, script)
+    with pytest.raises(openai.APIStatusError) as raised:
+        llm.chat("m", MESSAGES, max_tokens=10)
+    assert raised.value.llm_retries == 0 and raised.value.llm_failed == 0
+
+
+def test_the_wall_clock_cap_stops_a_retry_that_could_not_finish_in_time(tmp_path):
+    assert (
+        3 * llm_module.REQUEST_TIMEOUT_S + 10 <= llm_module.CHAT_WALL_CAP_S
+    )  # the documented worst case fits
+    now = [0.0]
+    script = Script(unavailable(), ok(), on_call=lambda n: now.__setitem__(0, now[0] + 300.0))
+    budget = make_budget(tmp_path)
+    sleeps: list[float] = []
+    client = SimpleNamespace(chat=SimpleNamespace(completions=script))
+    llm = GuardedLLM(budget, client=client, sleep=sleeps.append, rand=lambda: 0.0, clock=lambda: now[0])
+    with pytest.raises(openai.InternalServerError) as raised:
+        llm.chat("m", MESSAGES, max_tokens=10)
+    # 300 s gone, plus the 2 s wait, plus a full 120 s request would pass 400 s: no retry is started.
+    assert (
+        script.calls == 1 and sleeps == [] and raised.value.llm_retries == 0 and raised.value.llm_failed == 1
+    )
+
+
+def test_a_retry_that_fits_the_wall_clock_cap_runs(tmp_path):
+    now = [0.0]
+    script = Script(unavailable(), ok(), on_call=lambda n: now.__setitem__(0, now[0] + 100.0))
+    budget = make_budget(tmp_path)
+    client = SimpleNamespace(chat=SimpleNamespace(completions=script))
+    llm = GuardedLLM(budget, client=client, sleep=lambda s: None, rand=lambda: 0.0, clock=lambda: now[0])
+    llm.chat("m", MESSAGES, max_tokens=10)
+    assert script.calls == 2
 
 
 @pytest.mark.parametrize("code", [500, 502, 503, 504])
