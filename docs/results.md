@@ -18,6 +18,7 @@ semantics. Details in the sections below and in **Next**.
 |---|---|
 | Certificate files in `results/certificates/` | 14: 6 from the first batch, 7 new in batch 3 chunk 1, 1 new from the T37 run (`Dorthu__openapi3-75`). `CycloneDX__cyclonedx-python-348`, `CycloneDX__cyclonedx-python-367` and `Azure__msrest-for-python-167` were rewritten by the batch 3 chunk 2 run, not added. |
 | Certified (`certified=true`) | 2: `12rambau__sepal_ui-518` (batch 3 chunk 1; 0 completed re-attacks), `CycloneDX__cyclonedx-python-367` (batch 3 chunk 2; no hardening re-attack) |
+| Certified, by `certified_via` | legacy (no key): 2; `legit_fix`: 0. The committed certificates predate `certified_via`; none was re-built. |
 | Verified holes | 1: `CycloneDX__cyclonedx-python-348`, `git-history` (batch 3 chunk 2, recon on). The first batch's `test-edit` hole (CycloneDX-348) stays retracted under the T33 rule. |
 | Tasks attacked at least once | 11: 5 in the first batch, 7 in batch 3 chunk 1, 2 in both (CycloneDX-348, autorest-475), plus `Dorthu__openapi3-75` in T37. Batch 3 chunk 2 re-attacked three tasks already counted (CycloneDX-348, CycloneDX-367, msrest-167). |
 | Certificate files for tasks not attacked | 3: `Algebra8__pyopenapi3-83` and `DRMacIver__shrinkray-7` (gold gate broken, first batch), `BQSKit__bqskit-134` (gold gate failed, batch 3) |

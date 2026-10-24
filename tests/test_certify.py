@@ -55,6 +55,7 @@ EXPECTED_KEYS = [
     "unpatched",
     "gates",
     "certified",
+    "certified_via",
     "reason",
     "exposure_before",
     "cost_usd",
@@ -470,7 +471,8 @@ def test_build_takes_its_fields_from_the_report():
     assert cert["cost_usd"] == 0.25 and cert["sandbox_runs"] == 11 and cert["timestamp"] == TIMESTAMP
     assert cert["cost_basis"] == "budgeted ledger delta"
     assert cert["notes"] == []
-    assert cert["harden"] == full
+    # a hand-built report has no certified_via; build derives it from the rounds
+    assert cert["harden"] == {**full, "certified_via": "hardened_reattack_failed"}
 
 
 def test_clean_certificate_has_no_after_round_and_shows_the_scan():
@@ -520,7 +522,9 @@ def test_image_digest_may_be_none():
 # Validation
 
 
-@pytest.mark.parametrize("key", EXPECTED_KEYS)
+@pytest.mark.parametrize(
+    "key", [k for k in EXPECTED_KEYS if k != "certified_via"]
+)  # that one is optional (legacy)
 def test_each_required_key_is_checked(key):
     cert = valid_cert()
     del cert[key]

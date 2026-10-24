@@ -744,6 +744,7 @@ def _score_section(summary: Mapping[str, Any], excluded: int, batch: _Batch, loa
                     "Certified, attacker succeeded before patching and the patches held (certified_hardened)",
                     summary.get("certified_hardened"),
                 ),
+                *_via_rows(summary.get("certified_via")),
                 ("Inconclusive", summary["inconclusive"]),
                 (
                     "No attempt, attacker never tried (no_attempt, also counted in the outcomes)",
@@ -796,6 +797,7 @@ def _environments_section(entries: Sequence[_Entry]) -> str:
                 _gates_text(gates["before"]),
                 _gates_text(gates["after"]),
                 cert["certified"],
+                _via_cell(cert),
                 _money(cert["cost_usd"]),
             )
         )
@@ -809,12 +811,18 @@ def _environments_section(entries: Sequence[_Entry]) -> str:
         "Gates before (gold, empty)",
         "Gates after",
         "Certified",
+        "Via",
         "Cost (USD)",
     )
     return _section(
         "environments",
         "Environments",
-        _table("One row per environment. Certified means not hackable by this attacker.", headers, rows),
+        _table(
+            "One row per environment. Certified means no hole left that this attacker could use (via: how it was "
+            "certified). It is not a claim that the task is secure.",
+            headers,
+            rows,
+        ),
     )
 
 
@@ -846,6 +854,7 @@ def _env_body(cert: Mapping[str, Any], transcript: str, diffs: Mapping[str, str 
                 "No live calls were made.</p>"
             ),
             _result_section(cert),
+            _before_after_section(cert),
             _task_section(cert),
             _attacker_section(cert["attacker"]),
             _gates_section(cert["harden"]),
@@ -855,6 +864,124 @@ def _env_body(cert: Mapping[str, Any], transcript: str, diffs: Mapping[str, str 
             _rounds_section(cert["harden"], diffs or {}),
             _section("transcript", "Transcript", transcript),
         ]
+    )
+
+
+VIA_PLAIN = {
+    "no_hole_found": "no hole found: the attacker failed before any patch",
+    "hardened_reattack_failed": "hole closed: the attacker failed after hardening",
+    "legit_fix": "hole closed, task still solvable: the attacker submitted a real fix after hardening",
+}
+
+
+def _via_cell(cert: Mapping[str, Any]) -> str:
+    """The short certified_via for the index: the value, legacy when the key is absent, a dash when not certified."""
+    if "certified_via" not in cert:
+        return "legacy" if cert.get("certified") else "none"
+    return cert["certified_via"] or "none"
+
+
+def _via_rows(counts: Any) -> list[tuple[str, Any]]:
+    """Summary rows for the certified_via split. Empty when the score has none (an older score dict)."""
+    counts = _map(counts)
+    if not counts:
+        return []
+    return [
+        (f"Certified via {name} (also counted in Certified)", counts.get(name))
+        for name in ("no_hole_found", "hardened_reattack_failed", "legit_fix", "legacy")
+    ]
+
+
+def _via_text(cert: Mapping[str, Any]) -> str:
+    """certified_via as recorded, with plain words. A certificate written before T50 has none."""
+    if "certified_via" not in cert:
+        return "not recorded (certificate written before certified_via)"
+    via = cert["certified_via"]
+    if via is None:
+        return "none (not certified)"
+    return f"{via}: {VIA_PLAIN.get(via, 'unknown value')}"
+
+
+def _found_how(attack: Mapping[str, Any]) -> str:
+    """How the before attack ended: a real submit, or an auto-submit of the working diff at a step or token limit."""
+    if attack.get("auto_submitted") is True:
+        return f"auto_submitted at {attack.get('stop_reason')}"
+    if attack.get("submitted") is True:
+        return "submit"
+    return f"not submitted ({attack.get('stop_reason')})"
+
+
+def _after_outcome(rnd: Mapping[str, Any]) -> str:
+    """The re-attack's result in plain words, from the recorded round. No diff text."""
+    attack, holes = _map(rnd.get("attack")), _map(rnd.get("holes"))
+    if rnd.get("error"):
+        return "round error"
+    if rnd.get("no_attempt"):
+        return "no attempt"
+    if holes.get("exploited") is True:
+        return f"hole still found ({_value(holes.get('labels'))})"
+    if attack.get("outcome") == "legit_fix":
+        return "legit_fix (passed the hidden tests like the gold fix; not an exploit)"
+    if rnd.get("inconclusive"):
+        return "inconclusive"
+    return "failed (did not pass the hidden tests)"
+
+
+def _attempted_again(before_holes: Mapping[str, Any], after: Mapping[str, Any]) -> str:
+    """yes when the after attack's attempted labels name a before hole label, else none."""
+    earlier, attempted = before_holes.get("labels"), _map(after.get("holes")).get("attempted")
+    if not isinstance(earlier, list) or not isinstance(attempted, list):
+        return "not recorded"
+    return "yes" if set(earlier) & set(attempted) else "none"
+
+
+def _before_after_section(cert: Mapping[str, Any]) -> str:
+    """The before -> after panel for a hardened task. Empty for a task with no after round. It shows labels, tags
+    and counts only, never diff text, and says "against this attacker" because that is all the evidence is."""
+    harden = _map(cert.get("harden"))
+    before, after = _map(harden.get("before")), _map(harden.get("after"))
+    if not after:
+        return ""
+    before_holes, before_attack = _map(before.get("holes")), _map(before.get("attack"))
+    scan = _map(after.get("exposure"))
+    scan_holes = scan.get("holes")
+    exposure = (
+        "not recorded" if not isinstance(scan_holes, list) else ("clean" if not scan_holes else scan_holes)
+    )
+    gates_ok = _map(after.get("gates")).get("ok")
+    closed = (
+        _map(after.get("attack")).get("outcome") == "legit_fix" and cert.get("certified_via") == "legit_fix"
+    )
+    lead = (
+        "Hole closed, task still solvable: after hardening the attacker submitted a fix that passes the hidden "
+        "tests like the gold fix. Closure is shown by the exposure scan; the re-attack found no way back in. "
+        "This holds against this attacker only."
+        if closed
+        else "Before and after hardening, as recorded. Results hold against this attacker only."
+    )
+    return _section(
+        "before-after",
+        "Before and after hardening",
+        f"<p>{_cell(lead)}</p>",
+        _kv_table(
+            "Before: the hole the attacker found",
+            [
+                ("Hole labels", before_holes.get("labels")),
+                ("Recon", before_attack.get("recon") or "none"),
+                ("How it was found", _found_how(before_attack)),
+                ("Patches applied", harden.get("accepted")),
+            ],
+        ),
+        _kv_table(
+            "After: the same attacker, hardened task",
+            [
+                ("Exposure scan", exposure),
+                ("Gates held", gates_ok),
+                ("Re-attack outcome", _after_outcome(after)),
+                ("Earlier hole attempted again", _attempted_again(before_holes, after)),
+                ("Certified via", _via_text(cert)),
+            ],
+        ),
     )
 
 
@@ -870,6 +997,7 @@ def _result_section(cert: Mapping[str, Any]) -> str:
             "Certificate summary",
             [
                 ("Certified", cert["certified"]),
+                ("Certified via", _via_text(cert)),
                 ("Reason", cert["reason"]),
                 ("Cost (USD)", _money_basis(cert["cost_usd"], cert.get("cost_basis"))),
                 ("Timestamp", cert["timestamp"]),
