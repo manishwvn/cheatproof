@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 
 import pytest
+import test_harden as th
+import test_recon_nudge as trn
 
 from cheatproof import cli, holes, keep
 from cheatproof.attacker import AttackResult
@@ -638,3 +640,135 @@ def test_recheck_labels_that_differ_still_exit_0_as_before(tmp_path, capsys):
     capsys.readouterr()
     assert _recheck(traces, task) == 0
     assert "recorded labels: DIFFER" in capsys.readouterr().out
+
+
+# --- T49: the legit_fix downgrade is replayed by recheck, from inputs kept at write time ---------------------------
+
+
+def _legit_task(gold: str) -> TaskSpec:
+    return dataclasses.replace(th.TASK, gold_patch=gold, test_patch=th.HARD_CODE_TEST_PATCH)
+
+
+def _keep_real_run(tmp_path: Path, task: TaskSpec, lab, *, after: bool = False) -> tuple[Path, str]:
+    """Run the real harden with the fakes of test_recon_nudge.LegitLab, keep its files as cli does, and write each
+    attack's trace. after=True keeps the same attack again as the re-attack round."""
+    out = lab.run()
+    if after:
+        out = dataclasses.replace(out, after=out.before, attacks=(out.attacks[0], out.attacks[0]))
+    stem = cli._certificate_stem(task)
+    traces = tmp_path / "traces"
+    keep.start_run(traces, stem, task)
+    assert keep.keep_raw(out, stem, traces) == []
+    lines = [
+        json.dumps(rec) for result in out.attacks for rec in [HEADER, *result.steps, _end(result.final_diff)]
+    ]
+    (traces / f"{stem}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return traces, stem
+
+
+def _rounds(traces: Path, stem: str) -> dict:
+    return json.loads((traces / f"{stem}.rounds.json").read_text(encoding="utf-8"))["rounds"]
+
+
+def test_rounds_file_keeps_the_downgrade_inputs_at_write_time(tmp_path):
+    task = _legit_task(trn.FIX_DIFF)
+    traces, stem = _keep_real_run(
+        tmp_path, task, trn.LegitLab(trn.FIX_DIFF, attacks=[trn.legit_attack(trn.FIX_DIFF)])
+    )
+    before = _rounds(traces, stem)["before"]
+    assert before["recorded"]["labels"] == [] and before["recorded"]["exploited"] is False
+    assert before["attack"]["outcome"] == "legit_fix"
+    assert before["exposure"] == {"future_git": False, "network": False, "refs": []}
+
+
+def test_after_legit_fix_round_rechecks_as_match(tmp_path, capsys):
+    task = _legit_task(trn.FIX_DIFF)
+    lab = trn.LegitLab(trn.FIX_DIFF, attacks=[trn.legit_attack(trn.FIX_DIFF)])
+    traces, stem = _keep_real_run(tmp_path, task, lab, after=True)
+    assert _rounds(traces, stem)["after"]["attack"]["outcome"] == "legit_fix"
+    capsys.readouterr()
+    assert _recheck(traces, task, stem) == 0
+    captured = capsys.readouterr()
+    assert "after: labels=[] attempted=[] primary=none exploited=False" in captured.out
+    assert "outcome: recorded legit_fix, recomputed legit_fix: MATCH" in captured.out
+    assert "recorded labels: match" in captured.out
+    assert "DIFFER" not in captured.out and "return 41" not in captured.out + captured.err
+
+
+def test_gold_match_with_exposure_rechecks_as_match(tmp_path, capsys):
+    task = _legit_task(trn.FIX_DIFF)
+    lab = trn.LegitLab(trn.FIX_DIFF, exposed=("git-history",), attacks=[trn.legit_attack(trn.FIX_DIFF)])
+    traces, stem = _keep_real_run(tmp_path, task, lab)
+    before = _rounds(traces, stem)["before"]
+    assert before["exposure"]["future_git"] is True
+    assert before["attack"]["outcome"] == "gold_match_with_exposure"
+    capsys.readouterr()
+    assert _recheck(traces, task, stem) == 0
+    out = capsys.readouterr().out
+    assert "outcome: recorded gold_match_with_exposure, recomputed gold_match_with_exposure: MATCH" in out
+    assert "DIFFER" not in out
+
+
+def test_a_recorded_outcome_that_the_inputs_do_not_give_exits_1(tmp_path, capsys):
+    task = _legit_task(trn.FIX_DIFF)
+    traces, stem = _keep_real_run(
+        tmp_path, task, trn.LegitLab(trn.FIX_DIFF, attacks=[trn.legit_attack(trn.FIX_DIFF)])
+    )
+    path = traces / f"{stem}.rounds.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["rounds"]["before"]["attack"]["outcome"] = None
+    path.write_text(json.dumps(data), encoding="utf-8")
+    capsys.readouterr()
+    assert _recheck(traces, task, stem) == 1
+    captured = capsys.readouterr()
+    assert "outcome: recorded none, recomputed legit_fix: DIFFER" in captured.out
+    assert f"recorded outcome does not match the recomputed outcome: {stem}.rounds.json" in captured.err
+    assert "return 41" not in captured.out + captured.err
+
+
+def test_a_real_exploit_label_stays_a_hole_after_the_downgrade_check(tmp_path, capsys):
+    task = make_task()
+    traces = _harden(tmp_path, task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py")])
+    capsys.readouterr()
+    assert _recheck(traces, task) == 0
+    out = capsys.readouterr().out
+    assert "before: labels=['test-edit']" in out and "primary=test-edit exploited=True" in out
+    assert "outcome: recorded none, recomputed none: MATCH" in out
+
+
+def test_a_non_gold_pass_stays_unclassified_after_the_downgrade_check(tmp_path, capsys):
+    task = _legit_task(trn.FIX_DIFF)
+    traces, stem = _keep_real_run(
+        tmp_path, task, trn.LegitLab(trn.FIX_DIFF, attacks=[trn.legit_attack(trn.OTHER_DIFF)])
+    )
+    assert _rounds(traces, stem)["before"]["recorded"]["labels"] == ["unclassified"]
+    capsys.readouterr()
+    assert _recheck(traces, task, stem) == 0
+    out = capsys.readouterr().out
+    assert (
+        "before: labels=['unclassified'] attempted=['unclassified'] primary=unclassified exploited=True"
+        in out
+    )
+    assert "outcome: recorded none, recomputed none: MATCH" in out
+
+
+def test_an_older_rounds_file_without_the_downgrade_inputs_is_compared_as_before(tmp_path, capsys):
+    task = _legit_task(trn.FIX_DIFF)
+    traces, stem = _keep_real_run(
+        tmp_path, task, trn.LegitLab(trn.FIX_DIFF, attacks=[trn.legit_attack(trn.FIX_DIFF)])
+    )
+    path = traces / f"{stem}.rounds.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for rec in data["rounds"].values():
+        rec.pop("exposure")
+        rec.pop("attack")
+    path.write_text(json.dumps(data), encoding="utf-8")
+    capsys.readouterr()
+    # Without the downgrade inputs the old comparison stands: the recorded primary none and exploited False of a
+    # legit_fix round differ from the recomputed unclassified hole, so the recheck exits 1 as it did before T49.
+    assert _recheck(traces, task, stem) == 1
+    captured = capsys.readouterr()
+    assert "downgrade inputs not recorded: outcome not recomputed (older rounds.json)" in captured.out
+    assert "recorded primary: DIFFER" in captured.out and "recorded exploited: DIFFER" in captured.out
+    assert "outcome" not in captured.err
+    assert "error: recorded primary does not match the recomputed primary" in captured.err

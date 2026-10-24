@@ -7,15 +7,17 @@ the certificate's file stem:
 - <stem>.after.diff       the RAW attack diff of the re-attack round (only when that round ran an attack)
 - <stem>.diff             the RAW final diff: the last round's attack diff
 - <stem>.restore.json     the task's restore set (grader.restore_paths), written before the paid run
-- <stem>.rounds.json      per round: the grade inputs classify was given and the labels harden recorded
+- <stem>.rounds.json      per round: the grade inputs classify was given, the labels harden recorded, the exposure
+                          flags and refs classify was given, and the attack summary's auto_submitted and outcome (T49)
 
 Nothing here is ever committed (results/traces/ is in .gitignore, and `git add -f` is denied). A file already there
 is renamed to <name>.<UTC time>.old, never overwritten.
 
 recheck() re-runs holes.classify on the kept diff, trace and restore set with no network, sandbox, model or budget.
-It compares the recomputed labels, primary and exploited with those recorded in rounds.json. Older files that do not
-record primary or exploited are compared on labels only. render() prints labels and test path names only, never diff
-text.
+It compares the recomputed labels, primary and exploited with those recorded in rounds.json, then applies the same
+legit_fix rule as harden (holes.downgrade_legit_fix) and compares the recomputed outcome with the recorded one. Older
+files that do not record the exposure and attack inputs are compared on labels, primary and exploited only. render()
+prints labels, outcomes and test path names only, never diff text.
 """
 
 from __future__ import annotations
@@ -164,6 +166,8 @@ def _round_inputs(rnd: Any, result: Any) -> dict[str, Any]:
         hidden = False
         visible = _visible_passed(rnd.gates.empty)
     recorded = rnd.holes
+    exposure = rnd.exposure
+    attack = rnd.attack or {}
     return {
         "hidden_passed": hidden,
         "visible_passed": visible,
@@ -177,6 +181,13 @@ def _round_inputs(rnd: Any, result: Any) -> dict[str, Any]:
             "primary": recorded.primary,
             "exploited": recorded.exploited,
         },
+        # T49: the inputs of the legit_fix rule and of classify's exposure_refs, as harden had them for this round.
+        "exposure": {
+            "future_git": exposure is not None and bool(exposure.future_git),
+            "network": exposure is not None and bool(exposure.network),
+            "refs": [] if exposure is None else [str(ref) for ref in exposure.future_git_evidence],
+        },
+        "attack": {"auto_submitted": bool(attack.get("auto_submitted")), "outcome": attack.get("outcome")},
     }
 
 
@@ -250,9 +261,18 @@ class RoundCheck:
     matches: bool | None  # recomputed labels equal the recorded ones; None when none were recorded
     primary_ok: bool | None = None  # recomputed primary equals the recorded one; None when not recorded
     exploited_ok: bool | None = None  # recomputed exploited equals the recorded one; None when not recorded
+    recorded_outcome: str | None = (
+        None  # attack summary outcome harden recorded (legit_fix, gold_match_with_exposure)
+    )
+    outcome: str | None = None  # the outcome recomputed with the same rule as harden
+    outcome_ok: bool | None = None  # None when the downgrade inputs were not recorded (older rounds.json)
 
 
-GRADED_FIELDS = ("primary", "exploited")  # rounds.json fields a recheck must reproduce; a mismatch exits 1
+GRADED_FIELDS = (
+    "primary",
+    "exploited",
+    "outcome",
+)  # rounds.json fields a recheck must reproduce; a mismatch exits 1
 
 
 def _read_json(path: Path, what: str) -> Any:
@@ -331,6 +351,7 @@ def recheck(traces_dir: Path, stem: str, task: TaskSpec) -> list[RoundCheck]:
         diff: str | None = None
         if rec.get("has_diff"):
             diff = (traces_dir / f"{stem}.{name}.diff").read_text(encoding="utf-8", errors="replace")
+        inputs = _downgrade_inputs(rec, stem)
         report = holes.classify(
             segments[index],
             diff,
@@ -339,6 +360,7 @@ def recheck(traces_dir: Path, stem: str, task: TaskSpec) -> list[RoundCheck]:
             hidden_passed=rec.get("hidden_passed"),
             grader_labels=tuple(rec.get("grader_labels") or ()),
             restored=paths,
+            exposure_refs=() if inputs is None else inputs[0]["refs"],
         )
         if rec.get("no_attempt"):
             # harden clears the labels of an attack that made no attempt; the evidence stays in attempted.
@@ -352,6 +374,14 @@ def recheck(traces_dir: Path, stem: str, task: TaskSpec) -> list[RoundCheck]:
                 skipped_records=report.skipped_records,
                 notes=report.notes,
             )
+        outcome: str | None = None
+        if inputs is not None:
+            # T49: the same rule harden applies after classify, with the round's recorded exposure flags.
+            exposure, _ = inputs
+            report, verdict = holes.downgrade_legit_fix(
+                report, diff, task, future_git=exposure["future_git"], network=exposure["network"]
+            )
+            outcome = None if verdict is None else verdict[0]
         recorded = rec.get("recorded")
         matches = None if recorded is None else list(report.labels) == recorded.get("labels")
         test_paths = tuple(holes.diff_test_paths(diff, task, paths))
@@ -364,9 +394,30 @@ def recheck(traces_dir: Path, stem: str, task: TaskSpec) -> list[RoundCheck]:
                 matches,
                 primary_ok=_recorded_equal(recorded, "primary", report.primary),
                 exploited_ok=_recorded_equal(recorded, "exploited", report.exploited),
+                recorded_outcome=None if inputs is None else inputs[1]["outcome"],
+                outcome=outcome,
+                outcome_ok=None if inputs is None else inputs[1]["outcome"] == outcome,
             )
         )
     return checks
+
+
+def _downgrade_inputs(rec: dict[str, Any], stem: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """The exposure flags and refs, and the attack summary, harden had for one round (T49). None when rounds.json
+    predates them: the outcome is then not recomputed. KeepError when they are present but unreadable."""
+    exposure = rec.get("exposure")
+    attack = rec.get("attack")
+    if not (isinstance(exposure, dict) and isinstance(attack, dict) and "outcome" in attack):
+        return None
+    refs = exposure.get("refs")
+    if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
+        raise KeepError(f"unreadable round record: {stem}.rounds.json")
+    flags = {
+        "future_git": bool(exposure.get("future_git")),
+        "network": bool(exposure.get("network")),
+        "refs": refs,
+    }
+    return flags, attack
 
 
 def _recorded_equal(recorded: dict[str, Any] | None, field: str, value: Any) -> bool | None:
@@ -381,7 +432,11 @@ def mismatched_fields(checks: list[RoundCheck]) -> list[str]:
     found = {
         field
         for check in checks
-        for field, ok in (("primary", check.primary_ok), ("exploited", check.exploited_ok))
+        for field, ok in (
+            ("primary", check.primary_ok),
+            ("exploited", check.exploited_ok),
+            ("outcome", check.outcome_ok),
+        )
         if ok is False
     }
     return [field for field in GRADED_FIELDS if field in found]
@@ -420,4 +475,15 @@ def render(stem: str, checks: list[RoundCheck]) -> list[str]:
             state = "match" if check.matches else "DIFFER"
             lines.append(f"  recorded labels: {state} {check.recorded.get('labels')}")
         lines.extend(_field_lines(check))
+        lines.extend(_outcome_lines(check))
     return lines
+
+
+def _outcome_lines(check: RoundCheck) -> list[str]:
+    """T49: the recorded and the recomputed outcome (legit_fix, gold_match_with_exposure or none), and MATCH or DIFFER."""
+    if check.outcome_ok is None:
+        return ["  downgrade inputs not recorded: outcome not recomputed (older rounds.json)"]
+    state = "MATCH" if check.outcome_ok else "DIFFER"
+    recorded = check.recorded_outcome or "none"
+    recomputed = check.outcome or "none"
+    return [f"  outcome: recorded {recorded}, recomputed {recomputed}: {state}"]
