@@ -1,0 +1,44 @@
+{
+  "base_commit": "0e02198948258b69e666f53aa2b22fcf4da62f97",
+  "closed": true,
+  "closed_reason": null,
+  "executor": "sandbox",
+  "fix_reachable": true,
+  "fix_reachable_basis": "5 of 5 gold source lines found in future commits",
+  "future_commits_after": 0,
+  "future_commits_before": 59,
+  "future_scan": {
+    "commit_ids": [
+      "d092bf3081d1",
+      "6e3d2bc10d53",
+      "3aab305c4d4a",
+      "7e67af3ec097",
+      "edd230abd2bc",
+      "61a1eb1cd03a",
+      "02de4c556eba"
+    ],
+    "commits_scanned": 7,
+    "complete": true,
+    "gold_added_lines": 5,
+    "gold_lines_in_future": 5,
+    "gold_paths_touched_by_future_commits": 1,
+    "lines": 11,
+    "list_complete": true,
+    "paths": [
+      "openapi3/openapi.py"
+    ]
+  },
+  "instance_id": "Dorthu__openapi3-75",
+  "patch": {
+    "applied": true,
+    "empty_gate_ok": true,
+    "gold_gate_ok": true,
+    "name": "strip-future-git"
+  },
+  "refs_before": 49,
+  "repo": "Dorthu/openapi3",
+  "sandbox_runs": 5,
+  "schema": "rewardseal.exposure-audit",
+  "schema_version": 1,
+  "timestamp": "2026-10-24T16:29:10.986330+00:00"
+}

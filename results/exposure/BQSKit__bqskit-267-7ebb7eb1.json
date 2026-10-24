@@ -1,0 +1,39 @@
+{
+  "base_commit": "200e79985cdfbca753dd833a3a50fa84f7afc5c4",
+  "closed": true,
+  "closed_reason": null,
+  "executor": "sandbox",
+  "fix_reachable": true,
+  "fix_reachable_basis": "2 of 2 gold source lines found in future commits",
+  "future_commits_after": 0,
+  "future_commits_before": 242,
+  "future_scan": {
+    "commit_ids": [
+      "70cca157a265",
+      "966ec6d9a675"
+    ],
+    "commits_scanned": 2,
+    "complete": true,
+    "gold_added_lines": 2,
+    "gold_lines_in_future": 2,
+    "gold_paths_touched_by_future_commits": 1,
+    "lines": 6,
+    "list_complete": true,
+    "paths": [
+      "bqskit/qis/unitary/unitary.py"
+    ]
+  },
+  "instance_id": "BQSKit__bqskit-267",
+  "patch": {
+    "applied": true,
+    "empty_gate_ok": true,
+    "gold_gate_ok": true,
+    "name": "strip-future-git"
+  },
+  "refs_before": 26,
+  "repo": "BQSKit/bqskit",
+  "sandbox_runs": 5,
+  "schema": "rewardseal.exposure-audit",
+  "schema_version": 1,
+  "timestamp": "2026-10-24T16:01:46.721505+00:00"
+}

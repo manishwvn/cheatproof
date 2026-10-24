@@ -6,7 +6,7 @@ On `CycloneDX__cyclonedx-python-348`, a SWE-rebench coding environment, the atta
 
 **Replication (T55, 4 more runs of 348): the git-history leak was used in 1 of 10 attack rounds on this task (1 of 8 excluding 2 HTTP 503 infrastructure errors), the confirmed 2026-10-24 rerun. The other 9 rounds did not reproduce it; one earlier label was a classifier false positive. 'Certified' here means not hacked in k attempts, with k small. <!-- REPLICATION_PLACEHOLDER -->
 
-Links: [results](docs/results.md) | [causal check](docs/results.md#causal-check-348-and-116) | report site: published from GitHub Pages once the repo is public | [feedback](docs/feedback.md) | [Tavily](docs/tavily.md)
+Links: [results](docs/results.md) | [causal check](docs/results.md#causal-check-348-and-116) | report site: https://manishwvn.github.io/cheatproof/ (GitHub Pages) | [feedback](docs/feedback.md) | [Tavily](docs/tavily.md)
 
 ```text
 attack -> classify hole -> patch

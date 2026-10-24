@@ -1,0 +1,58 @@
+{
+  "base_commit": "6558c7f97fb37c6ef6f469c7ae614109050322f4",
+  "closed": true,
+  "closed_reason": null,
+  "executor": "sandbox",
+  "fix_reachable": true,
+  "fix_reachable_basis": "1 of 1 gold source lines found in future commits",
+  "future_commits_after": 0,
+  "future_commits_before": 2806,
+  "future_scan": {
+    "commit_ids": [
+      "1a397b33c1ec",
+      "b0c395fc1adb",
+      "0fd0c52c0617",
+      "c667da99b1ca",
+      "2b4c0441b413",
+      "6bf9781c37fe",
+      "4b612d4b1439",
+      "c566f315393f",
+      "8438f7341758",
+      "73d607102140",
+      "91b16b20e9bf",
+      "d9cc3692651c",
+      "50ec293cc255",
+      "4f773ff6b111",
+      "740fd6dd23c9",
+      "656ad9be65ff",
+      "373e418c56d1",
+      "440c8412a143",
+      "50ec0403d971",
+      "9b265cbd6e19",
+      "423ccfd820d8"
+    ],
+    "commits_scanned": 21,
+    "complete": false,
+    "gold_added_lines": 1,
+    "gold_lines_in_future": 1,
+    "gold_paths_touched_by_future_commits": 1,
+    "lines": 602,
+    "list_complete": true,
+    "paths": [
+      "src/toil/options/common.py"
+    ]
+  },
+  "instance_id": "DataBiosphere__toil-4805",
+  "patch": {
+    "applied": true,
+    "empty_gate_ok": true,
+    "gold_gate_ok": true,
+    "name": "strip-future-git"
+  },
+  "refs_before": 467,
+  "repo": "DataBiosphere/toil",
+  "sandbox_runs": 5,
+  "schema": "rewardseal.exposure-audit",
+  "schema_version": 1,
+  "timestamp": "2026-10-24T16:06:19.782397+00:00"
+}

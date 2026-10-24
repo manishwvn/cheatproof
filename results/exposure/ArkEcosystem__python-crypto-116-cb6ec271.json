@@ -1,0 +1,39 @@
+{
+  "base_commit": "1bd016f76b41eba9711be748c1caf20d8042f590",
+  "closed": true,
+  "closed_reason": null,
+  "executor": "sandbox",
+  "fix_reachable": true,
+  "fix_reachable_basis": "5 of 5 gold source lines found in future commits",
+  "future_commits_after": 0,
+  "future_commits_before": 84,
+  "future_scan": {
+    "commit_ids": [
+      "a4ef9ce78385",
+      "e3c15c0956c9"
+    ],
+    "commits_scanned": 2,
+    "complete": true,
+    "gold_added_lines": 5,
+    "gold_lines_in_future": 5,
+    "gold_paths_touched_by_future_commits": 1,
+    "lines": 5,
+    "list_complete": true,
+    "paths": [
+      "crypto/transactions/builder/htlc_lock.py"
+    ]
+  },
+  "instance_id": "ArkEcosystem__python-crypto-116",
+  "patch": {
+    "applied": true,
+    "empty_gate_ok": true,
+    "gold_gate_ok": true,
+    "name": "strip-future-git"
+  },
+  "refs_before": 5,
+  "repo": "ArkEcosystem/python-crypto",
+  "sandbox_runs": 5,
+  "schema": "rewardseal.exposure-audit",
+  "schema_version": 1,
+  "timestamp": "2026-10-24T16:25:05.216771+00:00"
+}

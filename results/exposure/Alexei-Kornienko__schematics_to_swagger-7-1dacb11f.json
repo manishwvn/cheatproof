@@ -1,0 +1,45 @@
+{
+  "base_commit": "3ddc537a8ed7682e9bb709ebd749b99d7ef09473",
+  "closed": true,
+  "closed_reason": null,
+  "executor": "sandbox",
+  "fix_reachable": true,
+  "fix_reachable_basis": "7 of 7 gold source lines found in future commits",
+  "future_commits_after": 0,
+  "future_commits_before": 25,
+  "future_scan": {
+    "commit_ids": [
+      "bc7a23c3ad08",
+      "254fa34aef78",
+      "74e800dfc3aa",
+      "8d23d6ffd887",
+      "ff632306943f",
+      "c9ffc641e2a4",
+      "1f2af64e2ca3",
+      "e6bace391028"
+    ],
+    "commits_scanned": 8,
+    "complete": true,
+    "gold_added_lines": 7,
+    "gold_lines_in_future": 7,
+    "gold_paths_touched_by_future_commits": 1,
+    "lines": 30,
+    "list_complete": true,
+    "paths": [
+      "schematics_to_swagger/__init__.py"
+    ]
+  },
+  "instance_id": "Alexei-Kornienko__schematics_to_swagger-7",
+  "patch": {
+    "applied": true,
+    "empty_gate_ok": true,
+    "gold_gate_ok": true,
+    "name": "strip-future-git"
+  },
+  "refs_before": 18,
+  "repo": "Alexei-Kornienko/schematics_to_swagger",
+  "sandbox_runs": 5,
+  "schema": "rewardseal.exposure-audit",
+  "schema_version": 1,
+  "timestamp": "2026-10-24T16:19:57.469167+00:00"
+}
