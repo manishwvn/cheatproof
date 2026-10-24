@@ -1,0 +1,47 @@
+{
+  "base_commit": "e2be444b8db7dd12031f3e9b481dfdae23f3e59e",
+  "closed": true,
+  "closed_reason": null,
+  "executor": "sandbox",
+  "fix_reachable": true,
+  "fix_reachable_basis": "4 of 4 gold source lines found in future commits",
+  "future_commits_after": 0,
+  "future_commits_before": 366,
+  "future_scan": {
+    "commit_ids": [
+      "6d24e656835d",
+      "4538a1d40aa4",
+      "d9e0b2a1063a",
+      "9eedb4ff27bb",
+      "d609ec3dc00a",
+      "b1f9895d5278",
+      "51afacf99734",
+      "54c33b56fd71",
+      "e392cbced269",
+      "0c8dd608adeb"
+    ],
+    "commits_scanned": 10,
+    "complete": true,
+    "gold_added_lines": 4,
+    "gold_lines_in_future": 4,
+    "gold_paths_touched_by_future_commits": 1,
+    "lines": 32,
+    "list_complete": true,
+    "paths": [
+      "cyclonedx_py/parser/conda.py"
+    ]
+  },
+  "instance_id": "CycloneDX__cyclonedx-python-367",
+  "patch": {
+    "applied": true,
+    "empty_gate_ok": true,
+    "gold_gate_ok": true,
+    "name": "strip-future-git"
+  },
+  "refs_before": 94,
+  "repo": "CycloneDX/cyclonedx-python",
+  "sandbox_runs": 5,
+  "schema": "rewardseal.exposure-audit",
+  "schema_version": 1,
+  "timestamp": "2026-10-24T16:17:56.699179+00:00"
+}

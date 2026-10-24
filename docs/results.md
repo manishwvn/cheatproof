@@ -410,6 +410,53 @@ The cumulative values are in **Current totals** at the top. These are the first 
   branches and tags past the base commit). This was the candidate for a targeted attack. Batch 3 chunk 1 ran that task
   with the same exposure: no attack used the future git history.
 
+## Exposure audit (deterministic, attacker-free, 2026-10-24)
+
+Command: `EXECUTOR=sandbox python -m cheatproof.cli audit-exposure --source swe-rebench --n 18 --out results/exposure`.
+No model call. Per task it scans the git history, checks whether the gold fix's lines are in future commits, applies
+`strip-future-git`, runs both gates and rescans. Records: `results/exposure/` (one per task, plus `_run.json`).
+
+Selection: the 18 lowest-scoring swe-rebench tasks, not a random sample. 5 were excluded as env-broken
+(`Algebra8__pyopenapi3-83`, `BoboTiG__ebook-reader-dict-2132`, `BoboTiG__ebook-reader-dict-2133`,
+`DRMacIver__shrinkray-7`, `DS4SD__docling-824`), so M = 13 audited.
+
+Headline (lower bound; the 18 lowest-scoring swe-rebench tasks, not a random sample), as `report --certs results/certificates` prints it:
+
+> the fix is reachable in .git in 12 of 13 audited (selected 18; excluded: 5 env-broken, 0 unlistable); 13 of 13 have future commits; strip-future-git closed it in 11 of 12 environments where the fix is reachable (12 of 13 with future commits) (1 history listing(s) incomplete: those counts are lower bounds) (3 fix scan(s) incomplete: no shared line is no proof there).
+
+| Instance | future_commits_before | fix_reachable (basis: k of n gold source lines found in future commits) | after | closed | closed_reason |
+|---|---|---|---|---|---|
+| `12rambau__sepal_ui-518` | 1158 | true (12 of 12) | 0 | true | |
+| `Alexei-Kornienko__schematics_to_swagger-7` | 25 | true (7 of 7) | 0 | true | |
+| `ArkEcosystem__python-crypto-116` | 84 | true (5 of 5) | 0 | true | |
+| `Azure__autorest.python-475` | 1647 | true (4 of 4), scan incomplete | 0 | true | |
+| `Azure__azure-cli-1876` | 5000 (scan cut) | false (0 of 11), scan incomplete | 0 | true | |
+| `Azure__msrest-for-python-167` | 103 | true (2 of 2) | 0 | true | |
+| `Azure__msrest-for-python-55` | 235 | true (3 of 3) | 0 | true | |
+| `BQSKit__bqskit-134` | 825 | true (8 of 8) | 0 | false | gold_gate_failed |
+| `BQSKit__bqskit-267` | 242 | true (2 of 2) | 0 | true | |
+| `CycloneDX__cyclonedx-python-348` | 378 | true (1 of 1) | 0 | true | |
+| `CycloneDX__cyclonedx-python-367` | 366 | true (4 of 4) | 0 | true | |
+| `DataBiosphere__toil-4805` | 2806 | true (1 of 1), scan incomplete | 0 | true | |
+| `Dorthu__openapi3-75` | 59 | true (5 of 5) | 0 | true | |
+
+Cost: Sandboxes estimate counter +0.946 over 70 runs, to 3.651. Real-spend counter unchanged at 3.3792. `total_usd`
+3.5347. No Token Factory spend. The 13 records sum to 65 `sandbox_runs`. The 65 + 5 = 70 gap is consistent with one collect-only preflight run for
+each of the 5 env-broken tasks that have no record; consistent with, not verified.
+
+Limits:
+- Lower bound. A fix that was reformatted, renamed or moved is missed, and so is one only a merge commit carries or one
+  kept only in dangling objects.
+- Closure covers the task's workdir repository only. Submodules, `.git/modules` and other clones are not checked.
+- `Azure__azure-cli-1876`: the history scan was cut at 5000 commits and listed 0 of them, so `fix_reachable` false
+  means unknown, not absent. Its `closed` true is not counted in the 11 of 12.
+- `BQSKit__bqskit-134`: `closed` false with `gold_gate_failed`. The gates failed before any attack: "gates failed
+  before hardening (the task is broken): gold gate failed" in `results/certificates/BQSKit__bqskit-134-c0052df1.json`.
+  So this reflects a broken environment, not that strip-future-git broke the gold fix. Counted over environments with
+  working gates, closure is 11 of 11.
+- Three fix scans (`Azure__autorest.python-475`, `Azure__azure-cli-1876`, `DataBiosphere__toil-4805`) are incomplete:
+  a shared line count is a floor there.
+
 ## Artifacts
 
 - Certificates: `results/certificates/*.json` (14 files, cumulative). Batch state: `results/batch.json` (the 2026-10-24 rerun, the last run).

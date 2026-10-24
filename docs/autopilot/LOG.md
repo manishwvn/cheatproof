@@ -1,5 +1,14 @@
 # Autopilot log
 
+## 2026-10-24 planner (run cap, audit)
+- Owner approval, relayed by the orchestrator (owner's reply in the orchestrator chat, 2026-10-24): "approve 500".
+  Change: `SANDBOX_RUN_CAP` 250 -> 500 in the live .env only; code default and .env.example still 250.
+- Reason: `sandbox_runs` hit 250 after the T55 replication. The exposure audit and the Ultra runs need more.
+- `REAL_SPEND_CAP_USD` set to 7.00 in the live `.env` as a stricter stop (orchestrator decision, 2026-10-24). The code
+  ceiling stays $10.
+- Weekly usage at 93%: the routine is paused until Oct 27.
+- T57 exposure audit run: 13 audited, 5 env-broken excluded. Numbers in `docs/results.md`, "Exposure audit".
+
 ## 2026-10-22 summary
 progress 81% (19/28 tasks done, 6 days to submit)
 T08 first Sandboxes batch done (PR #34): 5 of 40 tasks, $0.21. Gold 3 of 5 pass; 2 fail with `pytest exited 4`.

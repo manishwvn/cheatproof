@@ -39,3 +39,15 @@ Read this, then `STATUS.md`, then `docs/autopilot/QUEUE.md`, before doing anythi
 - Token rule: Opus orchestrates only; Haiku 5.5 builds and does docs; Sonnet 5.5 reviews first and takes what Haiku fails twice; effort high or xhigh, never max.
 - Never read the rebuttal or mandate projects, their state folders or routines, or the owner-private research folder.
 - Weekly caps W/F 85 (95/95 while `~/.autopilot-pause` exists).
+
+## Resume note for Oct 27 (10 lines)
+1. Pull main. Check progress with `python docs/autopilot/progress.py`. Remove `~/.cheatproof-autopilot/pause` only when the owner says so.
+2. Ultra on 4 future_git tasks (`CycloneDX__cyclonedx-python-348`, `CycloneDX__cyclonedx-python-367`, `DataBiosphere__toil-4805`, `ArkEcosystem__python-crypto-116`) with recon. Per task, set `finished: true` in `results/batch.json` by hand (resume state), then run `EXECUTOR=sandbox .venv/bin/python -m cheatproof.cli batch --source swe-rebench --n 18 --system-prompt-file results/combined.txt --strategy combined --attacker-model <Ultra model ID from the Ultra row of the .env.example price list> --max-steps 40 --max-tokens 400000 --first <task> --rerun --chunk-size 1`.
+3. Copy each new certificate to `results/ultra/<task>-ultra.json`, not to `results/replications`.
+4. Stop if one task costs more than $0.6 or the real-spend counter passes $7 (`REAL_SPEND_CAP_USD=7.00` in `.env`). The first Ultra attempt (2026-10-24) never ran: the old run cap of 250 stopped it. Ultra prices $1.0 / $3.0 per M.
+5. Headline: lead with the deterministic exposure audit (fix reachable in 12 of 13 audited, lower bound; the 18 lowest-scoring swe-rebench tasks, not a random sample; strip-future-git closed it in 11 of 12), then the attacker finding (1 of 10 rounds, confirmed causality). Put it in the README first screen, site hero, `docs/results.md` and video beat 1. Every count computed from data and backed by tests.
+6. Final polish: README links; check Pages at https://manishwvn.github.io/cheatproof/; owner runs `gh repo edit manishwvn/cheatproof --homepage https://manishwvn.github.io/cheatproof/`.
+7. Fresh-clone test (T12, after 2026-10-27): clone to a temp dir, `uv sync`, `pytest`, site build, `report`.
+8. Video: finalize `docs/video/script.md`, then rough cut with `video/rough_cut.py`.
+9. Devpost submission by the owner (deadline 2026-10-30 10:00 PDT).
+10. Open items: T31 items 2 and 4; env-broken `DS4SD__docling-824` and `BoboTiG` tasks; replication-site rule (inconclusive-but-finished runs count as judged); Tavily: one harness search, dashboard 1 of 1000.

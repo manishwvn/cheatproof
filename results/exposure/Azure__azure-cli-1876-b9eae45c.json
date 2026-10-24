@@ -1,0 +1,37 @@
+{
+  "base_commit": "62dab24154f910ff7f3ef2b6b3783945b58e9098",
+  "closed": true,
+  "closed_reason": null,
+  "executor": "sandbox",
+  "fix_reachable": false,
+  "fix_reachable_basis": "0 of 11 gold source lines found in future commits",
+  "future_commits_after": 0,
+  "future_commits_before": 5000,
+  "future_scan": {
+    "commit_ids": [],
+    "commits_scanned": 0,
+    "complete": false,
+    "gold_added_lines": 11,
+    "gold_lines_in_future": 0,
+    "gold_paths_touched_by_future_commits": 2,
+    "lines": 0,
+    "list_complete": false,
+    "paths": [
+      "src/azure-cli-core/azure/cli/core/_util.py",
+      "src/azure-cli-core/azure/cli/core/application.py"
+    ]
+  },
+  "instance_id": "Azure__azure-cli-1876",
+  "patch": {
+    "applied": true,
+    "empty_gate_ok": true,
+    "gold_gate_ok": true,
+    "name": "strip-future-git"
+  },
+  "refs_before": 774,
+  "repo": "Azure/azure-cli",
+  "sandbox_runs": 5,
+  "schema": "rewardseal.exposure-audit",
+  "schema_version": 1,
+  "timestamp": "2026-10-24T16:33:09.079412+00:00"
+}

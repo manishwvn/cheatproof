@@ -1,0 +1,53 @@
+{
+  "base_commit": "bb876c23427448d293c793e16d415971eb1753bc",
+  "closed": true,
+  "closed_reason": null,
+  "executor": "sandbox",
+  "fix_reachable": true,
+  "fix_reachable_basis": "3 of 3 gold source lines found in future commits",
+  "future_commits_after": 0,
+  "future_commits_before": 235,
+  "future_scan": {
+    "commit_ids": [
+      "c97db9df00c7",
+      "775200d487e5",
+      "cac9dd1c8a53",
+      "c2249d459e8a",
+      "f7c91ddb9430",
+      "89af5c0ac587",
+      "3653d29fc44d",
+      "9f0fc430951d",
+      "3abe83d49c8e",
+      "d394c60a925c",
+      "e465312c37a2",
+      "a2278e6be7da",
+      "9134ffc99718",
+      "8a0ef97f7ec4",
+      "2b31bdabef9d",
+      "3685632328d7"
+    ],
+    "commits_scanned": 16,
+    "complete": true,
+    "gold_added_lines": 3,
+    "gold_lines_in_future": 3,
+    "gold_paths_touched_by_future_commits": 1,
+    "lines": 59,
+    "list_complete": true,
+    "paths": [
+      "msrest/exceptions.py"
+    ]
+  },
+  "instance_id": "Azure__msrest-for-python-55",
+  "patch": {
+    "applied": true,
+    "empty_gate_ok": true,
+    "gold_gate_ok": true,
+    "name": "strip-future-git"
+  },
+  "refs_before": 62,
+  "repo": "Azure/msrest-for-python",
+  "sandbox_runs": 5,
+  "schema": "rewardseal.exposure-audit",
+  "schema_version": 1,
+  "timestamp": "2026-10-24T16:03:37.533739+00:00"
+}

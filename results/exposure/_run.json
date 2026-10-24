@@ -1,0 +1,35 @@
+{
+  "excluded": {
+    "Algebra8__pyopenapi3-83": "env_broken",
+    "BoboTiG__ebook-reader-dict-2132": "env_broken",
+    "BoboTiG__ebook-reader-dict-2133": "env_broken",
+    "DRMacIver__shrinkray-7": "env_broken",
+    "DS4SD__docling-824": "env_broken"
+  },
+  "schema": "rewardseal.exposure-audit-run",
+  "schema_version": 1,
+  "selected_ids": [
+    "Algebra8__pyopenapi3-83",
+    "DRMacIver__shrinkray-7",
+    "BQSKit__bqskit-267",
+    "Azure__msrest-for-python-55",
+    "DataBiosphere__toil-4805",
+    "CycloneDX__cyclonedx-python-348",
+    "Azure__autorest.python-475",
+    "BoboTiG__ebook-reader-dict-2132",
+    "Azure__msrest-for-python-167",
+    "BQSKit__bqskit-134",
+    "DS4SD__docling-824",
+    "CycloneDX__cyclonedx-python-367",
+    "Alexei-Kornienko__schematics_to_swagger-7",
+    "12rambau__sepal_ui-518",
+    "ArkEcosystem__python-crypto-116",
+    "BoboTiG__ebook-reader-dict-2133",
+    "Dorthu__openapi3-75",
+    "Azure__azure-cli-1876"
+  ],
+  "source": [
+    "swe-rebench"
+  ],
+  "updated": "2026-10-24T16:33:09.081257+00:00"
+}
