@@ -345,6 +345,7 @@ def _is_runs(value: Any) -> bool:
         and isinstance(row.get("instance_id"), str)
         and row.get("recon") in ("exposure", None)
         and ("recon_types" not in row or _is_str_list(row["recon_types"]))
+        and (row.get("harness_search") is None or isinstance(row["harness_search"], dict))  # T52, optional
         for row in value
     )
 
@@ -773,6 +774,10 @@ def _strategy_html(attacker: Any) -> str:
     kinds = attacker.get("recon_types")
     shown = f" ({', '.join(_cell(k) for k in kinds)})" if isinstance(kinds, list) and kinds else ""
     tag = f' <span class="label">recon=exposure{shown}</span>' if attacker.get("recon") == "exposure" else ""
+    search = attacker.get("harness_search")
+    if isinstance(search, dict):  # T52: the harness's own Tavily call, never an attacker decision
+        failed = "" if search.get("ok") is True else " (failed)"
+        tag += f' <span class="label">harness search via Tavily{failed}</span>'
     return f"{text}{tag}"
 
 

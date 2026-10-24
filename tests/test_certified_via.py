@@ -531,3 +531,43 @@ def test_the_panel_says_how_closure_is_shown_and_whether_the_hole_was_tried_agai
     cert = legit_cert()
     cert["harden"]["after"]["holes"]["attempted"] = ["git-history"]
     assert "Earlier hole attempted again</th><td>yes</td>" in site._before_after_section(cert)
+
+
+# --- T52 harness_search together with certified_via (merge of PR #64 and PR #66) ------------------------------
+
+
+SEARCH = {"provider": "tavily", "query": "Fix foo crash", "results": 2, "ok": True}
+
+
+def searched_cert(search=SEARCH):
+    cert = legit_cert()
+    cert["attacker"]["harness_search"] = search
+    return cert
+
+
+def test_a_certificate_can_carry_harness_search_and_certified_via_legit_fix():
+    cert = searched_cert()
+    validate_certificate(cert)
+    assert cert["attacker"]["harness_search"] == SEARCH and cert["certified_via"] == "legit_fix"
+
+
+def test_harness_search_validation_still_runs_next_to_the_legit_fix_checks():
+    bad = searched_cert({**SEARCH, "provider": "other"})
+    with pytest.raises(ValueError, match="harness_search"):
+        validate_certificate(bad)
+    unsubmitted = searched_cert()
+    unsubmitted["harden"]["after"]["attack"]["submitted"] = False
+    with pytest.raises(ValueError, match="real submit"):
+        validate_certificate(unsubmitted)
+
+
+def test_the_site_shows_the_harness_search_tag_the_via_column_and_the_panel(tmp_path):
+    cert_dir = tmp_path / "certs"
+    write_certificate(searched_cert(), cert_dir)
+    build_site(cert_dir, tmp_path / "site")
+    index = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
+    assert "harness search via Tavily" in index
+    assert '<th scope="col">Via</th>' in index and "<td>yes</td><td>legit_fix</td>" in index
+    page = next((tmp_path / "site" / "env").glob("*.html")).read_text(encoding="utf-8")
+    assert "Before and after hardening" in page and "legit_fix: hole closed, task still solvable" in page
+    assert "harness search via Tavily" in page or "tavily" in page
