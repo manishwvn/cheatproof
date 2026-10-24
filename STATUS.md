@@ -31,6 +31,7 @@
 - **T42 (2026-10-23):** every run keeps its full trace, raw attack diffs and restore set under git-ignored `results/traces/`; `python -m cheatproof.cli holes recheck <stem>` re-checks hole labels offline (#50).
 - **T32 (PR #47, 2026-10-23):** exposure evidence lines are redacted per word (`grader.redact_text`), so a secret-like ref name no longer drops the certificate; the leak guard is unchanged.
 - **Batch 3 chunk 1 (2026-10-23, branch `chunk1-results`, PR to main, not merged):** 8 run, 1 certified (sepal_ui-518, 0 completed re-attacks), 5 inconclusive at token_limit, 0 holes; cumulative 13 of 40 with certificates, 0 verified holes. Details in `docs/results.md`.
+- **Batch 3 chunk 2 + T37 (2026-10-24 UTC, branch `chunk2-results`, PR to main, not merged):** 1 verified git-history hole (cyclonedx-348, recon on, auto-submitted; after hardening, legit fix, inconclusive), 2 certified (sepal_ui-518, cyclonedx-367; no hardening re-attack), T37 Tavily run inconclusive with no real Tavily call (T52 pending); cumulative 14 of 40 with certificates, 1 verified hole. Details in `docs/results.md`.
 - **Handoff 2026-10-23:** read `docs/autopilot/HANDOFF.md` first. T01 is done (#36); T08 batch 3 is queued, then the routine halts the budget (U26). T31 and T32 are new.
 - **Next for the routine:** U21 closed: Sandboxes cost is logged, and the budget halts only past `SANDBOX_COST_CAP_USD`
   ($0.50). The planner clears the live ledger `halted` after merge. T23 (#30) and T25 (#31) are done; T01 and T08 are
