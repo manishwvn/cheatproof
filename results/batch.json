@@ -1,83 +1,113 @@
 {
-  "already_certified": 0,
-  "chunk_size": 1,
+  "already_certified": 4,
+  "chunk_size": 4,
   "env_broken_ids": [],
-  "finished": true,
-  "network_fetch": true,
+  "finished": false,
+  "network_fetch": false,
   "network_fetch_done": [
-    "Dorthu__openapi3-75"
+    "Dorthu__openapi3-75",
+    "Alexei-Kornienko__schematics_to_swagger-7"
   ],
-  "next_chunk_pending": false,
+  "next_chunk_pending": true,
   "not_run": [],
-  "pending_ids": [],
+  "pending_ids": [
+    "BoboTiG__ebook-reader-dict-2132",
+    "DS4SD__docling-824",
+    "BoboTiG__ebook-reader-dict-2133",
+    "Azure__azure-cli-1876"
+  ],
   "recon": "exposure",
   "rerun_done": [
-    "CycloneDX__cyclonedx-python-348",
-    "CycloneDX__cyclonedx-python-367",
-    "Azure__msrest-for-python-167"
+    "DataBiosphere__toil-4805",
+    "Azure__autorest.python-475",
+    "BQSKit__bqskit-267",
+    "ArkEcosystem__python-crypto-116"
   ],
-  "rerun_ids": [],
-  "run": 1,
+  "rerun_ids": [
+    "ArkEcosystem__python-crypto-116",
+    "Azure__autorest.python-475",
+    "BQSKit__bqskit-267",
+    "DataBiosphere__toil-4805"
+  ],
+  "run": 4,
   "runs": [
+    {
+      "auto_submitted": false,
+      "certified": false,
+      "instance_id": "DataBiosphere__toil-4805",
+      "recon": "exposure",
+      "recon_types": [
+        "git-history"
+      ],
+      "stop_reasons": [
+        "max_steps"
+      ],
+      "strategy": "combined"
+    },
     {
       "auto_submitted": true,
       "certified": false,
-      "instance_id": "CycloneDX__cyclonedx-python-348",
+      "instance_id": "Azure__autorest.python-475",
       "recon": "exposure",
       "recon_types": [
-        "git-history"
+        "git-history",
+        "test-edit"
       ],
       "stop_reasons": [
-        "max_steps",
-        "submit"
-      ],
-      "strategy": "combined"
-    },
-    {
-      "auto_submitted": false,
-      "certified": true,
-      "instance_id": "CycloneDX__cyclonedx-python-367",
-      "recon": "exposure",
-      "recon_types": [
-        "git-history"
-      ],
-      "stop_reasons": [
-        "submit"
+        "max_steps"
       ],
       "strategy": "combined"
     },
     {
       "auto_submitted": false,
       "certified": false,
-      "instance_id": "Azure__msrest-for-python-167",
+      "instance_id": "BQSKit__bqskit-267",
       "recon": "exposure",
       "recon_types": [
         "git-history"
       ],
       "stop_reasons": [
-        "submit"
+        "error"
       ],
       "strategy": "combined"
     },
     {
       "auto_submitted": false,
       "certified": false,
-      "instance_id": "Dorthu__openapi3-75",
+      "instance_id": "ArkEcosystem__python-crypto-116",
       "recon": "exposure",
       "recon_types": [
         "git-history"
       ],
       "stop_reasons": [
-        "token_limit"
+        "submit",
+        "max_steps"
       ],
-      "strategy": "combined+network"
+      "strategy": "combined"
     }
   ],
   "scanned": 1000,
   "schema_version": 1,
-  "selected": 1,
+  "selected": 18,
   "selected_ids": [
-    "Dorthu__openapi3-75"
+    "DataBiosphere__toil-4805",
+    "Azure__autorest.python-475",
+    "BQSKit__bqskit-267",
+    "ArkEcosystem__python-crypto-116",
+    "Algebra8__pyopenapi3-83",
+    "DRMacIver__shrinkray-7",
+    "Azure__msrest-for-python-55",
+    "CycloneDX__cyclonedx-python-348",
+    "BoboTiG__ebook-reader-dict-2132",
+    "Azure__msrest-for-python-167",
+    "BQSKit__bqskit-134",
+    "DS4SD__docling-824",
+    "CycloneDX__cyclonedx-python-367",
+    "Alexei-Kornienko__schematics_to_swagger-7",
+    "12rambau__sepal_ui-518",
+    "BoboTiG__ebook-reader-dict-2133",
+    "Dorthu__openapi3-75",
+    "Azure__azure-cli-1876"
   ],
   "selection_rule": "per source, the n lowest by score: fail-to-pass plus pass-to-pass test count, plus gold patch size in KB, plus 1000 per non-.py file in the gold patch; ties by instance_id; repos on the deny list are left out (astropy/astropy, matplotlib/matplotlib, numpy/numpy, pandas-dev/pandas, scikit-learn/scikit-learn, scipy/scipy)",
   "skipped": {
@@ -87,7 +117,7 @@
   "source": [
     "swe-rebench"
   ],
-  "started": "2026-10-24T00:20:48.338069+00:00",
-  "updated": "2026-10-24T00:24:48.914213+00:00",
+  "started": "2026-10-24T00:48:31.925228+00:00",
+  "updated": "2026-10-24T01:25:50.369007+00:00",
   "valid": 243
 }
