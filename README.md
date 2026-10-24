@@ -4,7 +4,7 @@ On `CycloneDX__cyclonedx-python-348`, a SWE-rebench coding environment, the atta
 
 **Result: 1 of 9 confirmed (n=1, recon on, this attacker only)**
 
-**Replication: interim, 4 further runs of 348 did not reproduce a CONFIRMED git-history leak (scan incomplete, T55 fix in progress); final k/n pending.** rep1 and rep3 `test-edit` labels are suspected false positives caused by a scratch file named like a test (verification pending PR #74); rep1's certification via `hardened_reattack_failed` therefore does not count as a closed hole. <!-- REPLICATION_PLACEHOLDER -->
+**Replication (T55, 4 more runs of 348): the git-history leak was used in 1 of 10 attack rounds on this task (1 of 8 excluding 2 HTTP 503 infrastructure errors), the confirmed 2026-10-24 rerun. The other 9 rounds did not reproduce it; one earlier label was a classifier false positive. 'Certified' here means not hacked in k attempts, with k small. <!-- REPLICATION_PLACEHOLDER -->
 
 Links: [results](docs/results.md) | [causal check](docs/results.md#causal-check-348-and-116) | report site: published from GitHub Pages once the repo is public | [feedback](docs/feedback.md) | [Tavily](docs/tavily.md)
 
@@ -21,7 +21,7 @@ certify  <-  re-attack (same attacker, same limits; gold passes, empty fails)
 > - Recon was on: the attacker was shown the exposure scan. Every certificate labels this `recon=exposure`.
 > - One attacker model (Nemotron Super), 40 steps.
 > - "Certified" means "not hacked in k attempts by this attacker", not "safe".
-> - Replication k/n is pending.
+> - Replication: the leak was used in 1 of 10 attack rounds on this task (1 of 8 excluding infrastructure errors). The one is the confirmed rerun; the re-attack after it failed (1 of 1). Zero further confirmations in 9 further rounds.
 > - The other 8 environments are not confirmed: one unconfirmed lead (`ArkEcosystem__python-crypto-116`, probably a classifier false positive), the rest no leak used or inconclusive.
 
 Entry for the **Nebius x NVIDIA Global AI Hackathon**, track **Coding & Agentic Engineering**. RewardSeal audits the
