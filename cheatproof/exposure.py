@@ -445,6 +445,45 @@ def _read_added(
     return (digests if ran or not ids else None), done, whole and read <= FUTURE_SCAN_BYTES
 
 
+def future_touched_paths(
+    session: Session,
+    task: TaskSpec,
+    report: ExposureReport | None,
+    paths: Sequence[str],
+    *,
+    workdir: str = DEFAULT_WORKDIR,
+) -> int | None:
+    """T57: how many of `paths` some future commit changes (a count; no line and no digest is read). The commits are
+    those future_scan() walks: `log --all --reflog` with ORIG_HEAD / FETCH_HEAD and the pre-attack ids as starting
+    points, past base, limited to the pathspec. None when the count could not be read (no pre-attack list, a failed or
+    cut run); 0 when there is no future commit or no path. One read-only run through session.run."""
+    if report is None or report.future_commit_ids is None:
+        return None
+    wanted = [path for path in dict.fromkeys(paths) if path]
+    if not report.future_commit_ids or not wanted:
+        return 0
+    if len(wanted) > FUTURE_PATHS_MAX or any("\n" in path for path in wanted):
+        return None  # a cut pathspec or a name the line-based read cannot carry would understate the count
+    try:
+        base = checked_sha(task.base_commit)
+    except ValueError:
+        return None
+    starts = [r for r in report.future_extra_revs if FULL_SHA.fullmatch(r)]
+    if len(report.future_commit_ids) <= FUTURE_POSITIVE_MAX:
+        starts += report.future_commit_ids
+    revs = " ".join(shlex.quote(rev) for rev in dict.fromkeys(starts))
+    cmd = git_command(
+        workdir,
+        f"log --all --reflog {revs} --not {shlex.quote(base)} --full-history --no-merges --name-only -z --format="
+        f"{_pathspec(wanted)} | tr '\\0' '\\n' | sort -u",
+    )
+    res = session.run(cmd, STEP_TIMEOUT_S)
+    if res.exit_code != 0 or res.truncated or res.timed_out or res.stderr.strip():
+        return None
+    touched = {line for line in res.stdout.split("\n") if line}
+    return len(touched.intersection(wanted))
+
+
 def _covered_check(path: str) -> str:
     # test -w only reads permissions, and as root it is true for every file. A missing file is judged by its dir.
     q = shlex.quote(path)

@@ -206,6 +206,7 @@ def build_site(
     batch_file: Path | None = None,
     confirmations_file: Path | None = None,
     replications_dir: Path | None = None,
+    exposure_dir: Path | None = None,
 ) -> SiteResult:
     """Write the site for the certificates in cert_dir into out_dir and return what was written.
 
@@ -217,7 +218,9 @@ def build_site(
     cert_dir.parent/batch.json, and a missing default file is not an error. A bad batch record is listed in errors.
     confirmations_file is the manual-check manifest (default cert_dir.parent/confirmations.json; a missing default is
     an empty manifest, a missing explicit file is refused). replications_dir defaults to cert_dir.parent/replications;
-    a refused replication file is listed in errors and no replication number is shown.
+    a refused replication file is listed in errors and no replication number is shown. exposure_dir (T57) defaults to
+    cert_dir.parent/exposure: the audit records behind the hero block's exposure paragraph; without any, the paragraph
+    falls back to the certificates and says so; a malformed record is listed in errors and no number is shown.
     """
     root = Path(cert_dir)
     if not root.is_dir():
@@ -239,6 +242,9 @@ def build_site(
     batch, batch_errors = _read_batch(root, batch_file)
     replications = confirm.load_replications(replications_path)
     errors = [*cert_errors, *batch_errors, *[(f"replications/{n}", m) for n, m in replications.problems]]
+    exposure_summary = _exposure_summary(
+        root, Path(exposure_dir) if exposure_dir is not None else root.parent / "exposure", errors
+    )
     diffs_dir = root.parent / DIFFS_DIR
     env_dir = out / "env"
     env_dir.mkdir(parents=True, exist_ok=True)
@@ -250,7 +256,16 @@ def build_site(
     statuses = {c["task"]["instance_id"]: confirm.hole_status(c, manifest) for c in certs}
     index = out / "index.html"
     body = _index_body(
-        entries, errors, len(cert_errors), summary, batch, confirmation, manifest, replications, statuses
+        entries,
+        errors,
+        len(cert_errors),
+        summary,
+        batch,
+        confirmation,
+        manifest,
+        replications,
+        statuses,
+        exposure_summary,
     )
     _write(index, _document("RewardSeal report", body))
     pages = []
@@ -269,6 +284,18 @@ def build_site(
         _write(page, _document(f"RewardSeal: {entry.cert['task']['instance_id']}", body))
         pages.append(page)
     return SiteResult(index=index, pages=pages, errors=errors)
+
+
+def _exposure_summary(certs: Path, records: Path, errors: list[tuple[str, str]]) -> Mapping[str, Any] | None:
+    """T57: the exposure-audit summary for the hero block, or None. A malformed record adds an error row and no number
+    is drawn (the page is still built)."""
+    from cheatproof import audit  # lazy: keeps the grader and patches out of the site module's import
+
+    try:
+        return audit.exposure_summary(records, certs)
+    except (audit.ExposureAuditError, OSError) as exc:
+        errors.append(("exposure", f"exposure audit records refused: {exc}"))
+        return None
 
 
 def _load_all(root: Path) -> tuple[list[_Entry], list[tuple[str, str]]]:
@@ -653,6 +680,7 @@ def _index_body(
     manifest: Mapping[str, Mapping[str, str]] | None = None,
     replications: confirm.ReplicationSet | None = None,
     statuses: Mapping[str, confirm.HoleStatus] | None = None,
+    exposure: Mapping[str, Any] | None = None,
 ) -> str:
     """excluded counts the certificate files left out (errors also holds a bad batch record, which is not one).
     confirmation, manifest, replications and statuses (T54) feed the hero block and the confirmed/lead counts."""
@@ -675,6 +703,7 @@ def _index_body(
                 manifest or {},
                 replications or confirm.ReplicationSet(),
                 statuses or {},
+                exposure,
             ),
             _score_section(summary, excluded, batch, len(entries), confirmation),
             _environments_section(entries, statuses or {}),
@@ -722,6 +751,7 @@ def _hero_section(
     manifest: Mapping[str, Mapping[str, str]],
     replications: confirm.ReplicationSet,
     statuses: Mapping[str, confirm.HoleStatus],
+    exposure: Mapping[str, Any] | None = None,
 ) -> str:
     """The block at the top of the index (T54): the confirmed/lead headline, what it does not show, and a
     before -> after summary of each confirmed environment, with its replication state."""
@@ -745,6 +775,10 @@ def _hero_section(
         f"<p>{_cell(scope)}</p>",
         f"<p>{_cell(confirm.counts_line(confirmation))}</p>",
     ]
+    if exposure is not None:  # T57: one additive paragraph; the T54 hero above and below it is unchanged
+        from cheatproof.audit import summary_line
+
+        parts.append(f'<p class="exposure-audit">{_cell(summary_line(exposure))}</p>')
     if lead_ids:
         links = " ".join(
             _link_html(f"env/{entry.name}.html", entry.cert["task"]["instance_id"])
