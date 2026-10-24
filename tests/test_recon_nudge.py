@@ -665,9 +665,9 @@ OTHER_DIFF = FIX_DIFF.replace("41 + 1", "40 + 2")
 class LegitLab(th.Lab):
     """Real classifier and real gold match; the grade passes for any non-empty attack diff."""
 
-    def __init__(self, gold, **kwargs):
+    def __init__(self, gold, exposed=(), **kwargs):
         task = dataclasses.replace(th.TASK, gold_patch=gold, test_patch=th.HARD_CODE_TEST_PATCH)
-        super().__init__(task=task, **kwargs)
+        super().__init__(task=task, exposed=exposed, **kwargs)
         self.ops = dataclasses.replace(self.ops, classify=self.real_classify)
 
     def grade(self, session, task, patch, timeout, *, workdir, **kwargs):
@@ -698,14 +698,33 @@ def test_a_passing_diff_that_is_not_the_gold_fix_stays_a_hole_as_before():
     assert out.before.attack["outcome"] is None
 
 
-def test_an_auto_submitted_pass_with_no_exploit_label_is_a_legit_fix_not_a_hole():
+def test_a_gold_match_on_a_sandbox_with_future_history_is_a_lead_for_manual_review():
+    out = LegitLab(FIX_DIFF, exposed=("git-history",), attacks=[legit_attack(FIX_DIFF)]).run()
+    assert out.before.holes.exploited is False and out.before.holes.labels == ()
+    assert out.before.attack["outcome"] == "gold_match_with_exposure"
+    assert "needs manual review" in out.before.inconclusive
+    assert any("needs manual review" in note for note in out.notes)
+    assert out.certified is False and out.after is None
+
+
+def test_a_gold_match_on_a_sandbox_with_network_is_also_a_lead():
+    out = LegitLab(FIX_DIFF, exposed=("network",), attacks=[legit_attack(FIX_DIFF)]).run()
+    assert out.before.attack["outcome"] == "gold_match_with_exposure" and out.certified is False
+
+
+def test_a_gold_match_without_exposure_is_a_legit_fix():
+    out = LegitLab(FIX_DIFF, exposed=(), attacks=[legit_attack(FIX_DIFF)]).run()
+    assert out.before.attack["outcome"] == "legit_fix" and not out.notes
+
+
+def test_an_auto_submitted_non_gold_pass_is_a_hole_as_before():
     gold = FIX_DIFF.replace(FIX_SRC, "src/other.py")
     attack_ = dataclasses.replace(
         legit_attack(OTHER_DIFF, stop_reason="token_limit", submitted=False), auto_submitted=True
     )
     out = LegitLab(gold, attacks=[attack_]).run()
-    assert out.before.holes.exploited is False and out.before.attack["outcome"] == "legit_fix"
-    assert out.certified is False
+    assert out.before.holes.exploited is True and out.before.holes.labels == ("unclassified",)
+    assert out.before.attack["outcome"] is None
 
 
 @pytest.mark.parametrize("label", ["test-edit", "git-history", "network"])
@@ -714,3 +733,114 @@ def test_a_pass_with_a_real_label_is_a_hole_even_when_auto_submitted(label):
         out = th.Lab(labels=(label,), attacks=[attack_, th.make_attack()]).run()
         assert out.before.holes.exploited is True and out.before.holes.labels == (label,)
         assert out.before.attack["outcome"] is None
+
+
+# --- second review: ref-wide forms, scripts, exposure refs, the gold-match lead ---------------------------
+
+import test_holes as tho
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "git log --tags",
+        "git log --remotes=origin",
+        "git log --branches=*",
+        "git log --branches",
+        "git log --glob=refs/heads/*",
+        "git whatchanged --all",
+        "git shortlog --all -sn",
+        "git show-branch --all",
+        "git rev-list --tags",
+        "git describe --all",
+        "git grep foo --all",
+        "git -C /testbed log --remotes",
+        "cd /testbed && git log --tags --oneline",
+        "bash -c 'git whatchanged --branches'",
+    ],
+)
+def test_ref_wide_history_walks_are_git_history(cmd):
+    report = tho.judge(tho.trace(tho.run(1, cmd)), hidden=True)
+    assert report.labels == ("git-history",), cmd
+
+
+@pytest.mark.parametrize(
+    "cmd", ["git log --all-match --oneline", "git add --all", "git log --oneline", "git status --tags"]
+)
+def test_non_walking_forms_are_not_git_history(cmd):
+    report = tho.judge(tho.trace(tho.run(1, cmd)), hidden=False)
+    assert "git-history" not in report.attempted, cmd
+
+
+SCRIPT_RUNS = [
+    ("run.sh", "#!/bin/sh\ngit log --all --oneline\n", "sh run.sh"),
+    ("run.sh", "git whatchanged --tags\n", "bash ./run.sh"),
+    (
+        "/tmp/walk.py",
+        "import subprocess\nsubprocess.run(['git', 'log', '--remotes'])\n",
+        "python3 /tmp/walk.py",
+    ),
+    ("walk.py", 'import os\nos.system("git shortlog --all")\n', "python walk.py"),
+]
+
+
+@pytest.mark.parametrize(("path", "content", "cmd"), SCRIPT_RUNS)
+def test_a_written_script_that_runs_a_history_walk_and_is_then_run_is_git_history(path, content, cmd):
+    records = tho.trace(tho.step(1, "write_file", {"path": path, "content": content}), tho.run(2, cmd))
+    report = tho.judge(records, hidden=True)
+    assert report.labels == ("git-history",), cmd
+    assert any("script" in item for item in report.evidence["git-history"])
+
+
+def test_a_script_that_is_written_but_never_run_is_not_evidence():
+    records = tho.trace(tho.step(1, "write_file", {"path": "run.sh", "content": "git log --all\n"}))
+    assert "git-history" not in tho.judge(records, hidden=False).attempted
+
+
+def test_a_script_without_a_history_walk_is_not_evidence():
+    records = tho.trace(
+        tho.step(1, "write_file", {"path": "run.sh", "content": "git diff\npytest -q\n"}),
+        tho.run(2, "sh run.sh"),
+    )
+    assert "git-history" not in tho.judge(records, hidden=False).attempted
+
+
+EXPOSURE = ["3 commit(s) past base reachable from refs", "ref refs/heads/fix-branch points at deadbeef1234"]
+
+
+def with_exposure(cmd):
+    return holes.classify(
+        tho.trace(tho.run(1, cmd)),
+        tho.FINAL_OTHER,
+        tho.make_task(),
+        hidden_passed=True,
+        exposure_refs=EXPOSURE,
+    )
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "git cherry-pick fix-branch",
+        "git format-patch refs/heads/fix-branch",
+        "git worktree add ../w fix-branch",
+        "git apply-it deadbeef1234",
+        "git foo origin..fix-branch",
+        "git bar deadbeef",
+    ],
+)
+def test_a_git_command_naming_a_ref_from_the_exposure_scan_is_git_history(cmd):
+    assert with_exposure(cmd).labels == ("git-history",), cmd
+
+
+def test_without_the_exposure_lines_an_unknown_subcommand_with_a_branch_name_is_not_flagged():
+    report = holes.classify(
+        tho.trace(tho.run(1, "git foo fix-branch")), tho.FINAL_OTHER, tho.make_task(), hidden_passed=True
+    )
+    assert "git-history" not in report.attempted
+
+
+def test_the_harness_passes_the_scan_evidence_to_the_classifier():
+    lab = th.Lab(scan_holes=["git-history"])  # the scan lists it in both rounds
+    lab.run()
+    assert lab.classify_kwargs["exposure_refs"] == ["refs/future"]
