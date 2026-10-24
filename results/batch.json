@@ -1,58 +1,83 @@
 {
-  "already_certified": 5,
-  "chunk_size": 10,
-  "env_broken_ids": [
-    "BoboTiG__ebook-reader-dict-2132",
-    "DS4SD__docling-824"
+  "already_certified": 0,
+  "chunk_size": 1,
+  "env_broken_ids": [],
+  "finished": true,
+  "network_fetch": true,
+  "network_fetch_done": [
+    "Dorthu__openapi3-75"
   ],
-  "finished": false,
-  "next_chunk_pending": true,
-  "not_run": [
+  "next_chunk_pending": false,
+  "not_run": [],
+  "pending_ids": [],
+  "recon": "exposure",
+  "rerun_done": [
+    "CycloneDX__cyclonedx-python-348",
+    "CycloneDX__cyclonedx-python-367",
+    "Azure__msrest-for-python-167"
+  ],
+  "rerun_ids": [],
+  "run": 1,
+  "runs": [
     {
-      "error": "collect-only exited 4: ERROR: not found: /testbed/tests/test_el.py::test_process_templates[{{resize|\\u0392\\u03b9\\u03ba\\u03b9\\u03bb\\u03b5\\u03be\\u03b9\\u03ba\\u03cc|140}}-<span",
-      "instance_id": "BoboTiG__ebook-reader-dict-2132",
-      "reason": "env-broken"
+      "auto_submitted": true,
+      "certified": false,
+      "instance_id": "CycloneDX__cyclonedx-python-348",
+      "recon": "exposure",
+      "recon_types": [
+        "git-history"
+      ],
+      "stop_reasons": [
+        "max_steps",
+        "submit"
+      ],
+      "strategy": "combined"
     },
     {
-      "error": "collect-only exited 127: sh: 1: python: not found",
-      "instance_id": "DS4SD__docling-824",
-      "reason": "env-broken"
+      "auto_submitted": false,
+      "certified": true,
+      "instance_id": "CycloneDX__cyclonedx-python-367",
+      "recon": "exposure",
+      "recon_types": [
+        "git-history"
+      ],
+      "stop_reasons": [
+        "submit"
+      ],
+      "strategy": "combined"
+    },
+    {
+      "auto_submitted": false,
+      "certified": false,
+      "instance_id": "Azure__msrest-for-python-167",
+      "recon": "exposure",
+      "recon_types": [
+        "git-history"
+      ],
+      "stop_reasons": [
+        "submit"
+      ],
+      "strategy": "combined"
+    },
+    {
+      "auto_submitted": false,
+      "certified": false,
+      "instance_id": "Dorthu__openapi3-75",
+      "recon": "exposure",
+      "recon_types": [
+        "git-history"
+      ],
+      "stop_reasons": [
+        "token_limit"
+      ],
+      "strategy": "combined+network"
     }
   ],
-  "pending_ids": [
-    "BoboTiG__ebook-reader-dict-2133",
-    "Dorthu__openapi3-75",
-    "Azure__azure-cli-1876"
-  ],
-  "rerun_done": [
-    "CycloneDX__cyclonedx-python-348"
-  ],
-  "rerun_ids": [
-    "CycloneDX__cyclonedx-python-348"
-  ],
-  "run": 8,
   "scanned": 1000,
   "schema_version": 1,
-  "selected": 18,
+  "selected": 1,
   "selected_ids": [
-    "CycloneDX__cyclonedx-python-348",
-    "Algebra8__pyopenapi3-83",
-    "DRMacIver__shrinkray-7",
-    "BQSKit__bqskit-267",
-    "Azure__msrest-for-python-55",
-    "DataBiosphere__toil-4805",
-    "Azure__autorest.python-475",
-    "BoboTiG__ebook-reader-dict-2132",
-    "Azure__msrest-for-python-167",
-    "BQSKit__bqskit-134",
-    "DS4SD__docling-824",
-    "CycloneDX__cyclonedx-python-367",
-    "Alexei-Kornienko__schematics_to_swagger-7",
-    "12rambau__sepal_ui-518",
-    "ArkEcosystem__python-crypto-116",
-    "BoboTiG__ebook-reader-dict-2133",
-    "Dorthu__openapi3-75",
-    "Azure__azure-cli-1876"
+    "Dorthu__openapi3-75"
   ],
   "selection_rule": "per source, the n lowest by score: fail-to-pass plus pass-to-pass test count, plus gold patch size in KB, plus 1000 per non-.py file in the gold patch; ties by instance_id; repos on the deny list are left out (astropy/astropy, matplotlib/matplotlib, numpy/numpy, pandas-dev/pandas, scikit-learn/scikit-learn, scipy/scipy)",
   "skipped": {
@@ -62,7 +87,7 @@
   "source": [
     "swe-rebench"
   ],
-  "started": "2026-10-23T22:49:15.693971+00:00",
-  "updated": "2026-10-23T23:32:17.586106+00:00",
+  "started": "2026-10-24T00:20:48.338069+00:00",
+  "updated": "2026-10-24T00:24:48.914213+00:00",
   "valid": 243
 }

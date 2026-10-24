@@ -443,6 +443,9 @@ Orchestrator decision: the live attacker never called `web_search`, so there was
 - CLI: `--no-harness-search` on harden and batch; the harness search is on by default with `--network-fetch`. The re-attack gets no search. The attacker's own `web_search` prompt nudge stays, now labelled separate. Sandbox network stays off; the 2-task cap is unchanged.
 - Tests (fakes only): `tests/test_harness_search.py`.
 
+### T49 Recheck applies the legit_fix downgrade that harden applies (shared helper, rounds.json inputs) — size S — done #65
+`python -m cheatproof.cli holes recheck <stem>` printed DIFFER for labels, primary and exploited on an after round that ended `legit_fix` or `gold_match_with_exposure`: the live round recorded labels [] after the T47 downgrade, and recheck recomputed `unclassified`. Fix: `holes.downgrade_legit_fix` is the one rule, used by `harden._play` and by `keep.recheck`. `rounds.json` records the exposure flags and refs and the attack summary's `auto_submitted` and `outcome` at write time. Recheck prints the recorded and recomputed outcome with MATCH or DIFFER (no diff text); a mismatched outcome exits 1. Older files print `downgrade inputs not recorded` and compare as before. Tests use the real harden with fakes and `tmp_path`. Full pytest and ruff clean.
+
 ### T31 Executor and sandbox minors from the PR #30 review — size S — todo — needs T08 (planner-merge paths: `executor.py`, `scripts/sandbox_access.py`)
 Minor findings from the Sonnet review of PR #30 (T23), none blocking. Fix with fakes, then a USER item for the planner to merge.
 1. DONE (T48 PR #62): with `SANDBOX_NETWORK_TRUSTED=1` the executor prints one warning line (no values) and `docs/results.md` notes it. Original: With `SANDBOX_NETWORK_TRUSTED=1` the sandbox network is not cut, and nothing warns. Print one warning line (no values) when it is on, and note it in `docs/results.md`.
