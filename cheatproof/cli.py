@@ -1418,6 +1418,11 @@ def render_text(score: Mapping[str, Any], directory: Path, batch: Mapping[str, A
     for key in ("certified_unhardened", "certified_hardened"):
         if key in score:
             lines.append(f"{key}: {score[key]}")
+    via = score.get("certified_via")
+    if isinstance(via, Mapping):  # T50: how the certified ones got certified
+        lines.append(
+            "certified_via: " + ", ".join(f"{k}={_cell(v)}" for k, v in sorted(via.items(), key=str))
+        )
     counted = score.get("outcomes")
     no_attempt = counted.get("no_attempt") if isinstance(counted, Mapping) else score.get("no_attempt")
     if no_attempt is not None:

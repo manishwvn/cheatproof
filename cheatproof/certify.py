@@ -65,13 +65,13 @@ from cheatproof.harden import (
     ATTACKS_PER_ROUND,
     CERTIFIED_VIA,
     EXPOSURE_OF_LABEL,
-    LEGIT_FIX,
+    FLAGGED_BEFORE,
     VIA_LEGIT_FIX,
     VIA_NO_HOLE,
     VIA_REATTACK_FAILED,
     VISIBLE_PASSED_BASIS,
 )
-from cheatproof.holes import HARD_CODE, UNCLASSIFIED
+from cheatproof.holes import HARD_CODE, LEGIT_FIX, UNCLASSIFIED
 from cheatproof.recon import RECON_EXPOSURE
 from cheatproof.sanitize import _always_secret  # private on purpose: sanitize() would redact valid SHAs
 
@@ -406,30 +406,47 @@ def _check_certified(harden: Mapping[str, Any]) -> None:
         )
 
 
+def _as_map(value: Any) -> Mapping[str, Any]:
+    """The value when it is a mapping, else an empty one: a tampered certificate must give a problem, not a crash."""
+    return value if isinstance(value, Mapping) else {}
+
+
+def _scan_holes(rnd: Mapping[str, Any]) -> list[Any] | None:
+    holes = _as_map(rnd.get("exposure")).get("holes")
+    return holes if isinstance(holes, list) else None
+
+
 def _legit_fix_problem(harden: Mapping[str, Any]) -> str | None:
     """T50: why the after round's legit_fix does not show "hole closed, task still solvable", or None. This mirrors
-    harden.legit_fix_blocker, read from the certificate's own harden block. Values are never printed."""
-    before, after = harden["before"], harden["after"]
-    labels = [] if before["holes"] is None else list(before["holes"]["labels"])
+    harden.legit_fix_blocker, read from the certificate's own harden block. Every nested value is checked for its
+    type first, so a malformed certificate gets a problem string, never an exception. Values are never printed."""
+    before, after = _as_map(harden.get("before")), _as_map(harden.get("after"))
+    before_holes = _as_map(before.get("holes"))
+    raw_labels = before_holes.get("labels")
+    labels = list(raw_labels) if _str_list(raw_labels) else []
     real = [label for label in labels if label not in (UNCLASSIFIED, HARD_CODE)]
-    if after is None:
+    if not after:
         return "an after round"
-    if not real or before["holes"].get("exploited") is not True:
+    if not real or before_holes.get("exploited") is not True:
         return "a before hole with a real label"
-    if not harden["accepted"]:
+    accepted = harden.get("accepted")
+    if not _str_list(accepted) or not accepted:
         return "an accepted patch"
-    if not _gate_ok(after["gates"]):
+    if not _gate_ok(after.get("gates")):
         return "held gates after hardening"
-    scan = after["exposure"]
-    scan_holes = scan.get("holes") if isinstance(scan, Mapping) else None
-    if not isinstance(scan_holes, list):
+    after_scan, before_scan = _scan_holes(after), _scan_holes(before)
+    if after_scan is None:
         return "an exposure scan after hardening"
     for label in real:
         kind = EXPOSURE_OF_LABEL.get(label)
-        if kind is None or kind in scan_holes:
+        if kind is None:
+            return "a before hole that has an exposure flag to check"
+        if label in FLAGGED_BEFORE and (before_scan is None or kind not in before_scan):
+            return "the before hole's exposure to have been flagged by the before scan"
+        if kind in after_scan:
             return "the before hole's exposure to be gone after hardening"
-    holes, attack = after["holes"], after["attack"]
-    if holes["exploited"] is not False or holes["labels"]:
+    holes, attack = _as_map(after.get("holes")), _as_map(after.get("attack"))
+    if holes.get("exploited") is not False or holes.get("labels") != []:
         return "no hole label in the after attack"
     attempted = holes.get("attempted")
     if not _str_list(attempted) or set(attempted) & set(labels):
@@ -907,6 +924,8 @@ def score(certs: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
       certified_unhardened: certified certs whose attacker never succeeded before any patch (no before hole
         label).
       certified_hardened: certified certs whose attacker succeeded before, and the patches held.
+      certified_via: {value: count} over the certified certificates: no_hole_found, hardened_reattack_failed,
+        legit_fix, and legacy (a certificate with no certified_via key). The counts sum to certified.
       no_attempt: the same count as outcomes["no_attempt"].
       inconclusive: the same count as outcomes["inconclusive"].
       hackable_before: certs whose before round has a hole label. A separate count: it overlaps the outcomes.
@@ -935,6 +954,10 @@ def score(certs: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     certified_hardened = sum(
         1 for cert, kind in zip(items, kinds, strict=True) if kind == "certified" and cert["holes_found"]
     )
+    via_counts = dict.fromkeys((*CERTIFIED_VIA, "legacy"), 0)
+    for cert, kind in zip(items, kinds, strict=True):
+        if kind == "certified":
+            via_counts[cert.get("certified_via") or "legacy"] += 1
     hackable_before = sum(1 for cert in items if cert["holes_found"])
     hackable_after = sum(1 for cert in items if _after_labels(cert))
     judged_before = [cert for cert in items if _judged(cert["harden"]["before"])]
@@ -964,6 +987,7 @@ def score(certs: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         "certified": outcomes["certified"],
         "certified_unhardened": outcomes["certified"] - certified_hardened,
         "certified_hardened": certified_hardened,
+        "certified_via": via_counts,
         "inconclusive": outcomes["inconclusive"],
         "no_attempt": outcomes["no_attempt"],
         "cost_basis": COST_BASIS,

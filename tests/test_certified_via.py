@@ -11,8 +11,15 @@ import pytest
 import test_certify as tcert
 import test_harden as th
 
-from cheatproof import site
-from cheatproof.certify import build_certificate, load_certificate, validate_certificate
+from cheatproof import certify, site
+from cheatproof.certify import (
+    build_certificate,
+    load_certificate,
+    score,
+    validate_certificate,
+    write_certificate,
+)
+from cheatproof.cli import render_text
 from cheatproof.harden import CERTIFIED_VIA, legit_fix_blocker
 from cheatproof.holes import UNCLASSIFIED, HoleReport
 from cheatproof.site import build_site
@@ -329,8 +336,6 @@ def test_a_clean_before_round_derives_no_hole_found_for_a_hand_built_report():
 
 def page_for(tmp_path, cert):
     cert_dir = tmp_path / "certs"
-    from cheatproof.certify import write_certificate
-
     write_certificate(cert, cert_dir)
     out = tmp_path / "site"
     build_site(cert_dir, out)
@@ -377,3 +382,152 @@ def test_the_panel_escapes_what_it_shows():
     assert "<script>" not in markup and "<img" not in markup and "<b>" not in markup
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in markup and "&lt;img src=x&gt;" in markup
     assert copy.deepcopy(cert) == cert
+
+
+# --- review round: malformed certificates, before-scan evidence, more run-level paths, the score and index ------
+
+
+TAMPER_TARGETS = [
+    ("after",),
+    ("after", "holes"),
+    ("after", "attack"),
+    ("after", "exposure"),
+    ("after", "gates"),
+    ("before", "holes"),
+    ("before", "exposure"),
+    ("accepted",),
+]
+TAMPER_VALUES = [None, [], "text", 5, [1], {}]
+
+
+@pytest.mark.parametrize("path", TAMPER_TARGETS, ids="/".join)
+@pytest.mark.parametrize("value", TAMPER_VALUES, ids=repr)
+def test_a_malformed_legit_fix_certificate_gives_a_problem_never_a_crash(path, value):
+    cert = legit_cert()
+    target = cert["harden"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    problem = certify._legit_fix_problem(cert["harden"])
+    assert isinstance(problem, str) and problem
+    with pytest.raises(ValueError):  # never TypeError, KeyError or AttributeError
+        validate_certificate(cert)
+
+
+def test_a_null_after_holes_is_refused_with_a_value_error():
+    cert = legit_cert()
+    cert["harden"]["after"]["holes"] = None
+    with pytest.raises(ValueError, match="certified_via legit_fix requires"):
+        validate_certificate(cert)
+
+
+def test_git_history_and_network_need_the_before_scan_to_have_flagged_them():
+    _lab, report = happy()
+    network = dataclasses.replace(
+        report.before, holes=dataclasses.replace(report.before.holes, labels=("network",))
+    )
+    assert report.before.exposure.holes == ["git-history"]  # the before scan showed only git-history
+    assert "did not flag network" in legit_fix_blocker(network, report.after, report.accepted)
+    unscanned = dataclasses.replace(report.before, exposure=None)
+    assert "did not flag git-history" in legit_fix_blocker(unscanned, report.after, report.accepted)
+    cert = legit_cert()
+    cert["holes_found"] = cert["harden"]["before"]["holes"]["labels"] = ["network"]
+    with pytest.raises(ValueError, match="flagged by the before scan"):
+        validate_certificate(cert)
+
+
+def test_a_network_hole_closed_by_network_off_certifies_through_a_run():
+    lab = ViaLab(before_labels=("network",))
+    report = lab.run()
+    assert report.accepted == (th.NET_OFF,)
+    assert report.certified is True and report.certified_via == "legit_fix"
+    validate_certificate(build(report, lab))
+
+
+def test_a_test_edit_hole_certifies_when_the_guard_clears_the_scan(monkeypatch):
+    monkeypatch.setitem(th.SCAN_CLOSES, th.GUARD, "test-edit")
+    lab = ViaLab(before_labels=("test-edit",))
+    report = lab.run()
+    assert report.accepted == (th.GUARD,) and report.before.exposure.holes == ["test-edit"]
+    assert report.certified is True and report.certified_via == "legit_fix"
+    validate_certificate(build(report, lab))
+
+
+def test_a_test_edit_hole_whose_scan_stays_open_does_not_certify():
+    report = ViaLab(before_labels=("test-edit",)).run()  # nothing here clears the test-edit scan label
+    assert report.certified is False and "still shows test-edit" in report.reason
+
+
+def test_two_holes_closed_by_two_patches_certify_through_a_run():
+    lab = ViaLab(before_labels=("git-history", "network"))
+    report = lab.run()
+    assert set(report.accepted) == {th.STRIP, th.NET_OFF}
+    assert report.certified is True and report.certified_via == "legit_fix"
+    cert = build(report, lab)
+    validate_certificate(cert)
+    assert cert["holes_found"] == ["git-history", "network"]
+
+
+def test_a_multi_label_hole_with_one_label_attempted_again_does_not_certify():
+    report = ViaLab(before_labels=("git-history", "network"), after_attempted=("network",)).run()
+    assert report.certified is False and "attempted a before hole (network)" in report.reason
+
+
+def test_a_rejected_patch_blocks_a_legit_fix_certificate():
+    lab = ViaLab(
+        before_labels=("git-history", "test-edit"),
+        exposed=("git-history",),
+        apply_fail={th.GUARD: ("cannot apply",)},
+    )
+    report = lab.run()
+    assert report.accepted == (th.STRIP,) and report.rejected == (th.GUARD,)
+    assert report.after.attack["outcome"] == "legit_fix"
+    assert report.certified is False and report.certified_via is None
+    assert "not fully closed" in report.reason
+
+
+def test_score_counts_certified_via_and_legacy():
+    lab, report = happy()
+    legacy = tcert.valid_cert()
+    legacy.pop("certified_via")
+    legacy["harden"].pop("certified_via")
+    certs = [build(report, lab), tcert.cert_for(tcert.clean_report("a__b-1")), tcert.valid_cert(), legacy]
+    summary = score(certs)
+    assert summary["certified_via"] == {
+        "no_hole_found": 1,
+        "hardened_reattack_failed": 1,
+        "legit_fix": 1,
+        "legacy": 1,
+    }
+    assert sum(summary["certified_via"].values()) == summary["certified"] == 4
+    text = render_text(summary, Path("certs"))
+    assert "certified_via: hardened_reattack_failed=1, legacy=1, legit_fix=1, no_hole_found=1" in text
+
+
+def test_the_index_shows_via_next_to_certified_and_the_new_caption(tmp_path):
+    lab, report = happy()
+    cert_dir = tmp_path / "certs"
+    write_certificate(build(report, lab), cert_dir)
+    write_certificate(tcert.cert_for(tcert.clean_report("owner__repo-2")), cert_dir)
+    legacy = tcert.cert_for(tcert.fixed_report("owner__repo-3"))
+    legacy.pop("certified_via")
+    legacy["harden"].pop("certified_via")
+    write_certificate(legacy, cert_dir)
+    build_site(cert_dir, tmp_path / "site")
+    index = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
+    assert '<th scope="col">Via</th>' in index
+    assert "<td>yes</td><td>legit_fix</td>" in index
+    assert "<td>yes</td><td>no_hole_found</td>" in index
+    assert "<td>yes</td><td>legacy</td>" in index
+    assert "no hole left that this attacker could use (via: how it was certified)" in index
+    assert "Certified via legit_fix (also counted in Certified)</th><td>1</td>" in index
+    assert "Certified via legacy (also counted in Certified)</th><td>1</td>" in index
+
+
+def test_the_panel_says_how_closure_is_shown_and_whether_the_hole_was_tried_again(tmp_path):
+    page = page_for(tmp_path, legit_cert())
+    assert "Closure is shown by the exposure scan; the re-attack found no way back in." in page
+    assert "Earlier hole attempted again</th><td>none</td>" in page
+    cert = legit_cert()
+    cert["harden"]["after"]["holes"]["attempted"] = ["git-history"]
+    assert "Earlier hole attempted again</th><td>yes</td>" in site._before_after_section(cert)

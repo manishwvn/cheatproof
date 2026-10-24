@@ -743,6 +743,7 @@ def _score_section(summary: Mapping[str, Any], excluded: int, batch: _Batch, loa
                     "Certified, attacker succeeded before patching and the patches held (certified_hardened)",
                     summary.get("certified_hardened"),
                 ),
+                *_via_rows(summary.get("certified_via")),
                 ("Inconclusive", summary["inconclusive"]),
                 (
                     "No attempt, attacker never tried (no_attempt, also counted in the outcomes)",
@@ -791,6 +792,7 @@ def _environments_section(entries: Sequence[_Entry]) -> str:
                 _gates_text(gates["before"]),
                 _gates_text(gates["after"]),
                 cert["certified"],
+                _via_cell(cert),
                 _money(cert["cost_usd"]),
             )
         )
@@ -804,12 +806,18 @@ def _environments_section(entries: Sequence[_Entry]) -> str:
         "Gates before (gold, empty)",
         "Gates after",
         "Certified",
+        "Via",
         "Cost (USD)",
     )
     return _section(
         "environments",
         "Environments",
-        _table("One row per environment. Certified means not hackable by this attacker.", headers, rows),
+        _table(
+            "One row per environment. Certified means no hole left that this attacker could use (via: how it was "
+            "certified). It is not a claim that the task is secure.",
+            headers,
+            rows,
+        ),
     )
 
 
@@ -861,6 +869,24 @@ VIA_PLAIN = {
 }
 
 
+def _via_cell(cert: Mapping[str, Any]) -> str:
+    """The short certified_via for the index: the value, legacy when the key is absent, a dash when not certified."""
+    if "certified_via" not in cert:
+        return "legacy" if cert.get("certified") else "none"
+    return cert["certified_via"] or "none"
+
+
+def _via_rows(counts: Any) -> list[tuple[str, Any]]:
+    """Summary rows for the certified_via split. Empty when the score has none (an older score dict)."""
+    counts = _map(counts)
+    if not counts:
+        return []
+    return [
+        (f"Certified via {name} (also counted in Certified)", counts.get(name))
+        for name in ("no_hole_found", "hardened_reattack_failed", "legit_fix", "legacy")
+    ]
+
+
 def _via_text(cert: Mapping[str, Any]) -> str:
     """certified_via as recorded, with plain words. A certificate written before T50 has none."""
     if "certified_via" not in cert:
@@ -896,6 +922,14 @@ def _after_outcome(rnd: Mapping[str, Any]) -> str:
     return "failed (did not pass the hidden tests)"
 
 
+def _attempted_again(before_holes: Mapping[str, Any], after: Mapping[str, Any]) -> str:
+    """yes when the after attack's attempted labels name a before hole label, else none."""
+    earlier, attempted = before_holes.get("labels"), _map(after.get("holes")).get("attempted")
+    if not isinstance(earlier, list) or not isinstance(attempted, list):
+        return "not recorded"
+    return "yes" if set(earlier) & set(attempted) else "none"
+
+
 def _before_after_section(cert: Mapping[str, Any]) -> str:
     """The before -> after panel for a hardened task. Empty for a task with no after round. It shows labels, tags
     and counts only, never diff text, and says "against this attacker" because that is all the evidence is."""
@@ -915,7 +949,8 @@ def _before_after_section(cert: Mapping[str, Any]) -> str:
     )
     lead = (
         "Hole closed, task still solvable: after hardening the attacker submitted a fix that passes the hidden "
-        "tests like the gold fix. This holds against this attacker only."
+        "tests like the gold fix. Closure is shown by the exposure scan; the re-attack found no way back in. "
+        "This holds against this attacker only."
         if closed
         else "Before and after hardening, as recorded. Results hold against this attacker only."
     )
@@ -938,6 +973,7 @@ def _before_after_section(cert: Mapping[str, Any]) -> str:
                 ("Exposure scan", exposure),
                 ("Gates held", gates_ok),
                 ("Re-attack outcome", _after_outcome(after)),
+                ("Earlier hole attempted again", _attempted_again(before_holes, after)),
                 ("Certified via", _via_text(cert)),
             ],
         ),

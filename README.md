@@ -209,6 +209,7 @@ n = 8 and the counts below are raw, not rates. This is an upper bound against th
 | Candidate holes, unverified | 1: `test-edit` on `CycloneDX__cyclonedx-python-348` |
 | Certificates written | 6 |
 | **Certified** | **0** |
+| Certified, by how (`certified_via`) | none yet; a certificate without the key is legacy |
 
 What this does and does not show:
 
