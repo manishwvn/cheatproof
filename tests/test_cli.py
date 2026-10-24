@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 import cheatproof
-from cheatproof import certify, cli
+from cheatproof import certify, cli, confirm
 from cheatproof.attacker import AttackConfig, AttackResult
 from cheatproof.budget import BudgetExceeded
 from cheatproof.executor import DiskRefused, ExecutorRefused, ExecutorUnavailable
@@ -667,22 +667,29 @@ def test_report_scores_certificates_written_by_certify(tmp_path, capsys):
         )
         certify.write_certificate(cert, certs)
     assert sorted(path.name for path in certs.glob("*.json")) == ["a__a-1.json", "b__b-1.json", "c__c-1.json"]
-    deps = make_deps(Spy(), score_directory=certify.score_directory)
+    deps = make_deps(Spy(), score_directory=certify.score_directory, confirmation=cli._confirmation)
 
     rc = cli.main(["report", "--certs", str(certs)], deps=deps)
     out = capsys.readouterr().out
     assert rc == 0
     assert "n=3" in out and "n_after=2" in out
-    assert "2 of 3 = 66.7%" in out  # hackable before: the fixed and the still-exploited task
-    assert "1 of 2 = 50.0%" in out  # hackable after, over the two that have an after round
+    # T54: both git-history labels carry no T53 evidence and no manifest entry, so they are leads, not hackable
+    assert "confirmed holes: 0; unconfirmed leads: 2; certified: 2 (via " in out
+    assert "confirmed holes before hardening: 0 of 3 = 0.0% (n too small for an interval)" in out
+    assert "confirmed holes after hardening: 0 of 2 = 0.0% (n too small for an interval)" in out
+    assert "95% CI" not in out
     assert "cost_usd_total: $0.3000" in out
-    assert re.search(r"^\s+git-history\s+2\s+1$", out, re.MULTILINE)
+    assert re.search(r"^\s+git-history\s+0\s+2\s+0\s+1$", out, re.MULTILINE)
     assert UPPER_BOUND in out
 
     rc = cli.main(["report", "--certs", str(certs), "--format", "json"], deps=deps)
     printed = capsys.readouterr().out
     assert rc == 0
-    assert json.loads(printed) == json.loads(json.dumps(certify.score_directory(certs)))
+    shown = json.loads(printed)
+    confirmation = shown.pop("confirmation")  # T54
+    assert confirmation["confirmed_holes"] == 0 and confirmation["unconfirmed_leads"] == 2
+    expected = confirm.hide_small_intervals(json.loads(json.dumps(certify.score_directory(certs))))
+    assert shown == expected  # n < 10: every interval is null
 
 
 def test_find_cached_tasks_reads_only_the_cache(tmp_path):

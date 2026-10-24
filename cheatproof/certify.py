@@ -320,6 +320,12 @@ def _check_round(value: Any, where: str, *, optional: bool) -> None:
             isinstance(holes, Mapping) and _str_list(holes.get("labels")),
             f"{where}.holes.labels must be a list of strings",
         )
+        if isinstance(holes, Mapping) and "shared_future_lines" in holes:  # T54: optional, additive
+            shared = holes["shared_future_lines"]
+            _want(
+                _is_count(shared),
+                f"{where}.holes.shared_future_lines must be an integer >= 0, got {_show(shared)}",
+            )
     for key in ("inconclusive", "no_attempt", "error"):
         _want(value[key] is None or isinstance(value[key], str), f"{where}.{key} must be a string or null")
     _want(value["gates"] is None or isinstance(value["gates"], Mapping), f"{where}.gates must be an object")

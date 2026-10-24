@@ -104,7 +104,8 @@ def test_index_lists_each_environment_with_working_relative_links(tmp_path):
     index = read(result.index)
     assert result.index == out / "index.html"
     assert [page.name for page in result.pages] == NAMES
-    links = re.findall(r'<a href="(env/[^"]+)">', index)
+    table = index.split('id="environments"')[1]  # the hero block links to its leads too
+    links = re.findall(r'<a href="(env/[^"]+)">', table)
     assert links == [f"env/{name}" for name in NAMES]
     for link in links:
         page = out / link
@@ -262,10 +263,8 @@ def test_index_shows_the_score_exactly_as_certify_gives_it(tmp_path):
     index = read(out / "index.html")
     summary = score_directory(cert_dir)
     assert f"n = {summary['n']} valid certificates" in index
-    low, high = summary["rate_before"]["interval_95"]
-    assert f"(95% CI {low:.1%} to {high:.1%})" in index
-    low, high = summary["rate_after"]["interval_95"]
-    assert f"(95% CI {low:.1%} to {high:.1%})" in index
+    assert "95% CI" not in index  # T54: n = 3, so no interval
+    assert index.count("n too small for an interval") >= 2
     for name, count in summary["outcomes"].items():
         assert f"<td>{name}</td><td>{count}</td>" in index
 
@@ -301,7 +300,7 @@ def test_a_directory_with_no_conclusive_certificate_still_builds(tmp_path, make)
     result = build_site(cert_dir, tmp_path / "site")
     index = read(result.index)
     assert result.index.is_file()
-    assert "<td>Hackable after hardening</td><td>0 of 0, no conclusive certificates</td>" in index
+    assert "<td>Confirmed holes after hardening</td><td>0 of 0, no conclusive certificates</td>" in index
     assert "0 of 0 = " not in index
 
 
@@ -431,7 +430,7 @@ def test_tables_and_preformatted_text_are_focusable_and_named(tmp_path):
     result = build_site(cert_dir, tmp_path / "site")
     index = read(result.index)
     page = read(result.pages[0])
-    assert 'aria-label="Rates with 95% Wilson intervals"' in index
+    assert 'aria-label="Rates with 95% Wilson intervals (shown from n = 10)"' in index
     assert '<th scope="row"><a href="env/owner__repo-1.html">owner__repo-1</a></th>' in index
     assert '<td><a href="env/' not in index
     for text in (index, page):

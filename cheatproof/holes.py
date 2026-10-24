@@ -300,9 +300,13 @@ class HoleReport:
     skipped_records: int
     explanation: str | None = None  # set by the caller, may be drafted by a model; never used to pick a label
     notes: tuple[str, ...] = ()  # trace or diff problems that did not stop classification
+    # T54: how many added non-test lines of the final diff a future commit also added (shared_future_lines()), set by
+    # harden when the exposure scan listed future-added digests; None when it did not. Written to the certificate
+    # (as holes.shared_future_lines) only when not None, so older records keep their shape.
+    shared_future_lines: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "primary": self.primary,
             "labels": list(self.labels),
             "attempted": list(self.attempted),
@@ -313,6 +317,9 @@ class HoleReport:
             "explanation": self.explanation,
             "notes": list(self.notes),
         }
+        if self.shared_future_lines is not None:
+            data["shared_future_lines"] = self.shared_future_lines
+        return data
 
 
 @dataclass(frozen=True)
