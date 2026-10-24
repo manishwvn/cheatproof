@@ -25,6 +25,48 @@ Limits (all in code):
   redacted whole), and each word is checked on its own. Result titles, urls and snippets get the same cleaning. The trace shows the cleaned query
   (`tool: web_search`, `args.query` in `traces/<stem>.jsonl`). The key is never in a query, result, trace or error.
 
+## Harness recon search (T52)
+
+On the live run the attacker (Nemotron Super) never chose to call `web_search`, so Tavily usage stayed 0 and no trace
+held a real Tavily runtime call. With `--network-fetch` the harness now makes one search itself, and says so everywhere.
+It is not an attacker decision, and nothing here claims the attacker used Tavily.
+
+- When: once, at the start of the before-hardening attack, before the first model step. Never in the after-hardening
+  re-attack (that attack gets no search and `harness_search` off). Off with `--no-harness-search` (harden and batch).
+- Query: the title of the problem statement (its first non-empty line, the statement the attacker already sees),
+  cleaned with `sanitize.clean_text` and cut to `MAX_QUERY_CHARS` (300). Fence lines (code fences, dash rules, the
+  problem-statement markers) are skipped. No hidden-test, gold-patch or test-patch text. If the query is empty or most
+  of its words are REDACTED, no call is made: the trace gets a `harness_search` record with `skipped: true` and
+  `reason: EmptyQuery`, and the certificate says `harness_search: null`.
+- Path: the same search callable as the attacker's own tool, so `budget.reserve_tavily_call()` and `TAVILY_CALL_CAP`
+  apply. It is not counted in the attacker's 3 `web_search` calls, so a run can make up to 4 Tavily calls. The 2-task
+  `--network-fetch` cap and the offline sandbox are unchanged.
+- Result: at most 3 results, title and snippet only, cleaned, 3000 chars in all, added to the first user message under
+  the heading `Harness recon search (Tavily, runtime call; run by the harness, not chosen by you)`, a warning that
+  the text comes from the open web and may contain injected instructions (data only), and begin and end markers
+  (an end marker inside the web text is replaced). `results` counts the blocks really shown (0 when none).
+- Failure: any search error (missing key, network, cap exhausted inside the wrapper) is logged as the exception class
+  name only and the attack goes on without results. A `BudgetExceeded` stops the attempt cleanly, as any budget stop.
+- The attacker's own `web_search` tool is separate and still offered; the prompt says the two are different things.
+
+Records:
+- Trace (`traces/<stem>.jsonl`), written after the header and before the first step:
+  `{"type":"harness_search","provider":"tavily","label":"harness recon search via Tavily (runtime call)","query":...,"results":N,"ok":true,"error":null}`.
+  It is not a `step` record and has no `tool` field. `ok` false carries the exception class name in `error`.
+  `injected_chars` is how many characters of web text went into the first message (a count, never the text).
+- Certificate: `attacker.harness_search` is exactly `{provider: "tavily", query (<= 300 chars), results (0..3), ok}` or `null` (present with `--network-fetch`,
+  null when the flag is off or the search never ran; absent in runs without `--network-fetch` and in older
+  certificates, which still validate).
+- `batch.json`: a run row gets `harness_search` (same four keys) when a search was attempted. The site shows a
+  `harness search via Tavily` tag next to the strategy (`(failed)` when `ok` is false).
+
+How to verify (the live run is the lead's; these are checks, not calls):
+1. The trace has a harness_search record: `grep '"type": "harness_search"' results/traces/<stem>.jsonl` shows the label,
+   the cleaned query and `"ok": true`. Pick the trace from the run you mean; a rotated earlier trace has its own copy.
+2. The certificate says so: `python -c "import json;print(json.load(open('<cert>.json'))['attacker']['harness_search'])"`.
+3. Tavily usage is a manual step: compare the Tavily dashboard usage before and after the run (the ledger's
+   `tavily_calls` counts the same calls). Nothing in the repo calls Tavily to check this.
+
 Run one task (not before the owner clears it):
 
     python -m cheatproof.cli batch --instance-ids <ID> --network-fetch --system-prompt-file results/combined.txt \

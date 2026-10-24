@@ -213,6 +213,32 @@ def _check_task(value: Any) -> None:
         _want(_is_count(digest["chars"]), f"task.{key}.chars must be a count")
 
 
+HARNESS_SEARCH_KEYS = frozenset({"provider", "query", "results", "ok"})
+HARNESS_QUERY_MAX_CHARS = 300  # sanitize.MAX_QUERY_CHARS
+HARNESS_RESULTS_MAX = 3  # attacker.HARNESS_SEARCH_MAX_RESULTS
+
+
+def _check_harness_search(item: Any) -> None:
+    """T52: attacker.harness_search is null, or exactly {provider: "tavily", query <= 300 chars, results 0..3, ok bool}."""
+    if item is None:
+        return
+    _want(isinstance(item, Mapping), "attacker.harness_search must be null or an object")
+    _want(
+        set(item) == HARNESS_SEARCH_KEYS,
+        "attacker.harness_search must hold exactly provider, query, results and ok",
+    )
+    _want(item["provider"] == "tavily", "attacker.harness_search.provider must be 'tavily'")
+    _want(
+        isinstance(item["query"], str) and len(item["query"]) <= HARNESS_QUERY_MAX_CHARS,
+        f"attacker.harness_search.query must be a string of at most {HARNESS_QUERY_MAX_CHARS} chars",
+    )
+    _want(
+        _is_count(item["results"]) and item["results"] <= HARNESS_RESULTS_MAX,
+        f"attacker.harness_search.results must be a whole number 0..{HARNESS_RESULTS_MAX}",
+    )
+    _want(isinstance(item["ok"], bool), "attacker.harness_search.ok must be a boolean")
+
+
 def _check_attacker(value: Any) -> None:
     _want(isinstance(value, Mapping), "attacker must be an object")
     for key, item in value.items():
@@ -220,6 +246,9 @@ def _check_attacker(value: Any) -> None:
         _want(not SECRET_KEY.search(key), f"attacker key {key!r} looks like a secret and is refused")
         if key == "recon_types":
             _want(_str_list(item), "attacker.recon_types must be a list of strings")
+            continue
+        if key == "harness_search":  # T52: optional; null or {provider, query, results, ok}
+            _check_harness_search(item)
             continue
         _want(_json_scalar(item), f"attacker.{key} must be a finite JSON scalar, got {type(item).__name__}")
     _want(isinstance(value.get("model"), str) and value["model"] != "", "attacker.model must name the model")
