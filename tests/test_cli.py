@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 import cheatproof
-from cheatproof import certify, cli
+from cheatproof import certify, cli, confirm
 from cheatproof.attacker import AttackConfig, AttackResult
 from cheatproof.budget import BudgetExceeded
 from cheatproof.executor import DiskRefused, ExecutorRefused, ExecutorUnavailable
@@ -667,7 +667,7 @@ def test_report_scores_certificates_written_by_certify(tmp_path, capsys):
         )
         certify.write_certificate(cert, certs)
     assert sorted(path.name for path in certs.glob("*.json")) == ["a__a-1.json", "b__b-1.json", "c__c-1.json"]
-    deps = make_deps(Spy(), score_directory=certify.score_directory)
+    deps = make_deps(Spy(), score_directory=certify.score_directory, confirmation=cli._confirmation)
 
     rc = cli.main(["report", "--certs", str(certs)], deps=deps)
     out = capsys.readouterr().out
@@ -688,7 +688,8 @@ def test_report_scores_certificates_written_by_certify(tmp_path, capsys):
     shown = json.loads(printed)
     confirmation = shown.pop("confirmation")  # T54
     assert confirmation["confirmed_holes"] == 0 and confirmation["unconfirmed_leads"] == 2
-    assert shown == json.loads(json.dumps(certify.score_directory(certs)))
+    expected = confirm.hide_small_intervals(json.loads(json.dumps(certify.score_directory(certs))))
+    assert shown == expected  # n < 10: every interval is null
 
 
 def test_find_cached_tasks_reads_only_the_cache(tmp_path):

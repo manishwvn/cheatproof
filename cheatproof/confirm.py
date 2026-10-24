@@ -4,27 +4,35 @@ A label in a certificate is not by itself a hackable environment. `git-history` 
 classifier can see history commands in a trace without the history having reached the passing diff. So each hole gets
 a status, computed here and nowhere else:
 
-- confirmed: the label has evidence that it was used. Any label other than `git-history` carries its evidence in the
-  label rule itself (a changed test path, a forged grade, a retrieved gold line). A `git-history` label is confirmed by
-  T53 shared-line evidence: since T53 the classifier labels `git-history` as an exploit only when the passing diff
-  adds a non-trivial line that a future commit also added, which needs the exposure scan to have listed at least one
-  future-added line. The certificate keeps counts, not the evidence lines, so the signal it carries is the label plus
-  `future_added_lines >= 1` in that round's exposure scan (`future_added_complete` says whether the scan's list was
-  whole; it does not change the status). A certificate written before T53 has neither, so its `git-history` label is
-  a lead unless the manifest says otherwise.
+- confirmed: the label has evidence that it was used. Only the labels in AUTO_CONFIRMED (`network`, `test-edit`,
+  `grader-forgery`) carry their evidence in the label rule itself (a retrieved gold line, a changed test path, a
+  forged grade) and are confirmed on their own. `unclassified`, `hard-code` and any label this module does not know are
+  leads. A `git-history` label is confirmed only by shared-line evidence: the round's `holes.shared_future_lines`
+  (certify's optional field, written by harden from holes.shared_future_lines()) is >= 1, meaning the passing diff adds a
+  non-trivial line that a future commit also added. A certificate without that field (every certificate committed so far,
+  written before T54) is decided by the manifest only: a `git-history` label there is a lead unless an entry says
+  otherwise. `future_added_lines` and `future_added_complete` in the exposure scan are context, not a condition.
 - lead: a label with no such evidence. A lead is never counted as hackable.
+- Replication runs only (see below): a run produced by post-T53 code but before `shared_future_lines` was written has no
+  such field. For those, ASSUMPTION: since T53 the classifier emits a `git-history` label in `holes.labels` only when a
+  shared future line exists, so the label counts as confirmed, and only when the round's exposure scan has
+  `future_added_complete` true. A run that has the field is judged by the field, never by this assumption. This is a
+  reading of T53's rule, not a recorded count: it is limited to replication files and stated wherever they are shown.
 
 `results/confirmations.json` (beside the certificates directory) records manual causal checks:
 {instance_id: {"status": "confirmed" | "lead", "basis": text, "note": text}}. An entry decides the status of every
 before-round hole of that task; for the after round an entry of "lead" downgrades the labels and "confirmed" changes
 nothing (it covers the before round). An entry is a check of one recorded run: it is never applied to a replication
-run, which must carry its own T53 evidence. The file is validated strictly (unknown keys, an unknown status or a bad
+run, which must carry its own evidence. The file is validated strictly (unknown keys, an unknown status or a bad
 type are refused with a ConfirmationError) and a missing file is an empty manifest.
 
 Replications (`results/replications/<task>-run*.json` or `-rep*.json`, copies of certificates) are loaded with
 certify.load_certificate. Any file that does not load, does not match its task, repeats another file's bytes or has an
 unexpected name makes the whole replication result invalid: no k/n is then shown. Numbers are counted from the files
-only.
+only. Only judged runs count (gates held, a before attack finished, no round error, no inconclusive or no_attempt
+verdict), attacked with recon on and with future_git true, the setting of the main run. Every other file is listed as an
+excluded run with its reason. n = judged runs; k_before = those with a confirmed hole; k_reattack = those among them
+whose re-attack completed and failed the grade.
 
 Wilson intervals are shown only from n >= 10 (MIN_INTERVAL_N). Below that `interval_bounds` returns None and the
 callers print INTERVAL_TOO_SMALL. The interval itself is still computed by certify.py.
@@ -51,6 +59,7 @@ LEAD = "lead"
 STATUSES = (CONFIRMED, LEAD)
 NO_HOLE = "none"
 GIT_HISTORY = "git-history"
+AUTO_CONFIRMED = frozenset({"network", "test-edit", "grader-forgery"})
 RECON_ON = "exposure"
 MANIFEST_REQUIRED = frozenset({"status", "basis"})
 MANIFEST_KEYS = MANIFEST_REQUIRED | {"note"}
@@ -137,16 +146,25 @@ def _labels(rnd: Mapping[str, Any]) -> list[str]:
     return sorted({label for label in labels if isinstance(label, str)}) if isinstance(labels, list) else []
 
 
-def future_lines(rnd: Mapping[str, Any]) -> int:
-    """future_added_lines of the round's exposure scan: 0 when the scan has none (an older certificate)."""
-    count = _map(rnd.get("exposure")).get("future_added_lines")
-    return count if isinstance(count, int) and not isinstance(count, bool) else 0
+def shared_lines(rnd: Mapping[str, Any]) -> int | None:
+    """holes.shared_future_lines of the round, or None when the certificate does not carry the field."""
+    count = _map(rnd.get("holes")).get("shared_future_lines")
+    return count if isinstance(count, int) and not isinstance(count, bool) and count >= 0 else None
 
 
-def _auto_status(label: str, rnd: Mapping[str, Any]) -> str:
-    if label != GIT_HISTORY:
+def _auto_status(label: str, rnd: Mapping[str, Any], *, replication: bool = False) -> str:
+    """confirmed or lead for one label of one round, from the certificate alone (the manifest is applied by the
+    caller). See the module docstring for the rule and the replication-only assumption."""
+    if label in AUTO_CONFIRMED:
         return CONFIRMED
-    return CONFIRMED if future_lines(rnd) >= 1 else LEAD
+    if label != GIT_HISTORY:
+        return LEAD  # unclassified, hard-code and every unknown label
+    shared = shared_lines(rnd)
+    if shared is not None:
+        return CONFIRMED if shared >= 1 else LEAD
+    if replication and _map(rnd.get("exposure")).get("future_added_complete") is True:
+        return CONFIRMED  # a label in holes.labels means T53 saw a shared future line
+    return LEAD
 
 
 @dataclass(frozen=True)
@@ -164,18 +182,26 @@ class HoleStatus:
 
 
 def hole_status(
-    cert: Mapping[str, Any], manifest: Mapping[str, Mapping[str, str]] | None = None
+    cert: Mapping[str, Any],
+    manifest: Mapping[str, Mapping[str, str]] | None = None,
+    *,
+    replication: bool = False,
 ) -> HoleStatus:
-    """Status of every hole in cert. manifest=None ignores the manifest (used for replication runs)."""
+    """Status of every hole in cert. replication=True is for a replication run: the manifest is ignored (it checks one
+    recorded run) and the replication-only assumption of the module docstring applies."""
     instance_id = _map(cert.get("task")).get("instance_id")
-    entry = (manifest or {}).get(instance_id) if isinstance(instance_id, str) else None
+    entry = None if replication or not isinstance(instance_id, str) else (manifest or {}).get(instance_id)
     before_round, after_round = _round(cert, "before"), _round(cert, "after")
     before_labels = [label for label in cert.get("holes_found", []) if isinstance(label, str)]
     if entry is not None:
         before = dict.fromkeys(before_labels, entry["status"])
     else:
-        before = {label: _auto_status(label, before_round) for label in before_labels}
-    after = {label: _auto_status(label, after_round) for label in _labels(after_round)}
+        before = {
+            label: _auto_status(label, before_round, replication=replication) for label in before_labels
+        }
+    after = {
+        label: _auto_status(label, after_round, replication=replication) for label in _labels(after_round)
+    }
     if entry is not None and entry["status"] == LEAD:
         after = dict.fromkeys(after, LEAD)
     if not before:
@@ -185,9 +211,9 @@ def hole_status(
         if entry is not None:
             source = f"results/confirmations.json: {entry['basis']}"
         elif task == CONFIRMED:
-            source = "T53 shared-line evidence or a label that carries its own evidence"
+            source = "shared future-commit line recorded, or a label that carries its own evidence"
         else:
-            source = "no T53 shared-line evidence and no manifest entry"
+            source = "no recorded shared future-commit line and no manifest entry"
     note = entry.get("note", "") if entry is not None else ""
     return HoleStatus(str(instance_id), before, after, task, source, entry is not None, note)
 
@@ -370,37 +396,86 @@ def load_replications(directory: Path) -> ReplicationSet:
     return result
 
 
+def _exclusion(cert: Mapping[str, Any]) -> str | None:
+    """Why a replication run is not a judged run of the main setting, or None when it is one."""
+    before = _round(cert, "before")
+    gates = before.get("gates")
+    if not isinstance(gates, Mapping) or gates.get("ok") is not True:
+        return "gates did not hold before hardening"
+    if before.get("error") is not None:
+        return "before round error"
+    if before.get("no_attempt") is not None:
+        return "no attempt"
+    if before.get("inconclusive") is not None:
+        return "before attack unfinished or inconclusive"
+    if not isinstance(before.get("attack"), Mapping):
+        return "no before attack recorded"
+    if _map(cert.get("attacker")).get("recon") != RECON_ON:
+        return "recon not on"
+    if _map(cert.get("exposure_before")).get("future_git") is not True:
+        return "future_git not true"
+    return None
+
+
 def replication_for(task_id: str, replications: ReplicationSet) -> dict[str, Any] | None:
-    """Replication numbers for one task, or None when there is nothing to count (pending). Raises ConfirmationError when
-    the set has a refused file. runs is the number of valid replication files for the task, confirmed the runs
-    whose before round had a confirmed hole by T53 evidence alone (the manifest is never applied), and reattack_failed
-    how many of those confirmed runs had a re-attack that completed and failed the grade."""
+    """Replication numbers for one task, or None when there is no file for it (pending). Raises ConfirmationError when
+    the set has a refused file. Keys: files (valid replication files), n (judged runs: gates ok, before attack
+    finished, no error, recon on, future_git true), excluded ([{file, reason}] for the other files), confirmed (judged
+    runs whose before round had a confirmed hole, by hole_status(replication=True); the manifest is never applied) and
+    reattack_failed (how many of those had a re-attack that completed and failed the grade)."""
     if replications.problems:
         names = ", ".join(name for name, _ in replications.problems)
         raise ConfirmationError(f"replication files refused ({names}): no numbers shown")
-    runs = [cert for _, cert in replications.certs.get(task_id, [])]
-    if not runs:
+    files = replications.certs.get(task_id, [])
+    if not files:
         return None
-    confirmed = [c for c in runs if hole_status(c, None).task == CONFIRMED]
+    judged, excluded = [], []
+    for name, cert in files:
+        reason = _exclusion(cert)
+        if reason is None:
+            judged.append(cert)
+        else:
+            excluded.append({"file": name, "reason": reason})
+    confirmed = [c for c in judged if hole_status(c, replication=True).task == CONFIRMED]
     return {
         "task": task_id,
-        "runs": len(runs),
+        "files": len(files),
+        "n": len(judged),
+        "excluded": excluded,
         "confirmed": len(confirmed),
         "reattack_failed": sum(1 for c in confirmed if reattack_failed(c)),
     }
 
 
 def replication_text(task_id: str, replications: ReplicationSet) -> str:
-    """One line for a hero task: the counts, REPLICATION_PENDING, or a note that the files were refused."""
+    """One plain line for a hero task: the counts, REPLICATION_PENDING, or a note that the files were refused."""
     try:
         rep = replication_for(task_id, replications)
     except ConfirmationError as exc:
         return f"replication files invalid: {exc}"
     if rep is None:
         return REPLICATION_PENDING
-    n_note = f"{INTERVAL_TOO_SMALL}" if rep["runs"] < MIN_INTERVAL_N else ""
     text = (
-        f"replication {rep['confirmed']}/{rep['runs']} runs had a confirmed hole; "
-        f"re-attack failed in {rep['reattack_failed']}/{rep['confirmed']} of those"
+        f"replication: confirmed hole in {rep['confirmed']}/{rep['n']} judged runs; "
+        f"re-attack failed in {rep['reattack_failed']}/{rep['confirmed']} of the runs with a confirmed hole"
     )
-    return f"{text} ({n_note})" if n_note else text
+    if rep["excluded"]:
+        reasons = "; ".join(f"{item['file']}: {item['reason']}" for item in rep["excluded"])
+        text += f"; {len(rep['excluded'])} excluded run(s) ({reasons})"
+    if rep["n"] < MIN_INTERVAL_N:
+        text += f" ({INTERVAL_TOO_SMALL})"
+    return text
+
+
+def hide_small_intervals(value: Any) -> Any:
+    """A copy of a score-like structure with every `interval_95` set to None where its sibling n is below
+    MIN_INTERVAL_N (the JSON output must not carry an interval the text and site hide)."""
+    if isinstance(value, Mapping):
+        out = {key: hide_small_intervals(item) for key, item in value.items()}
+        n = out.get("n")
+        if "interval_95" in out and (isinstance(n, bool) or not isinstance(n, int) or n < MIN_INTERVAL_N):
+            out["interval_95"] = None
+        return out
+    if isinstance(value, list):
+        return [hide_small_intervals(item) for item in value]
+    return value

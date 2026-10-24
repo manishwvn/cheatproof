@@ -229,6 +229,9 @@ class Deps:
     preflight: Callable[..., Any] | None = None
     # T37 --network-fetch: budget -> the capped, cleaned web_search callable. None: the flag is refused at the run.
     make_search: Callable[[Any], Callable[[str], list[dict]]] | None = None
+    # T54: directory -> (confirmation summary, replication entries, refused replication files). It raises on any
+    # problem, and `report` then fails. None only in fakes; Deps.default() always sets it.
+    confirmation: Callable[[Path], tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]] | None = None
 
     @classmethod
     def for_dry_run(cls) -> Deps:
@@ -275,6 +278,7 @@ class Deps:
             score_directory=certify.score_directory,
             build_site=_build_site,
             clock=_utc_now,
+            confirmation=_confirmation,
             load_selection=load_cached_selection,
             disk_free_gb=_free_gb,
             preflight=_collect_gate,
@@ -1558,18 +1562,15 @@ def render_text(
     return "\n".join(lines)
 
 
-def _confirmation(
-    directory: Path, manifest: Mapping[str, Any]
-) -> tuple[dict[str, Any] | None, dict[str, dict[str, Any]]]:
-    """T54: confirm.summarize over the certificates in directory, plus a replication entry for each confirmed task.
-    (None, {}) when the certificates cannot be loaded here (deps.score_directory is a fake in some tests)."""
+def _confirmation(directory: Path) -> tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]:
+    """T54: the manifest beside the certificates, confirm.summarize over the certificates in directory, and a
+    replication entry for each confirmed task, plus the names of any refused replication files. Raises on any problem
+    (ConfirmationError, OSError, ValueError, ...): the caller fails loudly and never falls back to raw label counts."""
     from cheatproof.certify import load_certificate
 
-    try:
-        certs = [load_certificate(path) for path in sorted(directory.glob("*.json")) if path.is_file()]
-        summary = confirm.summarize(certs, manifest)
-    except (OSError, ValueError, KeyError, TypeError):
-        return None, {}
+    manifest = confirm.load_manifest(directory.parent / confirm.CONFIRMATIONS_FILE)
+    certs = [load_certificate(path) for path in sorted(directory.glob("*.json")) if path.is_file()]
+    summary = confirm.summarize(certs, manifest)
     replications = confirm.load_replications(directory.parent / confirm.REPLICATIONS_DIR)
     entries: dict[str, dict[str, Any]] = {}
     for task in summary["confirmed_ids"]:
@@ -1577,11 +1578,8 @@ def _confirmation(
             counts = confirm.replication_for(task, replications)
         except confirm.ConfirmationError:
             counts = None
-        entries[task] = {
-            "counts": counts,
-            "text": confirm.replication_text(task, replications),
-        }
-    return summary, entries
+        entries[task] = {"counts": counts, "text": confirm.replication_text(task, replications)}
+    return summary, entries, [name for name, _ in replications.problems]
 
 
 def cmd_report(args: argparse.Namespace, deps: Deps) -> int:
@@ -1601,15 +1599,20 @@ def cmd_report(args: argparse.Namespace, deps: Deps) -> int:
         return _usage_error(f"no certificates scored under {directory}")
 
     batch = _read_batch(directory.parent / BATCH_FILE)
-    try:
-        manifest = confirm.load_manifest(directory.parent / confirm.CONFIRMATIONS_FILE)
-    except confirm.ConfirmationError as exc:
-        return _usage_error(f"could not read the confirmations: {sanitize(str(exc))[:ERROR_CHARS]}")
-    confirmation, replications = _confirmation(directory, manifest)
+    confirmation: dict[str, Any] | None = None
+    replications: dict[str, dict[str, Any]] = {}
+    refused: list[str] = []
+    if deps.confirmation is not None:  # None only for fakes; the real set always has it (see Deps.default)
+        try:
+            confirmation, replications, refused = deps.confirmation(directory)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            return _usage_error(
+                f"could not count confirmed holes in {directory}: {sanitize(str(exc))[:ERROR_CHARS]}"
+            )
     shown: dict[str, Any] = dict(score) if batch is None else {**score, "batch": batch}
     if confirmation is not None:
         shown["confirmation"] = {**confirmation, "replication": replications}
-    payload = json.dumps(shown, indent=2, sort_keys=True) + "\n"
+    payload = json.dumps(confirm.hide_small_intervals(shown), indent=2, sort_keys=True) + "\n"
     if args.out is not None:
         try:
             args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -1630,6 +1633,9 @@ def cmd_report(args: argparse.Namespace, deps: Deps) -> int:
         )
         if args.out is not None:
             print(f"wrote {args.out}")
+    if refused:  # a refused replication file means no replication number was drawn: say so and exit non-zero
+        print(f"error: replication files refused: {', '.join(refused)}", file=sys.stderr)
+        return 1
     return 0
 
 

@@ -116,8 +116,10 @@ from cheatproof.holes import (
     HARD_CODE,
     LEGIT_FIX,
     UNCLASSIFIED,
+    FutureAdded,
     HoleReport,
     downgrade_legit_fix,
+    shared_future_lines,
 )
 from cheatproof.recon import RECON_EXPOSURE, forbidden_snippets, recon_text, recon_types
 
@@ -701,6 +703,8 @@ class _Loop:
             state.attack = {**(state.attack or {}), "outcome": verdict[0]}
             if verdict[0] == GOLD_MATCH_LEAD:
                 self.notes.append(f"needs manual review: {self.task.instance_id} {GOLD_MATCH_LEAD}")
+        if isinstance(future_added, FutureAdded) and diff:  # T54: the count the site and report confirm from
+            holes = replace(holes, shared_future_lines=shared_future_lines(diff, self.task, future_added))
         state.holes = holes
         state.inconclusive = legit or _inconclusive(
             result, state.attack_grade, patched, state.no_attempt, exploited=holes.exploited
