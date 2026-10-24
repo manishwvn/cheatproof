@@ -2,7 +2,7 @@
 
 ## 2026-10-24 planner (run cap, audit)
 - Owner approval, relayed by the orchestrator (owner's reply in the orchestrator chat, 2026-10-24): "approve 500".
-  Change: `SANDBOX_RUN_CAP` 250 -> 500.
+  Change: `SANDBOX_RUN_CAP` 250 -> 500 in the live .env only; code default and .env.example still 250.
 - Reason: `sandbox_runs` hit 250 after the T55 replication. The exposure audit and the Ultra runs need more.
 - `REAL_SPEND_CAP_USD` set to 7.00 in the live `.env` as a stricter stop (orchestrator decision, 2026-10-24). The code
   ceiling stays $10.

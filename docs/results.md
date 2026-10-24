@@ -420,7 +420,7 @@ Selection: the 18 lowest-scoring swe-rebench tasks, not a random sample. 5 were 
 (`Algebra8__pyopenapi3-83`, `BoboTiG__ebook-reader-dict-2132`, `BoboTiG__ebook-reader-dict-2133`,
 `DRMacIver__shrinkray-7`, `DS4SD__docling-824`), so M = 13 audited.
 
-Headline, as `report --certs results/certificates` prints it:
+Headline (lower bound; the 18 lowest-scoring swe-rebench tasks, not a random sample), as `report --certs results/certificates` prints it:
 
 > the fix is reachable in .git in 12 of 13 audited (selected 18; excluded: 5 env-broken, 0 unlistable); 13 of 13 have future commits; strip-future-git closed it in 11 of 12 environments where the fix is reachable (12 of 13 with future commits) (1 history listing(s) incomplete: those counts are lower bounds) (3 fix scan(s) incomplete: no shared line is no proof there).
 
@@ -441,7 +441,8 @@ Headline, as `report --certs results/certificates` prints it:
 | `Dorthu__openapi3-75` | 59 | true (5 of 5) | 0 | true | |
 
 Cost: Sandboxes estimate counter +0.946 over 70 runs, to 3.651. Real-spend counter unchanged at 3.3792. `total_usd`
-3.5347. No Token Factory spend. The 13 records sum to 65 `sandbox_runs`; the gap to 70 is not reconciled yet.
+3.5347. No Token Factory spend. The 13 records sum to 65 `sandbox_runs`. The 65 + 5 = 70 gap is consistent with one collect-only preflight run for
+each of the 5 env-broken tasks that have no record; consistent with, not verified.
 
 Limits:
 - Lower bound. A fix that was reformatted, renamed or moved is missed, and so is one only a merge commit carries or one
@@ -449,8 +450,10 @@ Limits:
 - Closure covers the task's workdir repository only. Submodules, `.git/modules` and other clones are not checked.
 - `Azure__azure-cli-1876`: the history scan was cut at 5000 commits and listed 0 of them, so `fix_reachable` false
   means unknown, not absent. Its `closed` true is not counted in the 11 of 12.
-- `BQSKit__bqskit-134`: `closed` false with `gold_gate_failed`. Its gold gate also failed before any attack, so it is
-  a broken environment, not a closure result.
+- `BQSKit__bqskit-134`: `closed` false with `gold_gate_failed`. The gates failed before any attack: "gates failed
+  before hardening (the task is broken): gold gate failed" in `results/certificates/BQSKit__bqskit-134-c0052df1.json`.
+  So this reflects a broken environment, not that strip-future-git broke the gold fix. Counted over environments with
+  working gates, closure is 11 of 11.
 - Three fix scans (`Azure__autorest.python-475`, `Azure__azure-cli-1876`, `DataBiosphere__toil-4805`) are incomplete:
   a shared line count is a floor there.
 
