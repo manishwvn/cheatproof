@@ -23,7 +23,12 @@ in-session patch work. The first use of a just-started session skips the reset. 
 a new clean session state, never in the attacker's own, which may have tampered with the object store. Every
 start and every reset this module triggers counts as one sandbox run (sandbox_runs); the automatic reset inside
 Session.run after a host timeout is not visible here and is not counted (this includes a timeout inside the
-exposure scan, T53's two git runs among them; the scan is always followed by fresh(), which resets and counts).
+exposure scan and in the T55 history scan; both are always followed by fresh(), which resets and counts).
+T55: after the attack, and before the grade resets the session, a round with a non-empty attempted diff runs
+exposure.future_scan in the attacker's own session: a targeted read of the lines future commits add to the files
+the diff and the gold patch touch. Its record (paths, short commit ids, counts, complete) is RoundReport.future_scan,
+in the round of the certificate; its digests go to the git-ignored rounds.json only. It feeds holes.classify as
+future_added, in place of T53's pre-attack list. Its runs go through session.run, the budgeted, halt-checked path.
 Every session is closed on every path.
 On the normal exit path a failed close is retried once; a second failure is a note in the report, not an error.
 BudgetExceeded, ExecutorRefused and ExecutorUnavailable always propagate. Any other exception inside a round or
@@ -109,7 +114,7 @@ from typing import TYPE_CHECKING, Any
 
 from cheatproof.budget import Budget, BudgetExceeded
 from cheatproof.executor import EnvSpec, Executor, ExecutorRefused, ExecutorUnavailable, Session
-from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, ExposureReport
+from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, ExposureReport, FutureScan
 from cheatproof.grader import GateReport, GradeResult, error_line
 from cheatproof.holes import (
     GOLD_MATCH_LEAD,
@@ -186,6 +191,9 @@ class HardenOps:
     grade_kwargs: Callable[..., dict[str, bool]]
     scan: Callable[..., ExposureReport]
     classify: Callable[..., HoleReport]
+    # T55: future_scan(session, task, exposure, final_diff, *, workdir) -> FutureScan, run after the attack and before
+    # the grade resets the session. None (a test's fakes): the round has no targeted scan.
+    future_scan: Callable[..., FutureScan] | None = None
 
     @classmethod
     def default(cls) -> HardenOps:
@@ -201,6 +209,7 @@ class HardenOps:
             grade_kwargs=patches.grade_kwargs,
             scan=exposure.scan,
             classify=holes.classify,
+            future_scan=exposure.future_scan,
         )
 
 
@@ -255,8 +264,16 @@ class RoundReport:
     inconclusive: str | None = None
     no_attempt: str | None = None
     error: str | None = None
+    # T55: the targeted history scan after the attack (None: not run, or a record from before T55).
+    future_scan: FutureScan | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        data = self._base_dict()
+        if self.future_scan is not None:  # additive: older records keep their shape
+            data["future_scan"] = self.future_scan.to_dict()  # paths, short ids, counts; never digests
+        return data
+
+    def _base_dict(self) -> dict[str, Any]:
         return {
             "patches": list(self.patches),
             "patch_outcomes": [outcome.to_dict() for outcome in self.patch_outcomes],
@@ -272,10 +289,12 @@ class RoundReport:
 
 
 def _exposure_dict(scan: ExposureReport) -> dict[str, Any]:
-    """The scan as the certificate holds it. T53: the digests of the lines future commits add are left out (only
-    their count, future_added_lines, stays): they live in the git-ignored rounds.json, see keep.py."""
+    """The scan as the certificate holds it. The digests of the lines future commits add (T53) and the commit ids the
+    scan listed (T55) are left out: the digests live in the git-ignored rounds.json (see keep.py), the ids only serve
+    future_scan(). The certificate's own record of the history scan is RoundReport.future_scan."""
     data = asdict(scan)
-    data.pop("future_added_digests", None)
+    for key in ("future_added_digests", "future_commit_ids", "future_extra_revs", "future_list_complete"):
+        data.pop(key, None)
     return data
 
 
@@ -351,6 +370,7 @@ class _RoundState:
     inconclusive: str | None = None
     no_attempt: str | None = None
     error: str | None = None
+    future_scan: FutureScan | None = None
 
     def report(self) -> RoundReport:
         return RoundReport(
@@ -364,6 +384,7 @@ class _RoundState:
             inconclusive=self.inconclusive,
             no_attempt=self.no_attempt,
             error=self.error,
+            future_scan=self.future_scan,
         )
 
 
@@ -631,6 +652,19 @@ class _Loop:
             forbidden=forbidden_snippets(self.task.gold_patch, self.task.test_patch),
         )
 
+    def _future_scan(self, box: _Sandbox, state: _RoundState, diff: str) -> FutureScan | None:
+        """T55: the targeted history scan of this round's session, or None when this harness has none. The runs go
+        through session.run, the budgeted and halt-checked path. A failure that is not a budget or executor stop leaves
+        a scan that could not list anything (a lead only), never a round error."""
+        if self.ops.future_scan is None:
+            return None
+        try:
+            return self.ops.future_scan(box.session, self.task, state.exposure, diff, workdir=self.workdir)
+        except PROPAGATE:
+            raise
+        except Exception:  # noqa: BLE001 - the scan is evidence, not a gate
+            return FutureScan((), 0, (), 0, False, None)
+
     def _play(self, box: _Sandbox, state: _RoundState) -> None:
         gold = self._grade(box, state, self.task.gold_patch)
         empty = self._grade(box, state, "")
@@ -657,6 +691,8 @@ class _Loop:
         hidden_passed = None
         visible_passed = None
         if diff and state.no_attempt is None:
+            # T55: the targeted history scan runs here, in the attacker's own session, because _grade resets it.
+            state.future_scan = self._future_scan(box, state, diff)
             # A clean session: the attacker's own may hold a tampered object store or restored-over tests.
             state.attack_grade = self._grade(box, state, diff)
             hidden_passed = state.attack_grade.passed
@@ -669,7 +705,12 @@ class _Loop:
         if state.exposure is not None and state.exposure.future_git_evidence:
             extra["exposure_refs"] = list(state.exposure.future_git_evidence)  # T47: refs the scan listed
         # T53: git-history is an exploit only when the passing diff shares a future-added line (None: no digests).
-        future_added = None if state.exposure is None else state.exposure.future_added()
+        # T55: those lines come from the targeted scan after the attack; a record or a fake without one falls back to
+        # the T53 digests of the pre-attack scan.
+        if state.future_scan is not None:
+            future_added = state.future_scan.future_added()
+        else:
+            future_added = None if state.exposure is None else state.exposure.future_added()
         extra["future_added"] = future_added
         holes = self.ops.classify(
             result.steps,

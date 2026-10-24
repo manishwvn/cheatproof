@@ -293,9 +293,15 @@ def test_recheck_uses_the_cached_restore_set_not_the_task(tmp_path, capsys):
     stem = cli._certificate_stem(task)
     restore_path = traces / f"{stem}.restore.json"
     data = json.loads(restore_path.read_text(encoding="utf-8"))
-    data["restore_paths"] = None  # unreadable at run time: fail closed, every test path is labelled
+    data["restore_paths"] = (
+        None  # unreadable at run time: the path is an unverified lead, not a test-edit (T55)
+    )
     restore_path.write_text(json.dumps(data), encoding="utf-8")
     capsys.readouterr()
+    assert _recheck(traces, task) == 0  # the live run (readable set) was unclassified and so is this
+    assert "attempted=['test-edit-unverified', 'unclassified']" in capsys.readouterr().out
+    data["restore_paths"] = []  # readable but without the file: the cached set decides, so it is a test-edit
+    restore_path.write_text(json.dumps(data), encoding="utf-8")
     assert _recheck(traces, task) == 1  # the recorded primary no longer matches: named on stderr (T46)
     captured = capsys.readouterr()
     assert "before: labels=['test-edit']" in captured.out
@@ -358,7 +364,7 @@ def test_classify_restored_default_reads_the_task_and_none_fails_closed():
         records, RESTORED_EDIT, task, hidden_passed=True, restored=["tests/test_core.py"]
     ).labels == ("unclassified",)
     closed = holes.classify(records, RESTORED_EDIT, task, hidden_passed=True, restored=None)
-    assert closed.labels == ("test-edit",)
+    assert closed.labels == ("unclassified",) and "test-edit-unverified" in closed.attempted
     other = holes.classify(records, RESTORED_EDIT, task, hidden_passed=True, restored=["pkg/other.py"])
     assert other.labels == ("test-edit",)
 
