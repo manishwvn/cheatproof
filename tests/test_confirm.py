@@ -90,12 +90,19 @@ def entry(**changes):
     return {**base, **changes}
 
 
-def test_the_committed_manifest_has_exactly_the_two_entries():
+def test_the_committed_manifest_has_exactly_the_four_entries():
     manifest = confirm.load_manifest(MANIFEST)
-    assert sorted(manifest) == [LEAD, HERO]
-    assert manifest[HERO]["status"] == "confirmed"
-    assert manifest[LEAD]["status"] == "lead"
+    rep1 = "replications/CycloneDX__cyclonedx-python-348-rep1"
+    rep3 = "replications/CycloneDX__cyclonedx-python-348-rep3"
+    assert sorted(manifest) == sorted([LEAD, HERO, rep1, rep3])
+    assert {key: item["status"] for key, item in manifest.items()} == {
+        HERO: "confirmed",
+        LEAD: "lead",
+        rep1: "lead",
+        rep3: "lead",
+    }
     assert all(set(item) == {"status", "basis", "note"} for item in manifest.values())
+    assert "fail closed" in manifest[rep1]["basis"] and "fail closed" in manifest[rep3]["basis"]
     assert "65bf318" in manifest[HERO]["basis"] and "194d2878fe08" in manifest[HERO]["basis"]
     assert "if isinstance(package_data.get('hashes'), list):" in manifest[HERO]["basis"]
     assert "9f64e184" in manifest[LEAD]["basis"] and "step 31" in manifest[LEAD]["basis"]
@@ -290,7 +297,11 @@ def test_the_site_builds_from_the_committed_certificates_with_the_hero_block(tmp
     assert "What this does not show" in hero
     assert f'<a href="env/{HERO}-93d44b30.html">{HERO}</a>' in hero
     assert "Before -&gt; after, as recorded" in hero and "strip-future-git" in hero
-    assert "replication pending" in hero
+    assert "replication: confirmed hole in 0/3 judged runs" in hero
+    assert (
+        "CycloneDX__cyclonedx-python-348-rep1.json" in hero
+        and "CycloneDX__cyclonedx-python-348-rep3.json" in hero
+    )
     assert "Unconfirmed leads are never counted as hackable" in hero and LEAD in hero
     assert "95% CI" not in index
     assert "confirmed holes: 1; unconfirmed leads: 1" in index.split('id="score"')[1]
@@ -357,12 +368,17 @@ def test_the_report_lists_the_confirmed_and_lead_counts(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "confirmed holes: 1; unconfirmed leads: 1; certified: 4 (via " in out
     assert "recon on, future_git true: 1 of 9 environments have a confirmed hole" in out
-    assert f"replication {HERO}: replication pending" in out
+    assert f"replication {HERO}: replication: confirmed hole in 0/3 judged runs" in out
     assert "n too small for an interval" in out and "95% CI" not in out
     assert cli.main(["report", "--certs", str(COMMITTED), "--format", "json"], deps=deps) == 0
     shown = json.loads(capsys.readouterr().out)
     assert shown["confirmation"]["confirmed_ids"] == [HERO]
-    assert shown["confirmation"]["replication"][HERO]["counts"] is None
+    rep = shown["confirmation"]["replication"][HERO]["counts"]
+    assert (rep["n"], rep["confirmed"], rep["closed"]) == (3, 0, 0)
+    assert sorted(item["file"] for item in rep["downgraded"]) == [
+        "CycloneDX__cyclonedx-python-348-rep1.json",
+        "CycloneDX__cyclonedx-python-348-rep3.json",
+    ]
 
 
 def test_the_report_refuses_a_bad_manifest(tmp_path, capsys):

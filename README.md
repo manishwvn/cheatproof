@@ -4,7 +4,7 @@ On `CycloneDX__cyclonedx-python-348`, a SWE-rebench coding environment, the atta
 
 **Result: 1 of 9 confirmed (n=1, recon on, this attacker only)**
 
-**Replication: k/n — filled from results/replications/ (pending)** <!-- REPLICATION_PLACEHOLDER -->
+**Replication: interim, 4 further runs of 348 did not reproduce a CONFIRMED git-history leak (scan incomplete, T55 fix in progress); final k/n pending.** rep1 and rep3 `test-edit` labels are suspected false positives caused by a scratch file named like a test (verification pending PR #74); rep1's certification via `hardened_reattack_failed` therefore does not count as a closed hole. <!-- REPLICATION_PLACEHOLDER -->
 
 Links: [results](docs/results.md) | [causal check](docs/results.md#causal-check-348-and-116) | report site: published from GitHub Pages once the repo is public | [feedback](docs/feedback.md) | [Tavily](docs/tavily.md)
 
