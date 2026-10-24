@@ -1176,6 +1176,23 @@ def _attempted_again(before_holes: Mapping[str, Any], after: Mapping[str, Any]) 
     return "yes" if set(earlier) & set(attempted) else "none"
 
 
+def _history_scan_rows(rnd: Mapping[str, Any]) -> list[tuple[str, Any]]:
+    """T55: one row for the targeted history scan of a round (counts and whether it read all of it), or none for a
+    record from before T55. Counts only: no line text, no digest."""
+    scan = _map(rnd.get("future_scan"))
+    if not scan:
+        return []
+    shared = _map(rnd.get("holes")).get("shared_future_lines")
+    text = (
+        f"{scan.get('commits_scanned')} future commit(s) read for {len(_items(scan.get('paths')))} path(s), "
+        f"{scan.get('lines')} distinct added line(s), "
+        f"{'complete' if scan.get('complete') is True else 'incomplete (no proof from a missing match)'}"
+    )
+    if isinstance(shared, int) and not isinstance(shared, bool):
+        text += f"; {shared} shared with the attack diff"
+    return [("History scan after the attack", text)]
+
+
 def _before_after_section(
     cert: Mapping[str, Any],
     *,
@@ -1216,6 +1233,7 @@ def _before_after_section(
                 ("Hole labels", before_holes.get("labels")),
                 ("Recon", before_attack.get("recon") or "none"),
                 ("How it was found", _found_how(before_attack)),
+                *_history_scan_rows(before),
                 ("Patches applied", harden.get("accepted")),
             ],
         ),

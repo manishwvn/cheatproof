@@ -30,6 +30,11 @@ repo's PASS_TO_PASS tests, not from the attacker's own run. Every string in a ce
 explanation and notes, patch notes, reasons, round error, inconclusive and no_attempt) are cut to 300 chars at
 build time, after the secret check on the full text.
 
+A harden round may carry future_scan (T55, optional): {paths, commits_scanned, commit_ids (first 40 short ids),
+lines, complete}, the record of the targeted history scan run after the attack. It holds counts, paths and short
+commit ids only, never a line of text or a digest (the schema is closed); the digests are in the git-ignored
+rounds.json. A round without the key is a record from before T55.
+
 holes_found lists the labels exploited with a passing hidden grade only. Attempted-but-failed holes are
 in harden.before.holes.attempted.
 
@@ -308,6 +313,30 @@ def _check_attacker(value: Any) -> None:
     )
 
 
+FUTURE_SCAN_KEYS = frozenset({"paths", "commits_scanned", "commit_ids", "lines", "complete"})
+FUTURE_SCAN_LIST_MAX = 41  # CERT_PATHS paths plus the "... +N more" marker
+SHORT_COMMIT_ID = re.compile(r"[0-9a-f]{12}")
+
+
+def _check_future_scan(value: Any, where: str) -> None:
+    """T55: the targeted history scan of a round. The schema is closed, so a digest or a line of text has no key to
+    sit in: exactly paths, commits_scanned, commit_ids (short hex ids), lines and complete."""
+    _want(isinstance(value, Mapping), f"{where} must be an object")
+    _want(set(value) == FUTURE_SCAN_KEYS, f"{where} must hold exactly {', '.join(sorted(FUTURE_SCAN_KEYS))}")
+    for key in ("paths", "commit_ids"):
+        _want(
+            _str_list(value[key]) and len(value[key]) <= FUTURE_SCAN_LIST_MAX,
+            f"{where}.{key} must be a list of at most {FUTURE_SCAN_LIST_MAX} strings",
+        )
+    _want(
+        all(SHORT_COMMIT_ID.fullmatch(item) for item in value["commit_ids"]),
+        f"{where}.commit_ids must be 12-hex short commit ids",
+    )
+    for key in ("commits_scanned", "lines"):
+        _want(_is_count(value[key]), f"{where}.{key} must be an integer >= 0, got {_show(value[key])}")
+    _want(isinstance(value["complete"], bool), f"{where}.complete must be a boolean")
+
+
 def _check_round(value: Any, where: str, *, optional: bool) -> None:
     if value is None:
         _want(optional, f"{where} is required")
@@ -326,6 +355,8 @@ def _check_round(value: Any, where: str, *, optional: bool) -> None:
                 _is_count(shared),
                 f"{where}.holes.shared_future_lines must be an integer >= 0, got {_show(shared)}",
             )
+    if "future_scan" in value:  # T55: optional, additive
+        _check_future_scan(value["future_scan"], f"{where}.future_scan")
     for key in ("inconclusive", "no_attempt", "error"):
         _want(value[key] is None or isinstance(value[key], str), f"{where}.{key} must be a string or null")
     _want(value["gates"] is None or isinstance(value["gates"], Mapping), f"{where}.gates must be an object")

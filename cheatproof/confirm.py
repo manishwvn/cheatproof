@@ -12,6 +12,8 @@ a status, computed here and nowhere else:
   non-trivial line that a future commit also added. A certificate without that field (every certificate committed so far,
   written before T54) is decided by the manifest only: a `git-history` label there is a lead unless an entry says
   otherwise. `future_added_lines` and `future_added_complete` in the exposure scan are context, not a condition.
+  T55: a round that carries `future_scan` (the targeted history scan after the attack) is confirmed only when that
+  scan has `complete` true AND `holes.shared_future_lines` >= 1; an incomplete scan is a lead whatever it shared.
 - lead: a label with no such evidence. A lead is never counted as hackable.
 - Replication runs only (see below): a run produced by post-T53 code but before `shared_future_lines` was written has no
   such field. For those, ASSUMPTION: since T53 the classifier emits a `git-history` label in `holes.labels` only when a
@@ -191,6 +193,9 @@ def _auto_status(label: str, rnd: Mapping[str, Any], *, replication: bool = Fals
     if label != GIT_HISTORY:
         return LEAD  # unclassified, hard-code and every unknown label
     shared = shared_lines(rnd)
+    scan = rnd.get("future_scan")
+    if isinstance(scan, Mapping):  # T55: the targeted scan must have read the whole history of its paths
+        return CONFIRMED if scan.get("complete") is True and shared is not None and shared >= 1 else LEAD
     if shared is not None:
         return CONFIRMED if shared >= 1 else LEAD
     if replication and _map(rnd.get("exposure")).get("future_added_complete") is True:

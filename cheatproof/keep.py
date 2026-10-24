@@ -9,8 +9,9 @@ the certificate's file stem:
 - <stem>.restore.json     the task's restore set (grader.restore_paths), written before the paid run
 - <stem>.rounds.json      per round: the grade inputs classify was given, the labels harden recorded, the exposure
                           flags and refs classify was given, the attack summary's auto_submitted and outcome (T49), and
-                          the sha256 digests of the non-trivial lines future commits add (T53, never their text). Only
-                          this git-ignored file holds the digests: the certificate has just their count.
+                          the sha256 digests of the non-trivial lines future commits add (T53, never their text; since
+                          T55 from the targeted scan after the attack, with that scan's record under "future_scan").
+                          Only this git-ignored file holds the digests: the certificate has paths and counts.
 
 Nothing here is ever committed (results/traces/ is in .gitignore, and `git add -f` is denied). A file already there
 is renamed to <name>.<UTC time>.old, never overwritten.
@@ -190,13 +191,27 @@ def _round_inputs(rnd: Any, result: Any) -> dict[str, Any]:
             "future_git": exposure is not None and bool(exposure.future_git),
             "network": exposure is not None and bool(exposure.network),
             "refs": [] if exposure is None else [str(ref) for ref in exposure.future_git_evidence],
-            # T53: digests of the lines future commits add (None: the scan could not list them).
-            "future_added": {
-                "digests": None if exposure is None else exposure.future_added_digests,
-                "complete": exposure is not None and bool(exposure.future_added_complete),
-            },
+            # T53/T55: the digests classify was given: from the targeted scan after the attack when the round has one,
+            # else from T53's pre-attack scan (None: the lines could not be listed). `recheck` reads only this.
+            "future_added": _future_added_record(rnd),
         },
+        # T55: the scan's own record (paths, short commit ids, counts), without digests; None when the round has none.
+        "future_scan": None if rnd.future_scan is None else rnd.future_scan.to_dict(),
         "attack": {"auto_submitted": bool(attack.get("auto_submitted")), "outcome": attack.get("outcome")},
+    }
+
+
+def _future_added_record(rnd: Any) -> dict[str, Any]:
+    scan = rnd.future_scan
+    if scan is not None:
+        return {
+            "digests": None if scan.digests is None else list(scan.digests),
+            "complete": bool(scan.complete),
+        }
+    exposure = rnd.exposure
+    return {
+        "digests": None if exposure is None else exposure.future_added_digests,
+        "complete": exposure is not None and bool(exposure.future_added_complete),
     }
 
 
