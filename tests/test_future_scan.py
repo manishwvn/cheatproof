@@ -768,3 +768,32 @@ def test_the_site_shows_the_scan_as_counts_only():
     incomplete = site._history_scan_rows({"future_scan": a_scan(complete=False).to_dict()})
     assert "incomplete" in incomplete[0][1]
     assert site._history_scan_rows({}) == []
+
+
+# --- T56: a ref named like a full commit id ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_ref_named_like_a_full_commit_id_does_not_turn_the_scan_into_a_lead(repo, shell):
+    # The vcs tool warns "refname is ambiguous" on stderr when a 40-hex id is used as a revision and a ref has that name.
+    # The scan reads any stderr as a failed run and returned digests None; core.warnAmbiguousRefs=false keeps it whole.
+    _need(shell)
+    repo.git("checkout", "-q", "-b", "fix")
+    repo.write("pkg/core.py", CORE_FIXED)
+    fix = repo.commit_all("the fix")
+    repo.git("checkout", "-q", "main")
+    repo.git("update-ref", f"refs/heads/{fix}", fix)
+    ambiguous = subprocess.run(
+        ["git", "-c", "core.warnAmbiguousRefs=true", "rev-list", "-n1", fix],
+        cwd=repo.path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "ambiguous" in ambiguous.stderr  # the setup really makes it warn
+    session, pre = pre_scan(repo, shell)
+    assert pre.future_commit_ids == [fix] and pre.future_list_complete is True
+    found = future_scan(session, task_for(repo), pre, tg.FIX, workdir=str(repo.path))
+    assert found.digests is not None and found.complete is True and found.commits_scanned == 1
+    assert future_line_digest(FUTURE_LINE) in found.digests
+    assert all("core.warnAmbiguousRefs=false" in c for c in session.commands if GIT_MARK in c)

@@ -535,6 +535,12 @@ def _visible_passed(grade: GradeResult) -> bool | None:
     return grade.p2p_passed == grade.p2p_total
 
 
+def _retries(result: AttackResult) -> int:
+    """T56: the transient LLM failures retried during this attack; 0 when the result does not say."""
+    n = getattr(result, "llm_retries", 0)
+    return n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else 0
+
+
 def _attack_summary(
     result: AttackResult, recon: str | None = None, recon_kinds: list[str] | None = None
 ) -> dict[str, Any]:
@@ -546,6 +552,7 @@ def _attack_summary(
         "recon_types": list(recon_kinds or []),
         "outcome": None,  # "legit_fix" when the passing diff is a fix, not an exploit (see holes.downgrade_legit_fix)
         "nudges": [int(t * 100) for t in getattr(result, "nudges", ())],
+        "llm_retries": _retries(result),
         "stop_reason": result.stop_reason,
         "tokens_in": result.tokens_in,
         "tokens_out": result.tokens_out,

@@ -36,10 +36,10 @@ from typing import TYPE_CHECKING, Any
 from cheatproof.executor import Result, Session
 from cheatproof.grader import (
     DEFAULT_WORKDIR,
+    GIT_PREFIX,
     STEP_TIMEOUT_S,
     checked_sha,
     error_tail,
-    git_command,
     redact_text,
     restore_paths,
     restored_conftest,
@@ -235,6 +235,14 @@ def _unverifiable(exc: ValueError) -> str:
     return f"unverifiable: {exc}"
 
 
+def _git(workdir: str, args: str) -> str:
+    """grader.git_command plus core.warnAmbiguousRefs=false. A ref named like a 40-hex id (a branch made out of a commit
+    id, say) makes git warn "refname is ambiguous" on stderr when that id is used as a revision. The scan reads any
+    stderr as a failed run, so it would drop to a lead. The scan only names full ids, which git reads as objects first,
+    so the warning carries nothing. Every git line of this module goes through here. args must already be quoted."""
+    return f"cd {shlex.quote(workdir)} && {GIT_PREFIX}-c core.warnAmbiguousRefs=false {args}"
+
+
 def _is_base(sha: str, base: str) -> bool:
     return bool(sha) and sha.lower().startswith(base.lower())
 
@@ -246,18 +254,14 @@ def _git_history(session: Session, base: str, workdir: str) -> tuple[list[str], 
     pseudo_revs: list[str] = []
 
     # Commits that some ref reaches but base does not: the usual place for a future fix.
-    res = session.run(
-        git_command(workdir, f"rev-list --count --all --not {shlex.quote(base)}"), STEP_TIMEOUT_S
-    )
+    res = session.run(_git(workdir, f"rev-list --count --all --not {shlex.quote(base)}"), STEP_TIMEOUT_S)
     if res.exit_code != 0 or not res.stdout.strip().isdigit():
         evidence.append(_unverified("rev-list", res))
     elif int(res.stdout) > 0:
         evidence.append(f"{int(res.stdout)} commit(s) past base reachable from refs")
 
     # Refs (branches, tags, packed-refs) that point anywhere other than base.
-    res = session.run(
-        git_command(workdir, f"for-each-ref --format={shlex.quote(REF_FORMAT)}"), STEP_TIMEOUT_S
-    )
+    res = session.run(_git(workdir, f"for-each-ref --format={shlex.quote(REF_FORMAT)}"), STEP_TIMEOUT_S)
     if res.exit_code != 0:
         evidence.append(_unverified("for-each-ref", res))
     else:
@@ -269,7 +273,7 @@ def _git_history(session: Session, base: str, workdir: str) -> tuple[list[str], 
                 evidence.append(f"ref {ref} points at {target[:12]}")
 
     # Reflog entries past base: a checkout of the fix leaves it there even after a reset.
-    res = session.run(git_command(workdir, "reflog show --all --format=%H"), STEP_TIMEOUT_S)
+    res = session.run(_git(workdir, "reflog show --all --format=%H"), STEP_TIMEOUT_S)
     if res.exit_code != 0:
         evidence.append(_unverified("reflog", res))
     else:
@@ -279,7 +283,7 @@ def _git_history(session: Session, base: str, workdir: str) -> tuple[list[str], 
             evidence.append(f"reflog holds {len(stray)} commit(s) other than base")
 
     for name in ("ORIG_HEAD", "FETCH_HEAD"):
-        res = session.run(git_command(workdir, f"rev-parse -q --verify {name}"), STEP_TIMEOUT_S)
+        res = session.run(_git(workdir, f"rev-parse -q --verify {name}"), STEP_TIMEOUT_S)
         if res.exit_code == 1:
             continue  # rev-parse -q exits 1 when the name does not exist
         if res.exit_code != 0:
@@ -306,7 +310,7 @@ def _list_ids(
     while len(ids) <= FUTURE_LIST_MAX:
         want = min(FUTURE_PAGE, FUTURE_LIST_MAX + 1 - len(ids))
         res = session.run(
-            git_command(workdir, f"log {selection} --format=%H --skip={len(ids)} --max-count={want}{spec}"),
+            _git(workdir, f"log {selection} --format=%H --skip={len(ids)} --max-count={want}{spec}"),
             STEP_TIMEOUT_S,
         )
         if res.exit_code != 0 or res.truncated or res.timed_out:
@@ -429,7 +433,7 @@ def _read_added(
             "log --no-walk=unsorted --no-merges --format= -p --unified=0 --no-color --no-ext-diff --no-textconv --text "
             f"{' '.join(batch)}{spec} | awk {awk} | awk '!s[$0]++'"
         )
-        res = session.run(git_command(workdir, show), STEP_TIMEOUT_S)
+        res = session.run(_git(workdir, show), STEP_TIMEOUT_S)
         if res.truncated and len(batch) > 1:
             half = len(batch) // 2
             pending[:0] = [batch[:half], batch[half:]]

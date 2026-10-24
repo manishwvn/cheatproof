@@ -78,6 +78,11 @@ class ChatLLM(Protocol):
     def chat(self, model: str, messages: list[dict], max_tokens: int, **kwargs: Any) -> Any: ...
 
 
+# T56: most transient-failure retries one attack may use over all its LLM calls (a call makes at most 2). Past it the
+# attack ends as an error: a provider this unstable is not worth more worst-case reservations.
+LLM_RETRY_CEILING = 6
+
+
 class SearchFn(Protocol):
     """Host-side web search. The caller's callable must reserve against budget.py itself, one reservation
     per call, because each call is paid (Tavily). The attacker only counts calls, up to max_searches."""
@@ -150,6 +155,30 @@ class AttackResult:
     nudges: tuple[float, ...] = ()  # the budget thresholds whose reminder was sent
     # T52: {provider, query, results, ok} of the harness recon search, or None when none was attempted.
     harness_search: dict | None = None
+    # T56: transient LLM failures retried inside the attempt (GuardedLLM.retries moved by this much). Each retry was
+    # reserved and settled like a first call, so tokens and spend already include it.
+    llm_retries: int = 0
+
+
+def _chat(llm: ChatLLM, config: AttackConfig, messages: list[dict], tools: list[dict]) -> tuple[Any, int]:
+    """(reply, retries this call made). A client without chat_counted (a fake) made none."""
+    counted = getattr(llm, "chat_counted", None)
+    if counted is not None:
+        resp, retries = counted(config.model, list(messages), config.max_output_tokens, tools=tools)
+        return resp, retries if _is_count(retries) else 0
+    return llm.chat(config.model, list(messages), config.max_output_tokens, tools=tools), 0
+
+
+def _retries_of(exc: BaseException) -> int:
+    n = getattr(exc, "llm_retries", 0)
+    return n if _is_count(n) else 0
+
+
+def _failed_tokens(exc: BaseException, est_in: int, max_out: int) -> tuple[int, int]:
+    """Worst case of the attempts GuardedLLM saw fail with a transient error before this call ended in `exc`."""
+    n = getattr(exc, "llm_failed", 0)
+    n = n if _is_count(n) else 0
+    return n * est_in, n * max_out
 
 
 class _ToolError(Exception):
@@ -593,6 +622,7 @@ def attack(
     ]
 
     tokens_in = tokens_out = 0
+    llm_retries = 0  # T56: retries over the whole attack, summed from each call's own count
     stop_reason: StopReason = "max_steps"
     error = ""
     submitted = False
@@ -663,6 +693,7 @@ def attack(
                     "steps": len(steps),
                     "tokens_in": tokens_in,
                     "tokens_out": tokens_out,
+                    "llm_retries": llm_retries,
                     "error": _detail(exc),
                 }
             )
@@ -672,34 +703,54 @@ def attack(
         if tokens_in + tokens_out + est_in + config.max_output_tokens > config.max_tokens_total:
             stop_reason = "token_limit"
             break
+        if llm_retries > LLM_RETRY_CEILING:
+            stop_reason, error = (
+                "error",
+                f"llm retry ceiling reached ({llm_retries} retries; limit {LLM_RETRY_CEILING})",
+            )
+            record(step, time.monotonic(), None, {}, error, "llm_retry_ceiling", 0, 0)
+            break
         budget_nudge(step)
         started = time.monotonic()
         try:
-            resp = llm.chat(config.model, list(messages), config.max_output_tokens, tools=tools)
+            resp, call_retries = _chat(llm, config, messages, tools)
         except BudgetExceeded as exc:
+            f_in, f_out = _failed_tokens(exc, est_in, config.max_output_tokens)
+            tokens_in, tokens_out = tokens_in + f_in, tokens_out + f_out
+            llm_retries += _retries_of(exc)
             with contextlib.suppress(OSError):
-                record(step, started, None, {}, _detail(exc), "budget_exceeded", 0, 0)
+                record(step, started, None, {}, _detail(exc), "budget_exceeded", f_in, f_out)
             end_on_stop(exc)
             raise
         except Exception as exc:  # noqa: BLE001 - any other LLM failure ends the attempt as stop_reason error
+            f_in, f_out = _failed_tokens(exc, est_in, config.max_output_tokens)
+            tokens_in, tokens_out = tokens_in + f_in, tokens_out + f_out
+            llm_retries += _retries_of(exc)
             status = getattr(exc, "status_code", None)
             if status == 402:
                 # Balance exhausted. GuardedLLM has already halted the ledger, so stop like a budget cap.
                 # The provider text is not used: the message is ours.
                 halt = BudgetExceeded("HTTP 402 from the LLM provider: balance exhausted, attempt halted")
                 with contextlib.suppress(OSError):
-                    record(step, started, None, {}, _detail(halt), "budget_exceeded", 0, 0)
+                    record(step, started, None, {}, _detail(halt), "budget_exceeded", f_in, f_out)
                 end_on_stop(halt)
                 raise halt from None
             # Only the type: provider error text is not trusted to be free of request details.
             where = f" (HTTP {status})" if _is_count(status) else ""
             stop_reason, error = "error", f"llm call failed: {type(exc).__name__}{where}"
-            record(step, started, None, {}, error, "llm_error", 0, 0)
+            record(step, started, None, {}, error, "llm_error", f_in, f_out)
             break
 
+        # T56: each retry follows a failed attempt that GuardedLLM reserved and kept at its worst case, so the attack's
+        # own totals (and the max_tokens_total check) count it at the same worst case.
+        llm_retries += call_retries
+        f_in, f_out = call_retries * est_in, call_retries * config.max_output_tokens
+        tokens_in += f_in
+        tokens_out += f_out
         t_in, t_out = _usage(resp, est_in, config.max_output_tokens)
         tokens_in += t_in
         tokens_out += t_out
+        t_in, t_out = t_in + f_in, t_out + f_out  # the step record shows the failed attempts too
         message = _message(resp)
         if message is None:
             stop_reason, error = "error", "llm reply had no message"
@@ -803,6 +854,7 @@ def attack(
             "steps": len(steps),
             "tokens_in": tokens_in,
             "tokens_out": tokens_out,
+            "llm_retries": llm_retries,
             "error": error,
             "final_diff": None if final_diff is None else _digest(final_diff),
         }
@@ -819,4 +871,5 @@ def attack(
         auto_submitted=auto_submitted,
         nudges=tuple(sent),
         harness_search=harness_result,
+        llm_retries=llm_retries,
     )
