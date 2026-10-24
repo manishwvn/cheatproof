@@ -427,13 +427,16 @@ def test_replication_counts_only_judged_runs_and_lists_the_excluded_ones(tmp_pat
             {"file": "owner__repo-1-run7.json", "reason": "gates did not hold before hardening"},
             {"file": "owner__repo-1-run8.json", "reason": "before attack unfinished or inconclusive"},
         ],
+        "downgraded": [],
         "confirmed": 3,
         "reattack_failed": 2,
+        "closed": 2,
     }
     text = confirm.replication_text("owner__repo-1", loaded)
     assert text.startswith(
         "replication: confirmed hole in 3/5 judged runs; "
-        "re-attack failed in 2/3 of the runs with a confirmed hole; 3 excluded run(s) ("
+        "re-attack failed in 2/3 of the runs with a confirmed hole; closed holes (closed and confirmed) 2/3; "
+        "excluded or downgraded runs: "
     )
     assert "owner__repo-1-run6.json: recon not on" in text and "n too small for an interval" in text
     index = read(build_site(cert_dir, tmp_path / "site").index)
@@ -666,3 +669,98 @@ def test_hide_small_intervals_does_not_change_its_input():
     shown = confirm.hide_small_intervals(data)
     assert shown["a"]["interval_95"] is None and shown["b"][0]["interval_95"] == [0, 0.5]
     assert data["a"]["interval_95"] == [0, 1]
+
+
+# Replication-run overrides in the manifest (downgrade only)
+
+
+def two_run_dir(tmp_path):
+    """results/ with a confirmed main run and two replication runs, both confirmed by shared_future_lines."""
+    cert_dir, reps = hero_dir(tmp_path)
+    write_json(
+        reps, "owner__repo-1-rep1.json", numbered(rep_cert(with_t53(fixed_report("owner__repo-1"))), 1)
+    )
+    write_json(
+        reps, "owner__repo-1-rep2.json", numbered(rep_cert(with_t53(fixed_report("owner__repo-1"))), 2)
+    )
+    return cert_dir, reps, tmp_path / "results"
+
+
+def test_a_replication_key_is_downgrade_only_and_must_name_an_existing_file(tmp_path):
+    cert_dir, _reps, results = two_run_dir(tmp_path)
+    key = "replications/owner__repo-1-rep2"
+    path = write_json(results, "confirmations.json", {key: entry(status="lead", basis="no causal link")})
+    assert confirm.load_manifest(path)[key]["status"] == "lead"
+    for bad in ("replications/owner__repo-1-rep9", "replications/", "replications/a/b", "replications/x y"):
+        path = write_json(results, "confirmations.json", {bad: entry(status="lead")})
+        with pytest.raises(ConfirmationError):
+            confirm.load_manifest(path)
+    path = write_json(results, "confirmations.json", {key: entry(status="lead", extra=1)})
+    with pytest.raises(ConfirmationError, match="unknown key"):
+        confirm.load_manifest(path)
+    path = write_json(results, "confirmations.json", {key: entry(status="lead")})
+    assert cert_dir.is_dir()
+    # the site and report refuse a key without a file, and write nothing
+    path = write_json(
+        results, "confirmations.json", {"replications/owner__repo-1-rep9": entry(status="lead")}
+    )
+    out = tmp_path / "site"
+    with pytest.raises(ConfirmationError, match="no replication file owner__repo-1-rep9.json"):
+        build_site(cert_dir, out)
+    assert not out.exists()
+    assert cli.main(["report", "--certs", str(cert_dir)], deps=report_deps()) == 2
+
+
+def test_a_downgrade_is_honored_and_listed_with_its_basis(tmp_path):
+    _, reps, results = two_run_dir(tmp_path)
+    write_json(
+        results,
+        "confirmations.json",
+        {"replications/owner__repo-1-rep2": entry(status="lead", basis="history read after the last write")},
+    )
+    manifest = confirm.load_manifest(results / "confirmations.json")
+    loaded = confirm.load_replications(reps)
+    got = confirm.replication_for("owner__repo-1", loaded, manifest)
+    assert got["n"] == 2 and got["confirmed"] == 1 and got["closed"] == 1 and got["reattack_failed"] == 1
+    assert got["downgraded"] == [
+        {"file": "owner__repo-1-rep2.json", "basis": "history read after the last write"}
+    ]
+    without = confirm.replication_for("owner__repo-1", loaded)  # no manifest: both runs confirmed
+    assert without["confirmed"] == 2 and without["closed"] == 2 and without["downgraded"] == []
+    text = confirm.replication_text("owner__repo-1", loaded, manifest)
+    assert "confirmed hole in 1/2 judged runs" in text and "closed holes (closed and confirmed) 1/1" in text
+    assert "excluded or downgraded runs: owner__repo-1-rep2.json: history read after the last write" in text
+
+
+def test_an_upgrade_by_the_manifest_is_ignored_for_a_replication_run(tmp_path):
+    _, reps, results = two_run_dir(tmp_path)
+    no_evidence = numbered(rep_cert(fixed_report("owner__repo-1")), 3)  # no count, scan not whole: a lead
+    write_json(reps, "owner__repo-1-rep3.json", no_evidence)
+    write_json(results, "confirmations.json", {"replications/owner__repo-1-rep3": entry(status="confirmed")})
+    manifest = confirm.load_manifest(results / "confirmations.json")
+    got = confirm.replication_for("owner__repo-1", confirm.load_replications(reps), manifest)
+    assert got["n"] == 3 and got["confirmed"] == 2 and got["downgraded"] == []
+
+
+def test_a_downgraded_run_is_not_a_closed_hole_in_the_site_report_and_json(tmp_path, capsys):
+    cert_dir, _, results = two_run_dir(tmp_path)
+    write_json(
+        results,
+        "confirmations.json",
+        {"replications/owner__repo-1-rep2": entry(status="lead", basis="history read after the last write")},
+    )
+    index = read(build_site(cert_dir, tmp_path / "site").index)
+    assert "confirmed hole in 1/2 judged runs" in index
+    assert "closed holes (closed and confirmed) 1/1" in index
+    assert "excluded or downgraded runs: owner__repo-1-rep2.json: history read after the last write" in index
+    assert cli.main(["report", "--certs", str(cert_dir)], deps=report_deps()) == 0
+    out = capsys.readouterr().out
+    assert "confirmed hole in 1/2 judged runs" in out and "closed holes (closed and confirmed) 1/1" in out
+    assert cli.main(["report", "--certs", str(cert_dir), "--format", "json"], deps=report_deps()) == 0
+    counts = json.loads(capsys.readouterr().out)["confirmation"]["replication"]["owner__repo-1"]["counts"]
+    assert counts["confirmed"] == 1 and counts["closed"] == 1
+    assert counts["downgraded"] == [
+        {"file": "owner__repo-1-rep2.json", "basis": "history read after the last write"}
+    ]
+    # a replication key is not listed as an unused main-run entry
+    assert "Manifest entries with no hole label" not in index

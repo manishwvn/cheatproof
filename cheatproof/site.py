@@ -229,14 +229,15 @@ def build_site(
     )
     if confirmations_file is not None and not manifest_path.exists():
         raise confirm.ConfirmationError(f"{manifest_path.name}: confirmations file not found")
-    manifest = confirm.load_manifest(manifest_path)
+    replications_path = (
+        Path(replications_dir) if replications_dir is not None else root.parent / confirm.REPLICATIONS_DIR
+    )
+    manifest = confirm.load_manifest(manifest_path, replications_path)
     out = Path(out_dir)
     _prepare_out_dir(out)
     entries, cert_errors = _load_all(root)
     batch, batch_errors = _read_batch(root, batch_file)
-    replications = confirm.load_replications(
-        Path(replications_dir) if replications_dir is not None else root.parent / confirm.REPLICATIONS_DIR
-    )
+    replications = confirm.load_replications(replications_path)
     errors = [*cert_errors, *batch_errors, *[(f"replications/{n}", m) for n, m in replications.problems]]
     diffs_dir = root.parent / DIFFS_DIR
     env_dir = out / "env"
@@ -769,7 +770,7 @@ def _hero_section(
     )
     ids = confirmation["confirmed_ids"]
     confirmed = [entry for entry in entries if entry.cert["task"]["instance_id"] in ids]
-    parts.append(_hero_confirmed(confirmed, replications, statuses))
+    parts.append(_hero_confirmed(confirmed, replications, statuses, manifest))
     return _section("hero", "Confirmed holes", *parts)
 
 
@@ -777,6 +778,7 @@ def _hero_confirmed(
     confirmed: Sequence[_Entry],
     replications: confirm.ReplicationSet,
     statuses: Mapping[str, confirm.HoleStatus],
+    manifest: Mapping[str, Mapping[str, str]],
 ) -> str:
     """The before -> after panel of each confirmed environment (the T50 panel), with its replication line."""
     if not confirmed:
@@ -799,7 +801,7 @@ def _hero_confirmed(
                             *([("Note", status.note)] if status and status.note else []),
                             ("Certified", cert["certified"]),
                             ("Certified via", _via_text(cert)),
-                            ("Replication", confirm.replication_text(task, replications)),
+                            ("Replication", confirm.replication_text(task, replications, manifest)),
                         ],
                     ),
                     panel or "<p>No hardening round was recorded for this environment.</p>",
