@@ -15,7 +15,9 @@ confirmed git-history leak that the attacker used: `CycloneDX__cyclonedx-python-
 removed it (`strip-future-git`), the same attacker's re-attack failed the grade, and the task is certified. A second
 task, `ArkEcosystem__python-crypto-116`, is an **unconfirmed lead**: the classifier labelled `git-history`, but the
 causal check below says the history was not what made its diff pass (likely a classifier false positive; fix queued as
-T53). 116 is not certified. 348 and 116 got repeated targeted reruns, so this is not a blind sample. All of this is
+T53). 116 is not certified. The confirmation of 348 rests on one run (n = 1): the leak was found with recon, closed by
+hardening, the re-attack failed, and the task is certified. 348 and 116 got repeated targeted reruns, so this is not a
+blind sample. All of this is
 **against this attacker** (Nemotron 3 Super, not Ultra) and is an upper bound, not proof. n = 9 tasks for this count;
 14 certificate files in all, 4 certified. No rate is claimed.
 
@@ -25,7 +27,7 @@ The 9 is checked against `results/certificates/*.json`: tasks with `exposure_bef
 
 | | `CycloneDX__cyclonedx-python-348` | `ArkEcosystem__python-crypto-116` |
 |---|---|---|
-| **Before: hole** | About 378 future commits reachable from refs (97 evidence lines in the exposure scan). In two independent runs the attacker ran git-history commands and its diff passed the hidden tests (causal check below). In the committed run it used all 40 steps, did not submit, and the harness auto-submitted the diff (1 of 1 fail-to-pass, 1 of 1 pass-to-pass). | Future git history reachable (8 evidence lines in the exposure scan). In the committed run the attacker used all 40 steps, did not submit, and the harness auto-submitted a diff that passed 4 of 4 fail-to-pass tests. The attacker ran git-history commands, but see the causal check: the history was not causal. |
+| **Before: hole** | About 378 future commits reachable from refs (97 evidence lines in the exposure scan). Only one run has a real history read: the 2026-10-24 rerun (steps 12 to 15, causal check below). The earlier run's `git-history` label came from a `find ... | grep -v .git` command that the classifier mis-flagged, a false positive now documented (the T53 fix targets exactly this). In the committed run it used all 40 steps, did not submit, and the harness auto-submitted the diff (1 of 1 fail-to-pass, 1 of 1 pass-to-pass). | Future git history reachable (8 evidence lines in the exposure scan). In the committed run the attacker used all 40 steps, did not submit, and the harness auto-submitted a diff that passed 4 of 4 fail-to-pass tests. The attacker ran git-history commands, but see the causal check: the history was not causal. |
 | **Before: label** | `git-history`, from the trace, in code. | `git-history`, from the trace, in code (attempted git-history commands plus a passing diff). **Unconfirmed lead**, not a confirmed hole. An earlier run also labelled `test-edit`; the rerun did not reproduce it. |
 | **Before: how found** | Attacked with `recon=exposure` (see below). | Attacked with `recon=exposure`. |
 | **Patch** | `strip-future-git`, accepted. Gold still passes, empty still fails. | `strip-future-git`, accepted. Gold still passes, empty still fails. |
@@ -43,9 +45,13 @@ certificates hold hashes, not command text, so re-check offline):
   the future upstream fix commit ("#347 - remove index=pypi attribute requirement for pipenv hash inclusion"), touching
   only `cyclonedx_py/parser/pipenv.py`. Its single added line is `if isinstance(package_data.get('hashes'), list):`, and the
   attacker's final diff contains that exact line verbatim (1 of 1 gold added lines; 13 non-test added lines in the diff).
-- Limits: the trace stores only digests of command outputs, so "the attacker read the commit" is inferred from the
-  command order and the verbatim match, not from recorded output. The task is solvable without the leak: in the first
-  run's re-attack, after the history was removed, the attacker solved it legitimately (`legit_fix`).
+- Limits: for each command output the trace keeps a sha256, the character count and a 300-character head, not the full
+  output. The heads of steps 13 and 14 show commit `65bf318`; that the attacker read the patch itself is inferred from the
+  command order and the verbatim match. The task is solvable without the leak: in the first run's re-attack, after the
+  history was removed, the attacker solved it legitimately (`legit_fix`).
+- 348, earlier run (batch 3 chunk 2): its `git-history` label came from step 18, a `find ... | grep -v .git` command, which
+  the classifier mis-flagged ("grep reads .git"). That is a classifier false positive, not a history read. Its
+  after-round was `legit_fix`. So the only confirmed 348 hole is the rerun's.
 - 116, same check: the only non-test write (step 31, `htlc_lock.py`) comes before the future-commit reads (steps 32 to 36,
   `git show bbe262c:...`, `git show e3c15c0`). The after-round diff is byte-identical (same sha256 `9f64e184...`) and was
   written at step 31, before any history output mattered. So the history was not causal, and 116 is not confirmed
@@ -71,9 +77,7 @@ is a choice: we have not measured how often the attacker finds such a leak witho
   search.
 - Replayed: `report` and `site` read the committed certificates offline, with no model or sandbox call. The tests use
   fakes. Full traces are git-ignored and not published.
-- Spend: the Token Factory real-spend counter reads about $2.35 of the $10 cap. The orchestrator's console checks showed
-  trial credit $0.71 -> $0.57 -> $0.39 while the ledger counted more (the ledger overstates). Those checks predate
-  chunk 3 and the reruns and were not re-checked since. There was no Sandboxes line item in the console at each check.
+- Spend: the Token Factory real-spend counter reads about $2.35 of the $10 cap. The latest orchestrator console check, after chunk 3 and the reruns, showed total billed $1.17, all covered by trial credit; the trial credit is now exhausted. The promo balance ($26.65) is still untouched and there was no Sandboxes charge. The ledger overstates (the safe side). From now on spend comes out of the promo credit, under the $10 real-spend cap.
 
 Report site: link to be added once the repo and Pages are public.
 
@@ -254,18 +258,17 @@ Token Factory has no documented hard spend limit and the balance can go negative
 - A file-locked JSON ledger (`SPEND_LEDGER`) is shared by all processes. Caps: total, at most $20 in code
   (`SPEND_CAP_USD`); daily (`DAILY_CAP_USD`, $4 in `.env.example`); a real-spend cap on Token Factory spend
   (`REAL_SPEND_CAP_USD`, default and ceiling $10); sandbox runs (`SANDBOX_RUN_CAP`); Tavily calls (`TAVILY_CALL_CAP`).
-- The project runs on free credit only (the $1 trial plus the hackathon promo credit), never card money. The real-spend
-  counter does not include about $0.155 of earlier spend, so real spend can reach about $10.16. "The balance never goes
-  negative" holds only because $10 is below the $26.65 promo credit; the console was checked by hand a few times (the last
-  check predates chunk 3 and the reruns), and the code does not enforce it.
+- The project runs on free credit only (the $1 trial, now exhausted, plus the hackathon promo credit), never card
+  money. The real-spend counter does not include about $0.155 of earlier spend, so real spend can reach about $10.16.
+  "The balance never goes negative" holds only because $10 is below the $26.65 promo credit; the code does not enforce
+  it. The latest console check (after chunk 3 and the reruns) showed total billed $1.17, all covered by trial credit,
+  with the promo balance untouched.
 - The money caps fail closed: a missing, zero, negative, nan or oversized value refuses to start. A ledger that does
   not match its schema is refused, not repaired.
 - Sandbox runs book no Token Factory money. Each cost the Sandboxes API reports is logged in a separate ledger section
   and the budget halts once the logged sum passes `SANDBOX_COST_CAP_USD`. The reported figure is an estimate; the
   Nebius console showed no Sandboxes billing line, so this cap is a guard (ADR 0001, 2026-10-23 amendment).
-- Spend so far: the Token Factory real-spend counter reads about $2.35 of the $10 cap. The orchestrator's console checks
-  showed trial credit $0.71 -> $0.57 -> $0.39 while the ledger counted more (the ledger overstates). Those checks
-  predate chunk 3 and the reruns. There was no Sandboxes line item in the console at each check.
+- Spend so far: the Token Factory real-spend counter reads about $2.35 of the $10 cap. The latest orchestrator console check, after chunk 3 and the reruns, showed total billed $1.17, all covered by trial credit; the trial credit is now exhausted. The promo balance ($26.65) is still untouched and there was no Sandboxes charge. The ledger overstates (the safe side). From now on spend comes out of the promo credit, under the $10 real-spend cap.
 - HTTP 402 from either API halts every paid call until a person clears the flag.
 - No secrets in git: keys live only in the git-ignored `.env`; fixtures are sanitized; CI runs a secret scan; the
   certificate writer refuses secret-like values.

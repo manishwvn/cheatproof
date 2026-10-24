@@ -156,8 +156,9 @@ says so.
 - **What happened.** After batch 3 chunk 3 our log of the cost the Sandboxes API reports (Sandboxes 1) stood at about
   $1.80, with that chunk's 29 runs adding about $0.34; the Token Factory real-spend counter then read about $1.91. After
   the reruns the Sandboxes estimate was about $2.17 and the real-spend counter about $2.35, of the $10 cap. The
-  orchestrator's console checks showed trial credit $0.71 -> $0.57 -> $0.39 while the ledger counted more
-  (the ledger overstates), and no Sandboxes line.
+  latest orchestrator console check, after chunk 3 and the reruns, showed total billed $1.17, all covered by trial
+  credit (now exhausted), the $26.65 promo balance untouched, and no Sandboxes charge, while the ledger counted more
+  (the ledger overstates).
 - **Impact.** We had to trust the console over the API field, and our ledger overstates real spend. We cannot tell a
   user, or a reviewer reading our budget log, what a task costs on Sandboxes or whether it costs anything after the beta.
 - **Suggested fix.** Same as Sandboxes 1, plus a usage view in the console that lists runs and the cost they were
