@@ -2,7 +2,8 @@
 
 From building RewardSeal (an attacker model tries to pass SWE tasks without fixing them; holes are classified, patched
 and re-attacked) for the Nebius x NVIDIA hackathon, Coding & Agentic track. Everything below happened in this
-project's own runs: 8 tasks attempted, 5 attacks, 46 sandbox runs, a few dozen chat calls, all on the free credit.
+project's own runs: 14 certificate files, 11 tasks attacked (13 attack rounds in the committed certificates), about 70
+sandbox runs itemised in those certificates, all on the free credit.
 Each item gives what happened, the impact, and a suggested fix. Where we did not hit a problem ourselves, the item
 says so.
 
@@ -42,7 +43,7 @@ says so.
 - **What happened.** In the recorded Nano response, `usage.completion_tokens_details` was `null`, so we cannot tell how
   many of the 64 completion tokens were reasoning.
 - **Impact.** For an agent loop on a reasoning model, the budget is mostly reasoning tokens. We could not report to
-  ourselves where the tokens went, and 4 of our 5 attacks ended at the token limit (250,000 per attempt).
+  ourselves where the tokens went, and 7 of the 11 first attacks in the committed certificates ended at the token or step limit without a submit.
 - **Suggested fix.** Fill `completion_tokens_details.reasoning_tokens` for reasoning models.
 
 ### 4. Billing rules for failed and retried calls are not stated where we looked
@@ -153,8 +154,9 @@ says so.
 
 ### 9. The cost estimate keeps growing while the console shows no Sandboxes billing line
 - **What happened.** After batch 3 chunk 3 our log of the cost the Sandboxes API reports (Sandboxes 1) stood at about
-  $1.80, with that chunk's 29 runs adding about $0.34. Our Token Factory real-spend counter read about $2.35 of the
-  $10 cap. The orchestrator's console checks showed trial credit $0.71 -> $0.57 -> $0.39 while the ledger counted more
+  $1.80, with that chunk's 29 runs adding about $0.34; the Token Factory real-spend counter then read about $1.91. After
+  the reruns the Sandboxes estimate was about $2.17 and the real-spend counter about $2.35, of the $10 cap. The
+  orchestrator's console checks showed trial credit $0.71 -> $0.57 -> $0.39 while the ledger counted more
   (the ledger overstates), and no Sandboxes line.
 - **Impact.** We had to trust the console over the API field, and our ledger overstates real spend. We cannot tell a
   user, or a reviewer reading our budget log, what a task costs on Sandboxes or whether it costs anything after the beta.
@@ -163,13 +165,13 @@ says so.
 
 ## Tavily
 
-### 1. The usage endpoint lags behind real calls
+### 1. The usage endpoint lagged behind a real call
 - **What happened.** On 2026-10-24 our harness made one real Tavily search call (a recon search before the attacker's
   first step, query `Hide private model fields in swagger doc`, 3 results returned). Right after the run, the usage
-  endpoint still read 0 of 1000. Our own counter showed the call.
-- **Impact.** We could not confirm on Tavily's side that the runtime call was counted, which matters for a bonus award
-  that requires a functional runtime call. The dashboard count is unverified until it catches up, and we do not know the
-  expected delay.
+  endpoint still read 0 of 1000. Our own counter showed the call. Later the same day (2026-10-24) the endpoint showed
+  plan usage 1 of 1000 and 1 search, matching the one call.
+- **Impact.** For a while we could not confirm on Tavily's side that the runtime call was counted, which matters for a
+  bonus award that requires a functional runtime call. We do not know the expected delay.
 - **Suggested fix.** State the reporting delay for usage in the API docs, or return a per-request id or usage field in
   the search response so a caller can match its own call to the dashboard.
 
@@ -192,10 +194,10 @@ says so.
 - **Suggested fix.** Use one convention, or accept case-insensitive aliases.
 
 ### 3. Nemotron 3 Super as a long-horizon tool-using attacker
-- **What happened.** We ran Super as the attacker with a 40-step and 250,000-token limit per attempt. Of 5 attacks,
-  4 ended at one of those limits (2 on tokens, 2 on steps) and 1 submitted an exploit (`test-edit`, unverified); the
-  re-attack after hardening on that one also ran out of tokens. Cost per attacked task was $0.06 to $0.11 on
-  Token Factory.
+- **What happened.** We ran Super as the attacker with a 40-step and 250,000-token limit per attempt. Of the 11
+  first attacks in the committed certificates, 7 ended at a limit without a submit (6 on steps, 1 on tokens; the hero runs
+  used 500,000 tokens), and 4 submitted. One task has a confirmed git-history exploit (`CycloneDX__cyclonedx-python-348`,
+  from an auto-submitted diff at the step limit). Cost per attacked task was about $0.04 to $0.20 on Token Factory.
 - **Impact.** The limits, not the model's decision to stop, decide most of our outcomes, so we can only say "not hacked
   by this attacker within these limits". We do not know how much of that is verbosity in the model's reasoning, since
   `usage` does not split it (Token Factory 3).
