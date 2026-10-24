@@ -5,6 +5,8 @@ import shlex
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
+import openai
 import pytest
 
 from cheatproof import attacker
@@ -946,7 +948,10 @@ class FakeOpenAIClient:
 
     def _create(self, **kwargs):
         self.requests.append(kwargs)
-        return self.replies.pop(0)
+        item = self.replies.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item
 
 
 def test_attack_through_guarded_llm_and_a_real_budget_ledger(tmp_path, monkeypatch, init_ledger):
@@ -976,6 +981,51 @@ def test_attack_through_guarded_llm_and_a_real_budget_ledger(tmp_path, monkeypat
     assert ledger.exists()
     end = read_trace(trace)[-1]
     assert end["stop_reason"] == "submit" and end["diff_ok"] is True
+
+
+def _guarded_attack(tmp_path, monkeypatch, replies, trace=None):
+    monkeypatch.setenv("SPEND_LEDGER", str(tmp_path / "ledger.json"))
+    monkeypatch.setenv("SPEND_CAP_USD", "1")
+    monkeypatch.setenv("DAILY_CAP_USD", "1")
+    monkeypatch.setenv("MODEL_PRICES_JSON", json.dumps({MODEL: [1.0, 2.0]}))
+    budget = Budget.from_env()
+    client = FakeOpenAIClient(replies)
+    llm = GuardedLLM(budget, client=client, sleep=lambda s: None, rand=lambda: 0.0)
+    return attack(llm, FakeSession(), SYSTEM, TASK, CFG, trace_path=trace), client, budget
+
+
+def _unavailable():
+    req = httpx.Request("POST", "https://example.invalid/v1/chat/completions")
+    return openai.InternalServerError("busy", response=httpx.Response(503, request=req), body=None)
+
+
+def test_t56_transient_503s_are_retried_inside_the_attack_and_counted(tmp_path, monkeypatch, init_ledger):
+    trace = tmp_path / "trace.jsonl"
+    replies = [_unavailable(), _unavailable(), reply(call("submit", {}, "c1"), usage=(150, 10))]
+    result, client, _ = _guarded_attack(tmp_path, monkeypatch, replies, trace)
+    assert result.submitted is True and result.stop_reason == "submit"
+    assert result.llm_retries == 2 and len(client.requests) == 3
+    assert read_trace(trace)[-1]["llm_retries"] == 2
+
+
+def test_t56_three_503s_end_the_attack_as_an_error_after_two_retries(tmp_path, monkeypatch, init_ledger):
+    replies = [_unavailable(), _unavailable(), _unavailable()]
+    result, client, budget = _guarded_attack(tmp_path, monkeypatch, replies)
+    assert result.stop_reason == "error" and result.llm_retries == 2 and len(client.requests) == 3
+    assert result.error == "llm call failed: InternalServerError (HTTP 503)"
+    assert budget.snapshot()["halted"] is None
+
+
+def test_t56_a_402_halts_the_attack_with_no_retry(tmp_path, monkeypatch, init_ledger):
+    req = httpx.Request("POST", "https://example.invalid/v1/chat/completions")
+    gone = openai.APIStatusError("gone", response=httpx.Response(402, request=req), body=None)
+    with pytest.raises(BudgetExceeded):
+        _guarded_attack(tmp_path, monkeypatch, [gone, reply(call("submit"))])
+
+
+def test_t56_a_client_without_a_retry_counter_reports_zero():
+    result, _, _ = go([reply(call("submit"))])
+    assert result.llm_retries == 0
 
 
 def test_tool_output_over_the_configured_limit_is_cut_with_a_marker():

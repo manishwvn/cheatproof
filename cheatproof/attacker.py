@@ -150,6 +150,15 @@ class AttackResult:
     nudges: tuple[float, ...] = ()  # the budget thresholds whose reminder was sent
     # T52: {provider, query, results, ok} of the harness recon search, or None when none was attempted.
     harness_search: dict | None = None
+    # T56: transient LLM failures retried inside the attempt (GuardedLLM.retries moved by this much). Each retry was
+    # reserved and settled like a first call, so tokens and spend already include it.
+    llm_retries: int = 0
+
+
+def _llm_retries(llm: object) -> int:
+    """How many retries the client has made so far. A client without the counter (a fake) counts as 0."""
+    n = getattr(llm, "retries", 0)
+    return n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else 0
 
 
 class _ToolError(Exception):
@@ -593,6 +602,7 @@ def attack(
     ]
 
     tokens_in = tokens_out = 0
+    retries_before = _llm_retries(llm)
     stop_reason: StopReason = "max_steps"
     error = ""
     submitted = False
@@ -663,6 +673,7 @@ def attack(
                     "steps": len(steps),
                     "tokens_in": tokens_in,
                     "tokens_out": tokens_out,
+                    "llm_retries": _llm_retries(llm) - retries_before,
                     "error": _detail(exc),
                 }
             )
@@ -803,6 +814,7 @@ def attack(
             "steps": len(steps),
             "tokens_in": tokens_in,
             "tokens_out": tokens_out,
+            "llm_retries": _llm_retries(llm) - retries_before,
             "error": error,
             "final_diff": None if final_diff is None else _digest(final_diff),
         }
@@ -819,4 +831,5 @@ def attack(
         auto_submitted=auto_submitted,
         nudges=tuple(sent),
         harness_search=harness_result,
+        llm_retries=_llm_retries(llm) - retries_before,
     )

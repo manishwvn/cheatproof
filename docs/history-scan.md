@@ -25,6 +25,7 @@ The scan finds commits that a ref, the reflog, `ORIG_HEAD` or `FETCH_HEAD` reach
 object store with nothing pointing at it (a dangling commit in `.git/objects`, found by `git fsck --lost-found`) is not
 listed, so it is not scanned. The attacker prompt mentions `git fsck --lost-found`, so an attacker can read such a
 commit. A diff copied from one is not confirmed as `git-history` by this scan: it stays a lead (or `unclassified`) and
-needs manual review. The `strip-future-git` patch prunes unreachable objects, so the hardened re-attack does not have
+needs manual review. Since T56, a gold-matching pass where the attacker ran git-history commands but the exposure scan
+saw no future history (`future_git` False) is `gold_match_with_exposure`, never `legit_fix`. The `strip-future-git` patch prunes unreachable objects, so the hardened re-attack does not have
 this route. Closing the gap in the scan would need `git fsck --unreachable --no-reflogs` on a repo that can be large;
 it is not done.

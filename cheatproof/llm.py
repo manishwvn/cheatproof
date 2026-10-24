@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import random
+import sys
+import time
+from collections.abc import Callable
 
 import openai
 
@@ -13,6 +17,22 @@ BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "4096"))
 # Only options that cannot change what one reservation pays for.
 ALLOWED_KWARGS = {"temperature", "top_p", "tools", "tool_choice", "response_format", "stop", "seed"}
+# T56: bounded retry of transient Token Factory failures. Never more than MAX_RETRIES retries per chat() call; a caller can
+# ask for fewer, never for more. The waits are fixed and short (a little jitter on top, at most JITTER_S).
+MAX_RETRIES = 2
+RETRY_DELAYS_S = (2.0, 6.0)
+JITTER_S = 1.0
+# Only these statuses are retried. Every 4xx is NOT retried (401/402/403 are final; 402 halts the ledger). 429 is also not
+# retried, on purpose: a rate limit and an exhausted quota look alike, so the call fails closed instead of guessing,
+# and it has already been counted as a rejected prompt. Timeouts and dropped connections (APIConnectionError, which
+# APITimeoutError extends) are retried.
+RETRY_STATUSES = frozenset({500, 502, 503, 504})
+
+
+def _transient(err: BaseException) -> bool:
+    if isinstance(err, openai.APIStatusError):
+        return err.status_code in RETRY_STATUSES
+    return isinstance(err, openai.APIConnectionError)
 
 
 def estimate_tokens(messages: list[dict], tools: list[dict] | None = None) -> int:
@@ -21,8 +41,20 @@ def estimate_tokens(messages: list[dict], tools: list[dict] | None = None) -> in
 
 
 class GuardedLLM:
-    def __init__(self, budget: Budget, client=None) -> None:
+    def __init__(
+        self,
+        budget: Budget,
+        client=None,
+        *,
+        max_retries: int = MAX_RETRIES,
+        sleep: Callable[[float], None] = time.sleep,
+        rand: Callable[[], float] = random.random,
+    ) -> None:
         self.budget = budget
+        self.max_retries = max(0, min(int(max_retries), MAX_RETRIES))  # a cap that can only go down
+        self.retries = 0  # retries made so far, over all calls; the attacker reports the change per attack
+        self._sleep = sleep
+        self._rand = rand
         self._client = client or openai.OpenAI(
             # No SDK retries: each retry could be billed while only one reservation is held.
             base_url=BASE_URL,
@@ -41,6 +73,28 @@ class GuardedLLM:
             raise ValueError(f"max_tokens must be 1..{MAX_OUTPUT_TOKENS}")
         if kwargs.keys() - ALLOWED_KWARGS:
             raise ValueError(f"unsupported options: {sorted(kwargs.keys() - ALLOWED_KWARGS)}")
+        attempt = 0
+        while True:
+            try:
+                return self._chat_once(model, messages, max_tokens, kwargs)
+            except Exception as err:
+                # BudgetExceeded (cap, halt, 402) and every 4xx are final: _transient is False for them.
+                if attempt >= self.max_retries or not _transient(err):
+                    raise
+                failed = type(err).__name__
+            # Outside the except block, so a halt raised below carries no SDK error as its context.
+            self.budget.check_not_halted()  # a halt set meanwhile stops the retry before it waits
+            delay = RETRY_DELAYS_S[min(attempt, len(RETRY_DELAYS_S) - 1)] + JITTER_S * min(
+                1.0, max(0.0, self._rand())
+            )
+            attempt += 1
+            self.retries += 1
+            # Class name and attempt number only: never the message, the request or the provider text.
+            print(f"llm retry {attempt}/{self.max_retries} after {failed}", file=sys.stderr)
+            self._sleep(delay)
+
+    def _chat_once(self, model: str, messages: list[dict], max_tokens: int, kwargs: dict):
+        """One attempt: reserve, call, settle. A retry runs this again, so it books like a first attempt."""
         est_input = estimate_tokens(messages, kwargs.get("tools"))
         hold = self.budget.reserve(model, est_input, max_tokens)
         paid = None
