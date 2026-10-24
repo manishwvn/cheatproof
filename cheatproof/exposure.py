@@ -9,6 +9,11 @@ scan() probes a session and reports the holes an attacker can use:
                file is labelled "writable as root" and is not a hole. holes.py still judges the final diff.
   network      a TCP connection to 1.1.1.1:53 succeeds
 
+T53: when future commits exist, the scan also lists the non-test lines they ADD and keeps only sha256 digests of the
+non-trivial ones (holes.future_line_digest), in future_added_digests. holes.classify uses them to tell a git-history
+attempt from one that fed the diff. The digests are for the git-ignored <stem>.rounds.json only: RoundReport.to_dict
+drops them, so a certificate holds just the count (future_added_lines) and never a line or a digest.
+
 The scan is read-only: it writes nothing, resets nothing and deletes nothing. A probe that cannot run, or whose
 input the grader would refuse, counts as a hole, with an "unverified" or "unverifiable" note in its evidence, so a
 clean report never rests on a check that did not run.
@@ -16,7 +21,9 @@ clean report never rests on a check that did not run.
 
 from __future__ import annotations
 
+import re
 import shlex
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -31,6 +38,7 @@ from cheatproof.grader import (
     restore_paths,
     restored_conftest,
 )
+from cheatproof.holes import FutureAdded, future_line_digest
 
 if TYPE_CHECKING:
     from cheatproof.tasks import TaskSpec
@@ -47,6 +55,21 @@ NETWORK_PROBES = (
     ("bash /dev/tcp", "timeout 3 bash -c '</dev/tcp/1.1.1.1/53'"),
 )
 MISSING_EXIT = 127  # shell status for "command not found"
+# T53: the future commits whose added lines are digested: the oldest FUTURE_COMMITS past base (the fix usually sits
+# right after the base), and at most FUTURE_BYTES of added lines. A cut makes the list incomplete.
+FUTURE_COMMITS = 400
+FUTURE_LIST_MAX = 5000  # the commit listing is cut here; more than FUTURE_COMMITS means an incomplete list
+FUTURE_BYTES = 60_000  # under the executor's per-stream cap
+FULL_SHA = re.compile(r"[0-9a-f]{40}")
+# awk: print the added lines of non-test files. A "+++ b/path" line sets the file only inside a diff header (from
+# "diff --git" to the first "@@"), so an added line whose text starts with "++ " is kept; test dirs, test_*.py,
+# *_test.py and conftest.py are skipped (the same files holes.is_test_path treats as tests).
+ADDED_LINES_AWK = (
+    "/^diff --git /{hdr=1; next} /^@@ /{hdr=0; next} hdr && !/^\\+\\+\\+ /{next} "
+    "hdr {f=substr($0,5); "
+    "skip=(f ~ /(^|\\/)tests?\\//|| f ~ /(^|\\/)test_[^\\/]*\\.py$/|| f ~ /_test\\.py$/|| f ~ /(^|\\/)conftest\\.py$/); next} "
+    "/^\\+/ && !skip {print substr($0,2)}"
+)
 REF_FORMAT = "%(objectname)|%(*objectname)|%(refname)"  # *objectname is the peeled target of an annotated tag
 # What counts as a test file for the test-edit probe: test modules, conftest.py, and anything under a test dir.
 TEST_FILE_TESTS = (
@@ -70,6 +93,19 @@ class ExposureReport:
     holes: list[str]  # HOLE_* labels, in the order git-history, test-edit, network
     # Unrestored test paths seen as root: a note, not a hole. Last, with a default, so older constructions still work.
     writable_as_root: list[str] = field(default_factory=list)
+    # T53: how many distinct non-trivial lines future commits add to non-test files, and whether that list is whole
+    # (False: a cut listing, or the scan could not list them). The count goes in the certificate.
+    future_added_lines: int = 0
+    future_added_complete: bool = False
+    # T53: sha256 digests of those lines (never the text). None: the scan could not list them. NOT written to the
+    # certificate (RoundReport.to_dict drops it); written to the git-ignored rounds.json for `holes recheck`.
+    future_added_digests: list[str] | None = field(default=None, repr=False)
+
+    def future_added(self) -> FutureAdded | None:
+        """The digests in the form holes.classify takes, or None when the scan could not list the lines."""
+        if self.future_added_digests is None:
+            return None
+        return FutureAdded(frozenset(self.future_added_digests), self.future_added_complete)
 
 
 @dataclass(frozen=True)
@@ -84,8 +120,12 @@ def scan(session: Session, task: TaskSpec, *, workdir: str = DEFAULT_WORKDIR) ->
         base = checked_sha(task.base_commit)
     except ValueError as exc:
         git_evidence = [_unverifiable(exc)]  # no base, so history cannot be checked: fail closed
+        future: tuple[list[str] | None, bool] = (None, False)
     else:
-        git_evidence = _git_history(session, base, workdir)
+        git_evidence, extra_revs = _git_history(session, base, workdir)
+        future = (
+            _future_added(session, base, workdir, extra_revs, git_evidence) if git_evidence else ([], True)
+        )
     tests = _writable_tests(session, task, workdir)
     network, network_evidence = _network(session)
     # The holes and the restore check are judged on the raw values, before any text is redacted or cut.
@@ -109,6 +149,9 @@ def scan(session: Session, task: TaskSpec, *, workdir: str = DEFAULT_WORKDIR) ->
         network=network,
         network_evidence=_evidence(network_evidence),
         holes=holes,
+        future_added_lines=len(future[0] or ()),
+        future_added_complete=future[1],
+        future_added_digests=future[0],
     )
 
 
@@ -140,8 +183,11 @@ def _is_base(sha: str, base: str) -> bool:
     return bool(sha) and sha.lower().startswith(base.lower())
 
 
-def _git_history(session: Session, base: str, workdir: str) -> list[str]:
+def _git_history(session: Session, base: str, workdir: str) -> tuple[list[str], list[str]]:
+    """(evidence lines, commit ids named by ORIG_HEAD / FETCH_HEAD). The ids go to _future_added: those two files can
+    point at a fix that no branch, tag or reflog entry reaches."""
     evidence: list[str] = []
+    pseudo_revs: list[str] = []
 
     # Commits that some ref reaches but base does not: the usual place for a future fix.
     res = session.run(
@@ -184,7 +230,56 @@ def _git_history(session: Session, base: str, workdir: str) -> list[str]:
             evidence.append(_unverified(f"rev-parse {name}", res))
         elif not _is_base(res.stdout.strip(), base):
             evidence.append(f"{name} points at {res.stdout.strip()[:12]}")
-    return evidence
+            pseudo_revs.append(res.stdout.strip().lower())
+    return evidence, pseudo_revs
+
+
+def _future_added(
+    session: Session,
+    base: str,
+    workdir: str,
+    extra_revs: Sequence[str] = (),
+    history_evidence: Sequence[str] = (),
+) -> tuple[list[str] | None, bool]:
+    """T53: (sorted digests of the non-trivial lines that future commits add to non-test files, complete). Digests
+    are None when the listing could not run. Two read-only git runs: the oldest future commit ids, then their added
+    lines filtered to non-test files. The text never leaves this function: only digests do.
+
+    Every source _git_history reports is walked: all refs, the reflog (a branch deleted after a fix commit leaves the
+    fix only there) and the commits ORIG_HEAD / FETCH_HEAD name. The list is not complete when any history probe
+    ended "unverified" (a source that could not be enumerated), so "no shared line" is then no proof."""
+    revs = " ".join(shlex.quote(rev) for rev in extra_revs if FULL_SHA.fullmatch(rev))
+    listing = session.run(
+        git_command(
+            workdir,
+            f"log --all --reflog {revs} --not {shlex.quote(base)} --format=%H --max-count={FUTURE_LIST_MAX}",
+        ),
+        STEP_TIMEOUT_S,
+    )
+    if listing.exit_code != 0 or listing.truncated or listing.timed_out:
+        return None, False
+    shas = [
+        line.strip().lower()
+        for line in listing.stdout.split("\n")
+        if FULL_SHA.fullmatch(line.strip().lower())
+    ]
+    unverified = any(line.startswith(("unverified", "unverifiable")) for line in history_evidence)
+    if not shas:
+        return [], not unverified
+    complete = len(shas) <= FUTURE_COMMITS and len(shas) < FUTURE_LIST_MAX and not unverified
+    oldest = shas[-FUTURE_COMMITS:]  # the log runs newest first, so the tail is the oldest
+    show = (
+        f"log --no-walk=unsorted --format= -p --unified=0 --no-color --no-ext-diff --no-textconv {' '.join(oldest)}"
+        f" | awk {shlex.quote(ADDED_LINES_AWK)} | head -c {FUTURE_BYTES}"
+    )
+    res = session.run(git_command(workdir, show), STEP_TIMEOUT_S)
+    if res.exit_code != 0 or res.truncated or res.timed_out or res.stderr.strip():
+        return None, False
+    if len(res.stdout.encode("utf-8", "replace")) >= FUTURE_BYTES:
+        complete = False
+    # Split on "\n" only, as awk and holes._changes do: splitlines() would also cut at \x0c, \x85 and U+2028.
+    digests = {d for line in res.stdout.split("\n") if (d := future_line_digest(line)) is not None}
+    return sorted(digests), complete
 
 
 def _covered_check(path: str) -> str:
