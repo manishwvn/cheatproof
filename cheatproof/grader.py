@@ -60,6 +60,17 @@ COLLECT_CMD = (
     "PYTHONDONTWRITEBYTECODE=1 python -m pytest -p no:cacheprovider --color=no --collect-only -q --tb=short"
     " --show-capture=no"
 )
+
+
+# The one shell line every gate runs pytest in: the testbed PATH, then cd to the workdir, then the command. The gold and
+# empty gates, the collection rerun and the collect-only preflight all build through here, so they share one env.
+def gate_command(cmd: str, workdir: str) -> str:
+    return f"{TESTBED_PATH}cd {shlex.quote(workdir)} && {cmd}"
+
+
+# collect_gate's error cause when the shell exits 127 (command not found): no python on the gate's PATH in the image.
+INTERPRETER_MISSING = "interpreter missing"
+
 COLLECT_CAUSE_CHARS = (
     100  # the collection cause goes first in the gate error, so a certificate's 200-char head keeps it
 )
@@ -831,7 +842,7 @@ def _collect_cause(
     remaining = min(deadline - time.monotonic(), STEP_TIMEOUT_S)
     if remaining <= 0:
         return "", False
-    cmd = f"{TESTBED_PATH}cd {shlex.quote(workdir)} && {COLLECT_CMD} {shlex.quote(file)}"
+    cmd = gate_command(f"{COLLECT_CMD} {shlex.quote(file)}", workdir)
     res = _exec(session, cmd, remaining, logs, "pytest collect", cut_ok=True)
     if res.reset:
         return "", True
@@ -894,7 +905,7 @@ def _run_tests(
         if remaining <= 0:
             return outcomes, "out of time before every test ran", ()
         args = " ".join(shlex.quote(node) for node in batch)
-        cmd = f"{TESTBED_PATH}cd {shlex.quote(workdir)} && {PYTEST_CMD} {args}"
+        cmd = gate_command(f"{PYTEST_CMD} {args}", workdir)
         res = _exec(session, cmd, remaining, logs, f"pytest ({len(batch)} node ids)", cut_ok=True)
         if res.reset and res.truncated:
             # The output was cut at the cap and the executor reset the sandbox. The cut output gives no verdict and no
@@ -1059,7 +1070,8 @@ def collect_gate(
 
     The caller resets or starts the session first. ok is False with a one-line error when a restore or apply step
     fails or pytest exits nonzero (for example 4 on a missing node or an import error), so the task is env-broken and
-    no attacker tokens are spent. Bad node ids or a bad base commit raise ValueError before any command.
+    no attacker tokens are spent. Exit 127 (the shell found no python) is reported as "interpreter missing: <line>".
+    Bad node ids or a bad base commit raise ValueError before any command.
     """
     if not timeout > 0:
         raise ValueError(f"collect timeout must be greater than 0 seconds, got {timeout!r}")
@@ -1100,12 +1112,16 @@ def _collect_all(
         if remaining <= 0:
             return "collect-only: out of time"
         args = " ".join(shlex.quote(node) for node in batch)
-        cmd = f"{TESTBED_PATH}cd {shlex.quote(workdir)} && {COLLECT_CMD} {args}"
+        cmd = gate_command(f"{COLLECT_CMD} {args}", workdir)
         res = _exec(
             session, cmd, remaining, logs, f"pytest collect-only ({len(batch)} node ids)", cut_ok=True
         )
         if res.reset or res.timed_out:
             return "collect-only: timed out or hit the output cap and the sandbox was reset"
+        if res.exit_code == 127:
+            # The shell could not run the interpreter, so pytest never ran. Not a collection failure: name the cause.
+            detail = error_line(res.stderr, res.stdout, exit_code=res.exit_code)
+            return f"{INTERPRETER_MISSING}: {detail}" if detail else INTERPRETER_MISSING
         if res.exit_code != 0:
             detail = error_line(res.stderr, res.stdout, exit_code=res.exit_code)
             return f"collect-only exited {res.exit_code}" + (f": {detail}" if detail else "")

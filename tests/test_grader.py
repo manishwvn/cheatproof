@@ -23,6 +23,7 @@ from cheatproof.grader import (
     diff_files,
     empty_gate,
     error_line,
+    gate_command,
     gold_gate,
     grade,
     node_outcomes,
@@ -1785,3 +1786,25 @@ def test_collect_gate_task_without_f2p_or_with_bad_timeout():
         collect_gate(session, make_task(), timeout=0)
     with pytest.raises(ValueError):
         collect_gate(session, make_task(fail_to_pass=("-bad",)))
+
+
+def test_collect_gate_and_gold_gate_share_one_command_prefix():
+    # Same PATH setup, cd and workdir as the gold gate: one helper builds both shell lines.
+    gold = FakeSession([("pytest", all_pass)])
+    assert grade(gold, make_task(), GOLD, workdir="/work tree").passed is True
+    (pytest_cmd,) = gold.cmds("pytest")
+    collect = FakeSession()
+    assert collect_gate(collect, make_task(), workdir="/work tree").ok is True
+    (collect_cmd,) = collect.cmds("--collect-only")
+    prefix = gate_command("", "/work tree")
+    assert prefix == TESTBED_SETUP + "cd '/work tree' && "
+    assert pytest_cmd.startswith(prefix) and collect_cmd.startswith(prefix)
+
+
+def test_collect_gate_127_is_env_broken_with_interpreter_missing_not_a_collection_failure():
+    # sh exits 127 when python is not on the gate's PATH: pytest never ran, so no collection failure is claimed.
+    session = FakeSession([("--collect-only", Result(127, "", "sh: 1: python: not found\n", 0.1))])
+    result = collect_gate(session, make_task())
+    assert result.ok is False
+    assert result.error == "interpreter missing: sh: 1: python: not found"
+    assert "collect-only exited" not in result.error

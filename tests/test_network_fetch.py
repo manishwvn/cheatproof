@@ -454,7 +454,7 @@ def test_the_sandbox_network_stays_off_for_every_session(tmp_path, monkeypatch):
         attack=attack_spy(spy),
         make_search=search.make_search,
         make_executor=Executor,
-        preflight=lambda session, task: SimpleNamespace(ok=True),
+        preflight=lambda session, task, **_: SimpleNamespace(ok=True),
     )
     assert cli.main(harden_argv(tmp_path, "--network-fetch"), deps=deps) == 0
     assert [env.network for env in started] == [False]  # the collect-only preflight session
