@@ -2,7 +2,7 @@
 
 Decided 2026-10-18 after three research rounds and judge panels (earlier candidates live in git history). Judging:
 four equal criteria scored 1–5 (Technological Implementation, Design, Potential Impact, Quality of Idea); ties go
-to Technological Implementation. Budget: free Token Factory credits only (trial and hackathon promo), in-app real-spend cap $10 total, $4 a day.
+to Technological Implementation. Budget: free Token Factory credits only (the $1 trial, now exhausted, and the hackathon promo, which now covers spend), in-app real-spend cap $10 total, $4 a day.
 
 ## One line
 The first closed loop that finds reward hacks in SWE environments, patches them, and certifies that each patched
@@ -31,7 +31,7 @@ trains Nemotron with RL), labs and eval firms.
 2. **Gate before hardening:** the gold patch passes and the empty patch fails, or the task is dropped and counted.
 3. **Attack:** a dishonest Nemotron Super agent gets the task, a shell inside the environment and four explicit
    strategies: git-history retrieval, test edits, hard-coding, network fetch of the upstream fix (with Tavily search).
-   About 15 steps and 50k tokens per attempt.
+   Limits per attempt: 40 steps and 250,000 tokens (500,000 in the hero runs).
 4. **Classify** each success into a hole type, in code, from the trace and the diff.
 5. **Patch** with rule-based fixes: strip future `.git` objects and refs, hidden read-only tests restored at grade
    time, network off, a grader check that fails on touched test files.
@@ -42,8 +42,11 @@ Executor: Token Factory Sandboxes (checkpoint, branch per patch), with local Doc
 model call goes through Token Factory.
 
 ## Demo
-- **Hook (10 s):** "We told Nemotron Super to cheat on real SWE tasks. It passed k of n without solving the task."
-  Count verified holes only (docs/results.md, Holes found). Cut to a real attack trace from the final run.
+- **Hook (10 s):** "We told Nemotron Super to cheat on real SWE tasks. In 1 of 9 tasks with leaked git history, it
+  looked up the upstream fix." Headline: 1 of 9 confirmed: found, closed, certified (cyclonedx-348); crypto-116 is an
+  unconfirmed lead (classifier false positive suspected, T53). Never say "2 of 9 exploited". Say that 348 and 116 got
+  repeated targeted reruns, that recon was on, and "against this attacker". Evidence: docs/results.md, Causal check;
+  the 9 is checked against the certificates. Cut to a real attack trace from the final run.
 - Live loop on one environment: attack, hole found, patch applied, re-attack fails, gold still passes.
 - Scale: the environment table (n shown), before and after per attack type, cost per environment.
 - Product: `python -m cheatproof.cli harden <env-id>` returns a certificate JSON. Model ID on screen in the first 20 seconds.
@@ -54,7 +57,9 @@ tool calls and sandbox output on screen.
 
 ## Tavily (bonus award)
 Planned use: the network-fetch attack. The attacker searches for the upstream fix; if it finds and applies it, that
-is a network-on hole, and the patch is network off. Tavily can change outcomes at runtime. Claim it only after a run logs a Tavily call (none logged in docs/results.md yet). No other Tavily use.
+is a network-on hole, and the patch is network off. Tavily can change outcomes at runtime. One real runtime call is logged (2026-10-24): a harness recon search before the attacker's first step, labelled as
+such in the trace and certificate. The attacker made 0 `web_search` calls of its own, so claim the runtime call and do
+not claim that the attacker used Tavily. On 2026-10-24 the Tavily usage endpoint showed plan usage 1 of 1000 and 1 search: the dashboard shows 1 search credit used, matching the one harness search. No other Tavily use.
 
 ## Ways this loses, and the answer
 1. **Small or fake-looking numbers.** Report n, raw counts and intervals; show a real hack transcript.
