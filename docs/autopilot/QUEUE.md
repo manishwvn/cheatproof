@@ -258,6 +258,7 @@ step args) and `results/reports/` can be committed; ignore them, or sanitize tra
 ## Milestone: go/no-go 2026-10-21 (attacker passes at least 5 of 40 unhardened tasks)
 
 ### T08 Eval run and results with raw counts — size M — todo — needs T33, T34, T35, T32, T36, T38, T23, T07, T16, T17, T18, T19, T20, T22 [30%]
+T48 note: the docling-824 preflight `python: not found` cause and fix are in the T48 entry below (env-broken: interpreter missing).
 Unblocked 2026-10-21: U21 is closed and T23 is done (#30), so T08 has no U21 dependency left.
 Run the full loop on the 40 tasks within the $10 real-spend cap (`REAL_SPEND_CAP_USD`, T43) and the $4 daily cap (check the ledger before starting; stop at either cap). Write
 `docs/results.md`: method, n, raw counts per attack type before and after, gold and empty gate results, cost per
@@ -430,14 +431,15 @@ Orchestrator decision 2026-10-23 (owner-approved spend, honesty required). Batch
 - Also: the site's batch check accepted only the schema 1 core keys and would have refused the batch.json that T38 writes; it now accepts the optional keys (`BATCH_OPTIONAL_KEYS`).
 - Tests (fakes only): `tests/test_recon_nudge.py`. The paid run waits for the orchestrator.
 
-### T48 docling-824 collect-only preflight fails with `python: not found` — size S — todo (haiku)
+### T48 docling-824 collect-only preflight fails with `python: not found` — size S — done #TBD (haiku)
+Root cause (code reading, no live run): the preflight and the gold gate already built the same shell line (`TESTBED_PATH`, `cd`, `sh -lc`); the only gap was the workdir (preflight used the default, gates use `env.workdir`). `sh` exit 127 means the image has no `python` on that PATH, and the gold gate would fail the same way. Fix: `grader.gate_command` shared by all gates, workdir passed from `cli._preflight`, exit 127 reported as `env-broken: interpreter missing: <line>`. No extra PATH fallbacks: the gold gate tries only `TESTBED_PATH`.
 `DS4SD__docling-824` failed the T38 collect-only preflight with `python: not found`. Check whether the preflight (`cli._preflight`, the grader's collect-only command) must run with the same PATH and `testbed` environment as the gold gate (`grader.py`), because the gate finds `python` there. Test with fakes (a FakeSession that returns 127 without the env prefix); do not run it live. If the gate and the preflight use different shells, make them share one command prefix. Record the cause in T08.
 
 ### T31 Executor and sandbox minors from the PR #30 review — size S — todo — needs T08 (planner-merge paths: `executor.py`, `scripts/sandbox_access.py`)
 Minor findings from the Sonnet review of PR #30 (T23), none blocking. Fix with fakes, then a USER item for the planner to merge.
-1. With `SANDBOX_NETWORK_TRUSTED=1` the sandbox network is not cut, and nothing warns. Print one warning line (no values) when it is on, and note it in `docs/results.md`.
+1. DONE (T48 PR #TBD): with `SANDBOX_NETWORK_TRUSTED=1` the executor prints one warning line (no values) and `docs/results.md` notes it. Original: With `SANDBOX_NETWORK_TRUSTED=1` the sandbox network is not cut, and nothing warns. Print one warning line (no values) when it is on, and note it in `docs/results.md`.
 2. Sandbox `exec` and OCI-import runs are not counted by `reserve_sandbox_run` or the cost log. Count them, or document why not.
-3. The `colima ssh -- df` disk check after every run has a 15 s timeout. Skip it for the Sandboxes backend, which has no local images.
+3. DONE (T48 PR #TBD): verified by reading `executor.py`: `colima ssh -- df` lives only in `DockerExecutor` (`_colima_store_free_gb`); `SandboxExecutor` never calls it, so no code change. A test pins that. Original: The `colima ssh -- df` disk check after every run has a 15 s timeout. Skip it for the Sandboxes backend, which has no local images.
 4. Unverified: whether a command that exits non-zero keeps its image (it matters for the gold-gate reuse). Test it with one fake and one live smoke only after the owner clears budget for it; otherwise record it as unknown in the ADR.
 
 ### T32 Do not lose a certificate to the leak guard — size S — done #47 (P0, haiku; after T34)

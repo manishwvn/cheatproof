@@ -2275,7 +2275,7 @@ def preflight_deps(spy, tasks, *, errors=None, events=None, exc=None, **override
     errors = errors or {}
     seen = []
 
-    def preflight(session, task):
+    def preflight(session, task, workdir="/testbed"):
         seen.append(task.instance_id)
         message = errors.get(task.instance_id)
         return types.SimpleNamespace(ok=message is None, error=message)
@@ -2449,6 +2449,25 @@ def test_preflight_budget_stop_stops_the_batch_with_no_attacker_run(tmp_path):
     assert [r["reason"] for r in read_batch(out)["not_run"]] == ["budget", "budget"]
 
 
+def test_preflight_gets_the_workdir_its_session_starts_in(tmp_path):
+    starts, seen = [], []
+
+    class RecordingExecutor(PreExecutor):
+        def start(self, env, budget=None):
+            starts.append(env.workdir)
+            return super().start(env, budget)
+
+    def preflight(session, task, workdir=None):
+        seen.append(workdir)
+        return types.SimpleNamespace(ok=True, error=None)
+
+    deps = batch_deps(
+        Spy(), batch_tasks(ID_A), make_executor=lambda: RecordingExecutor([]), preflight=preflight
+    )
+    assert cli.main(batch_argv(tmp_path, out_dir(tmp_path)), deps=deps) == 0
+    assert seen == starts[:1] and seen[0] is not None  # the gates' workdir, not the grader's default
+
+
 def test_no_preflight_flag_skips_it_and_a_plain_deps_has_none(tmp_path):
     spy = Spy()
     deps, seen, events = preflight_deps(spy, batch_tasks(ID_A), errors={ID_A: "broken"})
@@ -2467,7 +2486,9 @@ def test_harden_preflight_failure_exits_1_without_a_paid_run(tmp_path, capsys):
     deps = make_deps(
         spy,
         make_executor=lambda: PreExecutor([]),
-        preflight=lambda session, task: types.SimpleNamespace(ok=False, error="collect-only exited 4: x"),
+        preflight=lambda session, task, **_: types.SimpleNamespace(
+            ok=False, error="collect-only exited 4: x"
+        ),
     )
     argv = ["harden", INSTANCE, "--system-prompt-file", str(prompt_file(tmp_path))]
     argv += ["--attacker-model", "m", "--out", str(out_dir(tmp_path))]
@@ -2683,7 +2704,10 @@ def test_a_transient_start_error_is_a_retried_executor_error_not_env_broken(tmp_
     out = out_dir(tmp_path)
     spy = Spy()
     deps = batch_deps(
-        spy, batch_tasks(ID_A, ID_B), make_executor=lambda: PreExecutor([], exc), preflight=lambda s, t: None
+        spy,
+        batch_tasks(ID_A, ID_B),
+        make_executor=lambda: PreExecutor([], exc),
+        preflight=lambda s, t, **_: None,
     )
     assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0  # no crash
     state = read_batch(out)
@@ -2698,7 +2722,7 @@ def test_a_transient_start_error_is_a_retried_executor_error_not_env_broken(tmp_
 
 
 def test_a_raising_preflight_function_is_a_retried_executor_error(tmp_path):
-    def preflight(session, task):
+    def preflight(session, task, workdir="/testbed"):
         raise TypeError("odd")
 
     deps, _, _ = preflight_deps(Spy(), batch_tasks(ID_A), preflight=preflight)

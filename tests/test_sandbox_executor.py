@@ -792,6 +792,31 @@ def test_trusted_flag_comes_from_the_environment(monkeypatch):
     assert SandboxExecutor(client_factory=lambda: None)._trust_no_network is False
 
 
+def test_trusted_network_prints_one_warning_line_without_values(capsys):
+    SandboxExecutor(client_factory=lambda: None, trust_no_network=True)
+    err = capsys.readouterr().err
+    assert len(err.splitlines()) == 1 and "SANDBOX_NETWORK_TRUSTED=1" in err
+    assert "not cut" in err
+
+
+def test_untrusted_network_prints_no_warning(capsys):
+    SandboxExecutor(client_factory=lambda: None, trust_no_network=False)
+    assert capsys.readouterr().err == ""
+
+
+def test_sandboxes_backend_never_runs_the_colima_disk_check(monkeypatch):
+    # colima df belongs to the local Docker backend (its image store). The Sandboxes backend has no local images.
+    monkeypatch.setattr("cheatproof.executor._colima_installed", lambda: True)
+
+    def colima_df(self):
+        raise AssertionError("colima df must not run for the Sandboxes backend")
+
+    monkeypatch.setattr(DockerExecutor, "_colima_store_free_gb", colima_df)
+    _, _, session = make()
+    session.run("x", timeout=5)
+    session.write_file("f.txt", "data")
+
+
 # --- wrapper integrity --------------------------------------------------------------------------------
 
 

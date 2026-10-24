@@ -96,6 +96,9 @@ the verified hole count is 0.
   chunk 1 selected 18, run 8. The first batch's batch rows are not in this file; its certificates are in
   `results/certificates/`.
 
+## Sandbox network (T31)
+With `SANDBOX_NETWORK_TRUSTED=1` the Sandboxes network is not cut (the platform is trusted to have no egress). The executor prints one warning line to stderr when it is on. The local Docker backend is unaffected.
+
 ## First batch: cost (HISTORICAL, as of 2026-10-22)
 
 Read from `~/.cheatproof-autopilot/ledger.json` (git-ignored live ledger, not committed). The halt shown here was in

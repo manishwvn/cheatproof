@@ -1075,6 +1075,12 @@ class SandboxExecutor:
             os.environ.get(SANDBOX_TRUSTED_ENV) == "1" if trust_no_network is None else trust_no_network
         )
         self._clock = clock
+        if self._trust_no_network:
+            # One line, no values. The owner trusts the platform to have no egress, so the network is not cut here.
+            print(
+                f"warning: {SANDBOX_TRUSTED_ENV}=1: sandbox network is not cut (platform trusted to have no egress)",
+                file=sys.stderr,
+            )
 
     def start(self, env: EnvSpec, budget: Budget | None = None) -> Session:
         return SandboxSession(self, env, Budget.from_env() if budget is None else budget)

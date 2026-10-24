@@ -728,7 +728,8 @@ def _preflight(plan: _Plan, deps: Deps, opened: tuple[Any, Any, Any]) -> str | N
     executor, budget, _ = opened
     try:
         with executor.start(plan.env, budget) as session:
-            result = deps.preflight(session, plan.task)
+            # The gates' workdir (harden passes env.workdir too), so the preflight sees the same checkout.
+            result = deps.preflight(session, plan.task, workdir=plan.env.workdir)
     except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
         raise _Unwritten("start", _stop_reason(exc), exc) from None
     except ValueError as exc:  # bad node ids or base commit: the task itself is unusable
