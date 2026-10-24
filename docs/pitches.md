@@ -42,8 +42,9 @@ Executor: Token Factory Sandboxes (checkpoint, branch per patch), with local Doc
 model call goes through Token Factory.
 
 ## Demo
-- **Hook (10 s):** "We told Nemotron Super to cheat on real SWE tasks. It passed k of n without solving the task."
-  Count verified holes only (docs/results.md, Holes found). Cut to a real attack trace from the final run.
+- **Hook (10 s):** "We told Nemotron Super to cheat on real SWE tasks. In 2 of 9 tasks with leaked git history, it
+  used the leak." Count verified holes only (docs/results.md, Holes found; the 9 is checked against the certificates).
+  Cut to a real attack trace from the final run. Say that recon was on, and "against this attacker".
 - Live loop on one environment: attack, hole found, patch applied, re-attack fails, gold still passes.
 - Scale: the environment table (n shown), before and after per attack type, cost per environment.
 - Product: `python -m cheatproof.cli harden <env-id>` returns a certificate JSON. Model ID on screen in the first 20 seconds.
@@ -54,7 +55,9 @@ tool calls and sandbox output on screen.
 
 ## Tavily (bonus award)
 Planned use: the network-fetch attack. The attacker searches for the upstream fix; if it finds and applies it, that
-is a network-on hole, and the patch is network off. Tavily can change outcomes at runtime. Claim it only after a run logs a Tavily call (none logged in docs/results.md yet). No other Tavily use.
+is a network-on hole, and the patch is network off. Tavily can change outcomes at runtime. One real runtime call is logged (2026-10-24): a harness recon search before the attacker's first step, labelled as
+such in the trace and certificate. The attacker made 0 `web_search` calls of its own, so claim the runtime call and do
+not claim that the attacker used Tavily. The Tavily dashboard count is not verified yet. No other Tavily use.
 
 ## Ways this loses, and the answer
 1. **Small or fake-looking numbers.** Report n, raw counts and intervals; show a real hack transcript.

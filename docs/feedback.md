@@ -73,6 +73,18 @@ says so.
 - **Impact.** Lost time at the start, and a window where only the $1 trial was available.
 - **Suggested fix.** Make the bare URL explain what is missing and link to the event form.
 
+### 8. `APITimeoutError` in the middle of a long agent run, with no retry guidance
+- **What happened.** In batch 3 chunk 3 (2026-10-24), the attacker run on `BQSKit__bqskit-267` ended with
+  `llm call failed: APITimeoutError` at step 36 of 40, after a long chain of tool-use calls. We use
+  `max_retries=0` (Token Factory 4), so the run stopped and was recorded as inconclusive. We could not tell from the
+  docs whether the timed-out request was still processed or billed, or what timeout and retry policy the API expects for
+  chat completions with large prompts.
+- **Impact.** An otherwise complete agent run was lost, and we cannot say whether the failure was in the model service
+  or in the network path. The result counts as "no result", which weakens the sample.
+- **Suggested fix.** Document the server-side timeout per model, say whether a request that times out is billed or
+  continues, and support an idempotency key or a resume token so a client can retry a step safely. A `Retry-After`
+  or error body that says whether the request was accepted would help.
+
 ## Sandboxes (beta)
 
 ### 1. The reported cost is an estimate that the console does not bill
@@ -138,6 +150,27 @@ says so.
 - **What happened.** We found no server-side image delete in the SDK we used (`contree-sdk` 0.3.6).
 - **Impact.** Our task images accumulate with no cleanup path.
 - **Suggested fix.** Add an image delete call and a project listing of images.
+
+### 9. The cost estimate keeps growing while the console shows no Sandboxes billing line
+- **What happened.** After batch 3 chunk 3 our log of the cost the Sandboxes API reports (Sandboxes 1) stood at about
+  $1.80, from that chunk's 29 runs adding about $0.34. Our app ledger showed about $2.35 in total against the $10 cap,
+  while the Nebius console showed about $0.14 and then $0.18 at the two checks we made, and no Sandboxes line.
+- **Impact.** We had to trust the console over the API field, and our ledger overstates real spend. We cannot tell a
+  user, or a reviewer reading our budget log, what a task costs on Sandboxes or whether it costs anything after the beta.
+- **Suggested fix.** Same as Sandboxes 1, plus a usage view in the console that lists runs and the cost they were
+  billed, so the API estimate can be reconciled with the bill.
+
+## Tavily
+
+### 1. The usage endpoint lags behind real calls
+- **What happened.** On 2026-10-24 our harness made one real Tavily search call (a recon search before the attacker's
+  first step, query `Hide private model fields in swagger doc`, 3 results returned). Right after the run, the usage
+  endpoint still read 0 of 1000. Our own counter showed the call.
+- **Impact.** We could not confirm on Tavily's side that the runtime call was counted, which matters for a bonus award
+  that requires a functional runtime call. The dashboard count is unverified until it catches up, and we do not know the
+  expected delay.
+- **Suggested fix.** State the reporting delay for usage in the API docs, or return a per-request id or usage field in
+  the search response so a caller can match its own call to the dashboard.
 
 ## NVIDIA models (via Token Factory)
 
