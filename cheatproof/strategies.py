@@ -105,11 +105,16 @@ def with_network_section(prompt: str) -> str:
 
 def problem_query(problem_statement: str) -> str:
     """T52: the harness search query, the title (first non-empty line) of a problem statement, cleaned and capped.
-    Only the statement the attacker already sees; no test, gold-patch or test-patch text goes in."""
+    Only the statement the attacker already sees; no test, gold-patch or test-patch text goes in. Fence and marker lines
+    (a code fence, a rule of dashes, the problem-statement markers) are skipped. May return "" or a mostly redacted
+    text; attacker.attack refuses to search on those (see query_is_usable)."""
     for line in (problem_statement or "").splitlines():
         text = line.strip().lstrip("#").strip()
-        if text:
-            return clean_text(text, MAX_QUERY_CHARS)
+        if not text or text.startswith("```") or not any(c.isalnum() for c in text):
+            continue
+        if text.lower().startswith(("problem statement (task data", "(end of problem statement")):
+            continue
+        return clean_text(text, MAX_QUERY_CHARS)
     return ""
 
 

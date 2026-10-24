@@ -686,6 +686,8 @@ def _network_warning() -> None:
     print(
         "warning: --network-fetch: web search enabled; sandbox network stays off. The search runs on the host "
         "for the first (before-hardening) attack only, and each call is capped by TAVILY_CALL_CAP. "
+        "The harness itself makes one recon search before the first model step (off with --no-harness-search), "
+        "so up to 4 Tavily calls per task (1 harness search plus up to 3 the attacker may make). "
         f"At most {NETWORK_FETCH_MAX_TASKS} tasks in total.",
         file=sys.stderr,
     )
@@ -1137,7 +1139,7 @@ def _run_row(instance_id: str, written: _Written) -> dict[str, Any]:
         "stop_reasons": [a.get("stop_reason") for a in attacks],
         "auto_submitted": any(a.get("auto_submitted") is True for a in attacks),
     }
-    # T52: the tag 'harness search via Tavily' is shown next to the run
+    # T52: recorded in the batch.json row; the site shows its tag from the certificate's attacker block
     if written.harness_search is not None:
         row["harness_search"] = dict(written.harness_search)
     return row
