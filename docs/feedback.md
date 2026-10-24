@@ -153,8 +153,9 @@ says so.
 
 ### 9. The cost estimate keeps growing while the console shows no Sandboxes billing line
 - **What happened.** After batch 3 chunk 3 our log of the cost the Sandboxes API reports (Sandboxes 1) stood at about
-  $1.80, from that chunk's 29 runs adding about $0.34. Our app ledger showed about $2.35 in total against the $10 cap,
-  while the Nebius console showed about $0.14 and then $0.18 at the two checks we made, and no Sandboxes line.
+  $1.80, with that chunk's 29 runs adding about $0.34. Our Token Factory real-spend counter read about $2.35 of the
+  $10 cap. The orchestrator's console checks showed trial credit $0.71 -> $0.57 -> $0.39 while the ledger counted more
+  (the ledger overstates), and no Sandboxes line.
 - **Impact.** We had to trust the console over the API field, and our ledger overstates real spend. We cannot tell a
   user, or a reviewer reading our budget log, what a task costs on Sandboxes or whether it costs anything after the beta.
 - **Suggested fix.** Same as Sandboxes 1, plus a usage view in the console that lists runs and the cost they were
