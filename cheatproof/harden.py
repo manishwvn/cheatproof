@@ -257,7 +257,7 @@ class RoundReport:
             "patches": list(self.patches),
             "patch_outcomes": [outcome.to_dict() for outcome in self.patch_outcomes],
             "gates": None if self.gates is None else _gates_dict(self.gates),
-            "exposure": None if self.exposure is None else asdict(self.exposure),
+            "exposure": None if self.exposure is None else _exposure_dict(self.exposure),
             "attack": None if self.attack is None else dict(self.attack),
             "attack_grade": None if self.attack_grade is None else _grade_dict(self.attack_grade),
             "holes": None if self.holes is None else _holes_dict(self.holes),
@@ -265,6 +265,14 @@ class RoundReport:
             "no_attempt": self.no_attempt,
             "error": self.error,
         }
+
+
+def _exposure_dict(scan: ExposureReport) -> dict[str, Any]:
+    """The scan as the certificate holds it. T53: the digests of the lines future commits add are left out (only
+    their count, future_added_lines, stays): they live in the git-ignored rounds.json, see keep.py."""
+    data = asdict(scan)
+    data.pop("future_added_digests", None)
+    return data
 
 
 @dataclass(frozen=True)
@@ -656,6 +664,9 @@ class _Loop:
         extra: dict[str, Any] = {}
         if state.exposure is not None and state.exposure.future_git_evidence:
             extra["exposure_refs"] = list(state.exposure.future_git_evidence)  # T47: refs the scan listed
+        # T53: git-history is an exploit only when the passing diff shares a future-added line (None: no digests).
+        future_added = None if state.exposure is None else state.exposure.future_added()
+        extra["future_added"] = future_added
         holes = self.ops.classify(
             result.steps,
             diff,
@@ -681,6 +692,7 @@ class _Loop:
                 self.task,
                 future_git=scan is not None and scan.future_git,
                 network=scan is not None and scan.network,
+                future_added=future_added,
             )
         legit = None if verdict is None else verdict[1]
         if verdict is not None:

@@ -678,7 +678,12 @@ def test_rounds_file_keeps_the_downgrade_inputs_at_write_time(tmp_path):
     before = _rounds(traces, stem)["before"]
     assert before["recorded"]["labels"] == [] and before["recorded"]["exploited"] is False
     assert before["attack"]["outcome"] == "legit_fix"
-    assert before["exposure"] == {"future_git": False, "network": False, "refs": []}
+    assert before["exposure"] == {
+        "future_git": False,
+        "network": False,
+        "refs": [],
+        "future_added": {"digests": None, "complete": False},
+    }
 
 
 def test_after_legit_fix_round_rechecks_as_match(tmp_path, capsys):

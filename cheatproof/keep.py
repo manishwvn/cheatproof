@@ -8,7 +8,9 @@ the certificate's file stem:
 - <stem>.diff             the RAW final diff: the last round's attack diff
 - <stem>.restore.json     the task's restore set (grader.restore_paths), written before the paid run
 - <stem>.rounds.json      per round: the grade inputs classify was given, the labels harden recorded, the exposure
-                          flags and refs classify was given, and the attack summary's auto_submitted and outcome (T49)
+                          flags and refs classify was given, the attack summary's auto_submitted and outcome (T49), and
+                          the sha256 digests of the non-trivial lines future commits add (T53, never their text). Only
+                          this git-ignored file holds the digests: the certificate has just their count.
 
 Nothing here is ever committed (results/traces/ is in .gitignore, and `git add -f` is denied). A file already there
 is renamed to <name>.<UTC time>.old, never overwritten.
@@ -16,7 +18,9 @@ is renamed to <name>.<UTC time>.old, never overwritten.
 recheck() re-runs holes.classify on the kept diff, trace and restore set with no network, sandbox, model or budget.
 It compares the recomputed labels, primary and exploited with those recorded in rounds.json, then applies the same
 legit_fix rule as harden (holes.downgrade_legit_fix) and compares the recomputed outcome with the recorded one. Older
-files that do not record the exposure and attack inputs are compared on labels, primary and exploited only. render()
+files that do not record the exposure and attack inputs are compared on labels, primary and exploited only. A file
+from before T53 has no future-added digests: classify then keeps the pre-T53 rule (the history commands alone label
+git-history), so its labels replay as recorded, and render() says the digests were not recorded. render()
 prints labels, outcomes and test path names only, never diff text.
 """
 
@@ -186,6 +190,11 @@ def _round_inputs(rnd: Any, result: Any) -> dict[str, Any]:
             "future_git": exposure is not None and bool(exposure.future_git),
             "network": exposure is not None and bool(exposure.network),
             "refs": [] if exposure is None else [str(ref) for ref in exposure.future_git_evidence],
+            # T53: digests of the lines future commits add (None: the scan could not list them).
+            "future_added": {
+                "digests": None if exposure is None else exposure.future_added_digests,
+                "complete": exposure is not None and bool(exposure.future_added_complete),
+            },
         },
         "attack": {"auto_submitted": bool(attack.get("auto_submitted")), "outcome": attack.get("outcome")},
     }
@@ -266,6 +275,8 @@ class RoundCheck:
     )
     outcome: str | None = None  # the outcome recomputed with the same rule as harden
     outcome_ok: bool | None = None  # None when the downgrade inputs were not recorded (older rounds.json)
+    future_digests: int | None = None  # T53: digests recorded for the round; None when not recorded
+    future_complete: bool = False
 
 
 GRADED_FIELDS = (
@@ -352,6 +363,7 @@ def recheck(traces_dir: Path, stem: str, task: TaskSpec) -> list[RoundCheck]:
         if rec.get("has_diff"):
             diff = (traces_dir / f"{stem}.{name}.diff").read_text(encoding="utf-8", errors="replace")
         inputs = _downgrade_inputs(rec, stem)
+        future = _future_inputs(rec, stem)
         report = holes.classify(
             segments[index],
             diff,
@@ -361,6 +373,7 @@ def recheck(traces_dir: Path, stem: str, task: TaskSpec) -> list[RoundCheck]:
             grader_labels=tuple(rec.get("grader_labels") or ()),
             restored=paths,
             exposure_refs=() if inputs is None else inputs[0]["refs"],
+            future_added=future,
         )
         if rec.get("no_attempt"):
             # harden clears the labels of an attack that made no attempt; the evidence stays in attempted.
@@ -379,7 +392,12 @@ def recheck(traces_dir: Path, stem: str, task: TaskSpec) -> list[RoundCheck]:
             # T49: the same rule harden applies after classify, with the round's recorded exposure flags.
             exposure, _ = inputs
             report, verdict = holes.downgrade_legit_fix(
-                report, diff, task, future_git=exposure["future_git"], network=exposure["network"]
+                report,
+                diff,
+                task,
+                future_git=exposure["future_git"],
+                network=exposure["network"],
+                future_added=future,
             )
             outcome = None if verdict is None else verdict[0]
         recorded = rec.get("recorded")
@@ -397,6 +415,8 @@ def recheck(traces_dir: Path, stem: str, task: TaskSpec) -> list[RoundCheck]:
                 recorded_outcome=None if inputs is None else inputs[1]["outcome"],
                 outcome=outcome,
                 outcome_ok=None if inputs is None else inputs[1]["outcome"] == outcome,
+                future_digests=len(future.digests) if isinstance(future, holes.FutureAdded) else None,
+                future_complete=isinstance(future, holes.FutureAdded) and future.complete,
             )
         )
     return checks
@@ -418,6 +438,21 @@ def _downgrade_inputs(rec: dict[str, Any], stem: str) -> tuple[dict[str, Any], d
         "refs": refs,
     }
     return flags, attack
+
+
+def _future_inputs(rec: dict[str, Any], stem: str) -> holes.FutureAdded | None | holes._Legacy:
+    """T53: the future-added digests harden gave classify for one round. LEGACY when rounds.json predates them (the
+    pre-T53 rule then applies), None when the scan could not list them. KeepError when present but unreadable."""
+    exposure = rec.get("exposure")
+    recorded = exposure.get("future_added") if isinstance(exposure, dict) else None
+    if recorded is None:
+        return holes.LEGACY
+    digests = recorded.get("digests") if isinstance(recorded, dict) else False
+    if digests is None:
+        return None
+    if not isinstance(digests, list) or not all(isinstance(d, str) for d in digests):
+        raise KeepError(f"unreadable round record: {stem}.rounds.json")
+    return holes.FutureAdded(frozenset(digests), bool(recorded.get("complete")))
 
 
 def _recorded_equal(recorded: dict[str, Any] | None, field: str, value: Any) -> bool | None:
@@ -476,7 +511,16 @@ def render(stem: str, checks: list[RoundCheck]) -> list[str]:
             lines.append(f"  recorded labels: {state} {check.recorded.get('labels')}")
         lines.extend(_field_lines(check))
         lines.extend(_outcome_lines(check))
+        lines.append(_future_line(check))
     return lines
+
+
+def _future_line(check: RoundCheck) -> str:
+    """T53: whether the round kept the digests git-history is confirmed against. Counts only, never a line."""
+    if check.future_digests is None:
+        return "  future-added digests not recorded: git-history is judged by the pre-T53 rule or as a lead"
+    state = "complete" if check.future_complete else "partial"
+    return f"  future-added digests: {check.future_digests} recorded ({state})"
 
 
 def _outcome_lines(check: RoundCheck) -> list[str]:
