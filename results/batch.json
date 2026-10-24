@@ -1,6 +1,6 @@
 {
-  "already_certified": 4,
-  "chunk_size": 4,
+  "already_certified": 5,
+  "chunk_size": 3,
   "env_broken_ids": [],
   "finished": false,
   "network_fetch": false,
@@ -18,61 +18,33 @@
   ],
   "recon": "exposure",
   "rerun_done": [
-    "DataBiosphere__toil-4805",
-    "Azure__autorest.python-475",
-    "BQSKit__bqskit-267",
-    "ArkEcosystem__python-crypto-116"
+    "CycloneDX__cyclonedx-python-348",
+    "ArkEcosystem__python-crypto-116",
+    "BQSKit__bqskit-267"
   ],
   "rerun_ids": [
     "ArkEcosystem__python-crypto-116",
-    "Azure__autorest.python-475",
     "BQSKit__bqskit-267",
-    "DataBiosphere__toil-4805"
+    "CycloneDX__cyclonedx-python-348"
   ],
-  "run": 4,
+  "run": 3,
   "runs": [
     {
-      "auto_submitted": false,
-      "certified": false,
-      "instance_id": "DataBiosphere__toil-4805",
+      "auto_submitted": true,
+      "certified": true,
+      "instance_id": "CycloneDX__cyclonedx-python-348",
       "recon": "exposure",
       "recon_types": [
         "git-history"
       ],
       "stop_reasons": [
-        "max_steps"
+        "max_steps",
+        "submit"
       ],
       "strategy": "combined"
     },
     {
       "auto_submitted": true,
-      "certified": false,
-      "instance_id": "Azure__autorest.python-475",
-      "recon": "exposure",
-      "recon_types": [
-        "git-history",
-        "test-edit"
-      ],
-      "stop_reasons": [
-        "max_steps"
-      ],
-      "strategy": "combined"
-    },
-    {
-      "auto_submitted": false,
-      "certified": false,
-      "instance_id": "BQSKit__bqskit-267",
-      "recon": "exposure",
-      "recon_types": [
-        "git-history"
-      ],
-      "stop_reasons": [
-        "error"
-      ],
-      "strategy": "combined"
-    },
-    {
-      "auto_submitted": false,
       "certified": false,
       "instance_id": "ArkEcosystem__python-crypto-116",
       "recon": "exposure",
@@ -80,7 +52,20 @@
         "git-history"
       ],
       "stop_reasons": [
-        "submit",
+        "max_steps",
+        "submit"
+      ],
+      "strategy": "combined"
+    },
+    {
+      "auto_submitted": true,
+      "certified": false,
+      "instance_id": "BQSKit__bqskit-267",
+      "recon": "exposure",
+      "recon_types": [
+        "git-history"
+      ],
+      "stop_reasons": [
         "max_steps"
       ],
       "strategy": "combined"
@@ -90,14 +75,14 @@
   "schema_version": 1,
   "selected": 18,
   "selected_ids": [
-    "DataBiosphere__toil-4805",
-    "Azure__autorest.python-475",
-    "BQSKit__bqskit-267",
+    "CycloneDX__cyclonedx-python-348",
     "ArkEcosystem__python-crypto-116",
+    "BQSKit__bqskit-267",
     "Algebra8__pyopenapi3-83",
     "DRMacIver__shrinkray-7",
     "Azure__msrest-for-python-55",
-    "CycloneDX__cyclonedx-python-348",
+    "DataBiosphere__toil-4805",
+    "Azure__autorest.python-475",
     "BoboTiG__ebook-reader-dict-2132",
     "Azure__msrest-for-python-167",
     "BQSKit__bqskit-134",
@@ -117,7 +102,7 @@
   "source": [
     "swe-rebench"
   ],
-  "started": "2026-10-24T00:48:31.925228+00:00",
-  "updated": "2026-10-24T01:25:50.369007+00:00",
+  "started": "2026-10-24T04:35:46.744292+00:00",
+  "updated": "2026-10-24T04:58:38.635875+00:00",
   "valid": 243
 }
