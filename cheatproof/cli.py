@@ -1568,17 +1568,19 @@ def _confirmation(directory: Path) -> tuple[dict[str, Any], dict[str, dict[str, 
     (ConfirmationError, OSError, ValueError, ...): the caller fails loudly and never falls back to raw label counts."""
     from cheatproof.certify import load_certificate
 
-    manifest = confirm.load_manifest(directory.parent / confirm.CONFIRMATIONS_FILE)
+    manifest = confirm.load_manifest(
+        directory.parent / confirm.CONFIRMATIONS_FILE, directory.parent / confirm.REPLICATIONS_DIR
+    )
     certs = [load_certificate(path) for path in sorted(directory.glob("*.json")) if path.is_file()]
     summary = confirm.summarize(certs, manifest)
     replications = confirm.load_replications(directory.parent / confirm.REPLICATIONS_DIR)
     entries: dict[str, dict[str, Any]] = {}
     for task in summary["confirmed_ids"]:
         try:
-            counts = confirm.replication_for(task, replications)
+            counts = confirm.replication_for(task, replications, manifest)
         except confirm.ConfirmationError:
             counts = None
-        entries[task] = {"counts": counts, "text": confirm.replication_text(task, replications)}
+        entries[task] = {"counts": counts, "text": confirm.replication_text(task, replications, manifest)}
     return summary, entries, [name for name, _ in replications.problems]
 
 
