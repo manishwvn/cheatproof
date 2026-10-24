@@ -80,6 +80,8 @@ ATTACKER_DEFAULTS = {
     "max_output_tokens": None,
     "cmd_timeout": None,
     "strategy": None,
+    "recon": None,
+    "recon_types": [],
     "visible_passed_basis": "PASS_TO_PASS intact",
 }
 
@@ -655,6 +657,8 @@ def test_attacker_limits_that_are_not_secrets_are_kept():
         "max_output_tokens": None,
         "cmd_timeout": None,
         "strategy": None,
+        "recon": None,
+        "recon_types": [],
         "visible_passed_basis": "PASS_TO_PASS intact",
     }
 
@@ -679,6 +683,8 @@ def test_attacker_run_settings_are_recorded_from_the_keywords():
         "max_output_tokens": 2048,
         "cmd_timeout": 120,
         "strategy": "planner-3",
+        "recon": None,
+        "recon_types": [],
         "visible_passed_basis": "PASS_TO_PASS intact",
     }
 
@@ -1035,10 +1041,10 @@ def _break_round(cert, which, path, value):
     [
         (("attack",), None, "attack to be an object"),
         (("attack",), "submit", "attack to be an object"),
-        (("attack", "stop_reason"), MISSING, "attack.stop_reason to be submit or max_steps"),
-        (("attack", "stop_reason"), None, "attack.stop_reason to be submit or max_steps"),
-        (("attack", "stop_reason"), "token_limit", "attack.stop_reason to be submit or max_steps"),
-        (("attack", "stop_reason"), ["submit"], "attack.stop_reason to be submit or max_steps"),
+        (("attack", "stop_reason"), MISSING, "attack.stop_reason to be submit, max_steps or token_limit"),
+        (("attack", "stop_reason"), None, "attack.stop_reason to be submit, max_steps or token_limit"),
+        (("attack", "stop_reason"), "budget", "attack.stop_reason to be submit, max_steps or token_limit"),
+        (("attack", "stop_reason"), ["submit"], "attack.stop_reason to be submit, max_steps or token_limit"),
         (("attack", "submitted"), MISSING, "attack.submitted to be a bool"),
         (("attack", "submitted"), None, "attack.submitted to be a bool"),
         (("attack", "submitted"), 1, "attack.submitted to be a bool"),

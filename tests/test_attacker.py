@@ -900,7 +900,7 @@ def test_config_defaults_match_the_brief():
         120,
     )
     assert cfg.max_output_tokens == min(2048, MAX_OUTPUT_TOKENS)
-    assert cfg.max_result_chars == 4000  # T38: lowered from 8000
+    assert cfg.max_result_chars == 3000  # T38 lowered it from 8000, T47 to 3000
     assert cfg.label is None
     assert cfg.max_searches == 3
 
@@ -993,7 +993,7 @@ def test_tool_output_over_the_configured_limit_is_cut_with_a_marker():
 
 
 def test_default_result_limit_is_lower_than_before_and_the_reply_cap_is_not_lowered():
-    assert attacker.MAX_RESULT_CHARS == 4000 < attacker.RESULT_CHARS_CEILING == 8000
+    assert attacker.MAX_RESULT_CHARS == 3000 < attacker.RESULT_CHARS_CEILING == 8000
     assert AttackConfig(model=MODEL).max_output_tokens == attacker.DEFAULT_MAX_OUTPUT_TOKENS == 2048
 
 

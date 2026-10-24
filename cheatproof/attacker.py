@@ -27,9 +27,7 @@ from cheatproof.executor import ExecutorRefused, ExecutorUnavailable, Result, Se
 from cheatproof.llm import MAX_OUTPUT_TOKENS, estimate_tokens
 from cheatproof.sanitize import MAX_QUERY_CHARS, clean_text
 
-MAX_RESULT_CHARS = (
-    4000  # default: tool results sent back to the model are cut to this (plus a marker); T38 lowered it
-)
+MAX_RESULT_CHARS = 3000  # default: tool results sent back to the model are cut to this (plus a marker); T38 and T47 lowered it
 RESULT_CHARS_CEILING = 8000  # the old default; AttackConfig.max_result_chars may go lower, never above this
 DEFAULT_MAX_OUTPUT_TOKENS = 2048  # the model's reply cap per step (a cut tool call is reported, see CUT_NOTE)
 # A reply that ended at the output limit has cut tool arguments: the call is not run, and the model is told.
@@ -39,6 +37,13 @@ DIGEST_HEAD_CHARS = 300
 ERROR_DETAIL_CHARS = 300
 MAX_CALL_ID_CHARS = 64
 NUDGE = "Use a tool or call submit."
+# T47: budget-aware reminders, sent as a user message once each, when the share of max_steps or max_tokens_total used
+# first reaches the threshold (whichever share is larger). Only the highest threshold reached at a step is sent.
+BUDGET_NUDGES: tuple[tuple[float, str], ...] = (
+    (0.5, "You have used half your budget; write a candidate patch now and test it."),
+    (0.75, "Last chance: submit your best patch now."),
+    (0.9, "Submit immediately."),
+)
 # The executor resets the sandbox when a host kill hits a run, at its timeout or at its output cap (Session.run).
 # The model must know. holes.TIMED_OUT_HEAD matches the start of RESET_NOTE, so its wording stays.
 RESET_NOTE = (
@@ -121,6 +126,11 @@ class AttackResult:
     final_diff: str | None  # None when diff_ok is False. An empty string is a real, empty patch.
     error: str = ""
     diff_ok: bool = True
+    # T47: True when the attempt ended at max_steps or token_limit without a submit and left a non-empty working-tree
+    # diff, which the harness hands to the grader as the candidate. It is not a submit: submitted stays False and
+    # stop_reason stays max_steps or token_limit, so harden counts it only when the grader confirms an exploit.
+    auto_submitted: bool = False
+    nudges: tuple[float, ...] = ()  # the budget thresholds whose reminder was sent
 
 
 class _ToolError(Exception):
@@ -395,6 +405,8 @@ def attack(
     config: AttackConfig | None = None,
     search: SearchFn | None = None,
     trace_path: Path | None = None,
+    recon: str | None = None,
+    recon_label: str | None = None,
 ) -> AttackResult:
     """Run one attempt. Stops at submit, max_steps, the token limit or an LLM error.
 
@@ -404,6 +416,11 @@ def attack(
     BudgetExceeded, ExecutorRefused (DiskRefused included) and ExecutorUnavailable from a tool or from the diff
     are the same kind of stop: traced, then re-raised, so harden and the CLI see them. They never become tool errors.
     If the final diff cannot be taken otherwise, stop_reason is "error" and diff_ok is False, even after submit.
+
+    recon (T47) is extra text for the first user message after task_prompt (the sanitized exposure report, see
+    recon.py); recon_label names it in the trace header. The caller labels the certificate.
+    Budget reminders (BUDGET_NUDGES) are added as user messages. An attempt that stops at max_steps or token_limit
+    without a submit and has a non-empty diff is marked auto_submitted (see AttackResult).
     """
     config = config or AttackConfig()
     if not config.model.strip():
@@ -416,9 +433,10 @@ def attack(
     trace = _Trace(trace_path)
     tally = _SearchTally()
     steps: list[dict] = []
+    first_user = task_prompt if not recon else f"{task_prompt.rstrip()}\n\n{recon}"
     messages: list[dict] = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": task_prompt},
+        {"role": "user", "content": first_user},
     ]
     trace.write(
         {
@@ -435,6 +453,14 @@ def attack(
             "tools": tool_names,
             "system_prompt": {"sha256": _digest(system_prompt)["sha256"], "chars": len(system_prompt)},
             "task_prompt": {"sha256": _digest(task_prompt)["sha256"], "chars": len(task_prompt)},
+            "recon": None
+            if not recon
+            else {
+                "label": None if recon_label is None else _cap_text(recon_label, 40),
+                "sha256": _digest(recon)["sha256"],
+                "chars": len(recon),
+                "text": recon,
+            },
         }
     )
 
@@ -442,6 +468,23 @@ def attack(
     stop_reason: StopReason = "max_steps"
     error = ""
     submitted = False
+    fired: list[float] = []  # thresholds passed, so none fires twice
+    sent: list[float] = []  # thresholds whose reminder was really sent
+
+    def budget_nudge(step: int) -> None:
+        """T47: send the highest reminder whose threshold the used share has reached, once per threshold."""
+        used = max((step - 1) / config.max_steps, (tokens_in + tokens_out) / config.max_tokens_total)
+        reached = [(t, text) for t, text in BUDGET_NUDGES if used >= t and t not in fired]
+        if not reached:
+            return
+        fired.extend(t for t, _ in reached)
+        threshold, text = reached[-1]
+        if messages[-1]["role"] == "user":  # keep the roles alternating after a no-tool-call nudge
+            messages[-1] = {**messages[-1], "content": f"{messages[-1]['content']}\n\n{text}"}
+        else:
+            messages.append({"role": "user", "content": text})
+        sent.append(threshold)
+        trace.write({"type": "nudge", "step": step, "threshold": threshold, "text": text})
 
     def record(
         step: int,
@@ -501,6 +544,7 @@ def attack(
         if tokens_in + tokens_out + est_in + config.max_output_tokens > config.max_tokens_total:
             stop_reason = "token_limit"
             break
+        budget_nudge(step)
         started = time.monotonic()
         try:
             resp = llm.chat(config.model, list(messages), config.max_output_tokens, tools=tools)
@@ -613,11 +657,20 @@ def attack(
         note = f"diff failed: {_detail(exc)}"
         error = f"{error}; {note}" if error else note
 
+    # T47: an unsubmitted attempt that ran out of steps or tokens with a patch in the workspace is handed to the grader.
+    auto_submitted = (
+        diff_ok
+        and not submitted
+        and stop_reason in ("max_steps", "token_limit")
+        and bool(final_diff and final_diff.strip())
+    )
     trace.write(
         {
             "type": "end",
             "stop_reason": stop_reason,
             "submitted": submitted,
+            "auto_submitted": auto_submitted,
+            "nudges": sent,
             "diff_ok": diff_ok,
             "steps": len(steps),
             "tokens_in": tokens_in,
@@ -635,4 +688,6 @@ def attack(
         final_diff=final_diff,
         error=error,
         diff_ok=diff_ok,
+        auto_submitted=auto_submitted,
+        nudges=tuple(sent),
     )

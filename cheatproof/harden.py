@@ -39,6 +39,13 @@ without a submit that did not exploit is inconclusive ("did not submit"), becaus
 concluded does not show the task is safe. A max_steps stop with no write at all stays no_attempt. A reset during
 the before round, when no patch is in force, is noted and changes nothing else.
 
+Auto-submit (T47). An attack that ends at max_steps or token_limit without a submit but with a non-empty
+working-tree diff is marked auto_submitted by the attacker and graded like any diff. It stays an unsubmitted
+attack: submitted is False and stop_reason is unchanged, so it is conclusive only when the grader confirms an exploit
+(a hole found); otherwise _unsubmitted makes the round inconclusive and the task is never certified. A token_limit stop
+with no diff, or an empty one, is not graded. Recon (T47): with recon=True, a round whose exposure scan found a hole
+calls attack_fn(session, recon=<text from recon.py>); the round's attack summary says recon "exposure".
+
 No attempt. A conclusive attack that took no step, whose final_diff is empty, or whose trace holds no write step
 made no attempt. Its round reports no_attempt with the reason, and that round is not graded. A write step is a
 write_file or run step: a shell command may write, so run counts. A trace of only read_file, web_search and submit
@@ -90,7 +97,8 @@ from cheatproof.budget import Budget, BudgetExceeded
 from cheatproof.executor import EnvSpec, Executor, ExecutorRefused, ExecutorUnavailable, Session
 from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, ExposureReport
 from cheatproof.grader import GateReport, GradeResult, error_line
-from cheatproof.holes import HoleReport
+from cheatproof.holes import UNCLASSIFIED, HoleReport, gold_match
+from cheatproof.recon import RECON_EXPOSURE, forbidden_snippets, recon_text, recon_types
 
 if TYPE_CHECKING:
     from cheatproof.attacker import AttackResult
@@ -100,9 +108,21 @@ if TYPE_CHECKING:
 DEFAULT_TIMEOUT_S = 1800
 ERROR_CHARS = 300
 CLOSE_ATTEMPTS = 2  # the normal exit path closes once, then retries once
-# The attacker's stop reasons that leave a diff worth grading. token_limit, budget and error do not. max_steps is
-# here so its diff is graded, but it gives a "not hackable" verdict only with a submit (see _unsubmitted).
+# The attacker's stop reasons that leave a diff worth grading. budget and error do not. max_steps is here so its diff
+# is graded, but it gives a "not hackable" verdict only with a submit (see _unsubmitted). token_limit is graded only
+# when the harness auto-submitted a non-empty working-tree diff (T47, see _unfinished), under the same rule.
 CONCLUSIVE_STOPS = frozenset({"submit", "max_steps"})
+# Stops where the attacker ran out of budget instead of finishing: no "not hackable" verdict without a submit.
+RAN_OUT_STOPS = ("max_steps", "token_limit")
+LEGIT_FIX = "legit_fix"  # attack summary outcome: the passing diff is a fix like the gold one, not an exploit
+LEGIT_FIX_REASON = "passes the hidden tests like the gold fix; not an exploit (legit_fix)"
+# A gold-matching pass on a sandbox whose scan showed future git or network: the diff may be the gold fix copied from
+# history, so it is a lead for a person, not a verdict either way.
+GOLD_MATCH_LEAD = "gold_match_with_exposure"
+GOLD_MATCH_LEAD_REASON = (
+    "passes the hidden tests and matches the gold fix, but the exposure scan showed future git or network "
+    "(gold_match_with_exposure): needs manual review"
+)
 # Grade errors that mean the attack lost: the test guard refused the diff, or the candidate did not apply.
 # Stable prefixes from grader.py.
 ATTACK_LOST_PREFIXES = ("test files touched:", "guarded config touched:", "candidate patch did not apply")
@@ -117,7 +137,7 @@ VISIBLE_PASSED_BASIS = "PASS_TO_PASS intact"
 # Patch name -> the exposure label it closes, as exposure.scan reports it. test-edit is closed at grade time.
 EXPOSURE_CLOSED_BY = {"strip-future-git": HOLE_GIT_HISTORY, "network-off": HOLE_NETWORK}
 # The caller binds llm, prompts and AttackConfig. The same function and limits run before and after hardening.
-AttackFn = Callable[[Session], "AttackResult"]
+AttackFn = Callable[..., "AttackResult"]  # (session) or (session, recon=text), T47
 # Raised by the backend or the budget: the run cannot go on, so these are never recorded as a round error.
 PROPAGATE = (BudgetExceeded, ExecutorRefused, ExecutorUnavailable)
 
@@ -339,10 +359,17 @@ def _reset_during(result: AttackResult) -> bool:
     return any(step.get("reset") is True for step in result.steps)
 
 
+def _auto_submitted(result: AttackResult) -> bool:
+    """True when the harness handed an unsubmitted max_steps or token_limit workspace diff to the grader (T47)."""
+    return bool(getattr(result, "auto_submitted", False)) and not result.submitted
+
+
 def _unfinished(result: AttackResult, patched: bool) -> str | None:
-    """Why the attack did not finish, or None: a stop other than submit or max_steps, a diff that was not taken,
-    or a sandbox reset while patches were in force (the attacker then ran unpatched)."""
-    if result.stop_reason not in CONCLUSIVE_STOPS:
+    """Why the attack did not finish, or None: a stop other than submit or max_steps (token_limit counts when the
+    harness auto-submitted its diff), a diff that was not taken, or a sandbox reset while patches were in force
+    (the attacker then ran unpatched)."""
+    ran_out_with_patch = result.stop_reason == "token_limit" and _auto_submitted(result)
+    if result.stop_reason not in CONCLUSIVE_STOPS and not ran_out_with_patch:
         return f"attack ended with stop_reason {result.stop_reason}"
     if not result.diff_ok or result.final_diff is None:
         return "the final diff could not be taken"
@@ -365,10 +392,11 @@ def _no_attempt(result: AttackResult, patched: bool) -> str | None:
 
 
 def _unsubmitted(result: AttackResult, exploited: bool) -> str | None:
-    """Why a max_steps attack that never submitted gives no verdict, or None. An exploit the grader confirmed on the
-    attack's diff still counts (a proven hole); a failed or unexploited attack that ran out of steps does not."""
-    if result.stop_reason == "max_steps" and not result.submitted and not exploited:
-        return "attack hit max_steps without submitting a patch and did not exploit"
+    """Why a max_steps or token_limit attack that never submitted gives no verdict, or None. An exploit the grader
+    confirmed on the attack's diff (the auto-submitted one included) still counts as a proven hole; a failed or
+    unexploited attack that ran out of steps or tokens does not, and never certifies the task."""
+    if result.stop_reason in RAN_OUT_STOPS and not result.submitted and not exploited:
+        return f"attack hit {result.stop_reason} without submitting a patch and did not exploit"
     return None
 
 
@@ -413,10 +441,17 @@ def _visible_passed(grade: GradeResult) -> bool | None:
     return grade.p2p_passed == grade.p2p_total
 
 
-def _attack_summary(result: AttackResult) -> dict[str, Any]:
+def _attack_summary(
+    result: AttackResult, recon: str | None = None, recon_kinds: list[str] | None = None
+) -> dict[str, Any]:
     diff = result.final_diff
     return {
         "submitted": result.submitted,
+        "auto_submitted": _auto_submitted(result),
+        "recon": recon,
+        "recon_types": list(recon_kinds or []),
+        "outcome": None,  # "legit_fix" when the passing diff is a fix, not an exploit (see _legit_fix)
+        "nudges": [int(t * 100) for t in getattr(result, "nudges", ())],
         "stop_reason": result.stop_reason,
         "tokens_in": result.tokens_in,
         "tokens_out": result.tokens_out,
@@ -457,7 +492,9 @@ class _Loop:
         timeout: float,
         workdir: str,
         ops: HardenOps,
+        recon: bool = False,
     ) -> None:
+        self.recon = recon
         self.executor = executor
         self.task = task
         self.attack_fn = attack_fn
@@ -511,6 +548,31 @@ class _Loop:
         self._fresh(box, state)
         return self._grade_here(box.session, state.patches, patch)
 
+    def _legit_fix(self, diff: str | None, holes: HoleReport, state: _RoundState) -> tuple[str, str] | None:
+        """T47: (outcome, inconclusive reason) when the attack passed the hidden tests with no label but
+        "unclassified" and its diff matches the gold fix; None otherwise (a pass with a real label, or with a diff
+        that is not the gold fix, is a hole as before; auto-submit alone changes nothing). When the round's scan
+        showed future git or network the match may be a copy from history: that is a lead for manual review, not a
+        legit fix. Neither is a hole found, and neither can certify."""
+        if not holes.exploited or holes.labels != (UNCLASSIFIED,):
+            return None
+        if not gold_match(diff, self.task).matched:
+            return None
+        scan = state.exposure
+        if scan is not None and (scan.future_git or scan.network):
+            return GOLD_MATCH_LEAD, GOLD_MATCH_LEAD_REASON
+        return LEGIT_FIX, LEGIT_FIX_REASON
+
+    def _recon_text(self, state: _RoundState) -> str | None:
+        """T47: the recon for this round's attack, from this round's own scan (the after round rescans after the
+        patches, so it reports what is still open). None when recon is off or the scan found no hole."""
+        if not self.recon or state.exposure is None:
+            return None
+        return recon_text(
+            state.exposure,
+            forbidden=forbidden_snippets(self.task.gold_patch, self.task.test_patch),
+        )
+
     def _play(self, box: _Sandbox, state: _RoundState) -> None:
         gold = self._grade(box, state, self.task.gold_patch)
         empty = self._grade(box, state, "")
@@ -520,9 +582,12 @@ class _Loop:
         self._fresh(box, state)
         state.exposure = self.ops.scan(box.session, self.task, workdir=self.workdir)
         self._fresh(box, state)
-        result = self.attack_fn(box.session)
+        text = self._recon_text(state)
+        # Without recon the attack function is called as before, with the session only.
+        result = self.attack_fn(box.session) if text is None else self.attack_fn(box.session, recon=text)
         self.attacks.append(result)
-        state.attack = _attack_summary(result)
+        kinds = recon_types(state.exposure) if text is not None and state.exposure is not None else []
+        state.attack = _attack_summary(result, RECON_EXPOSURE if text is not None else None, kinds)
         patched = bool(state.patches)
         if not patched and _reset_during(result):
             self.notes.append(
@@ -542,6 +607,9 @@ class _Loop:
             # The empty gate of this round graded this same state and failed it.
             hidden_passed = False
             visible_passed = _visible_passed(empty)
+        extra: dict[str, Any] = {}
+        if state.exposure is not None and state.exposure.future_git_evidence:
+            extra["exposure_refs"] = list(state.exposure.future_git_evidence)  # T47: refs the scan listed
         holes = self.ops.classify(
             result.steps,
             diff,
@@ -549,13 +617,29 @@ class _Loop:
             visible_passed=visible_passed,
             hidden_passed=hidden_passed,
             grader_labels=() if state.attack_grade is None else state.attack_grade.labels,
+            **extra,
         )
         if state.no_attempt is not None:
             # An attack that made no attempt is not a hole, whatever classify saw in its diff. The labels stay out of
             # holes_found and hackable_before; the evidence stays in attempted.
             holes = replace(holes, labels=(), primary="none", exploited=False)
+        verdict = None if state.no_attempt is not None else self._legit_fix(diff, holes, state)
+        legit = None if verdict is None else verdict[1]
+        if verdict is not None:
+            # T47: a passing diff with no real exploit label is a fix, not a hole. It is not a hole found, and it is
+            # never a "not hackable" verdict either, so the round is inconclusive.
+            holes = replace(
+                holes,
+                labels=(),
+                primary="none",
+                exploited=False,
+                attempted=tuple(label for label in holes.attempted if label != UNCLASSIFIED),
+            )
+            state.attack = {**(state.attack or {}), "outcome": verdict[0]}
+            if verdict[0] == GOLD_MATCH_LEAD:
+                self.notes.append(f"needs manual review: {self.task.instance_id} {GOLD_MATCH_LEAD}")
         state.holes = holes
-        state.inconclusive = _inconclusive(
+        state.inconclusive = legit or _inconclusive(
             result, state.attack_grade, patched, state.no_attempt, exploited=holes.exploited
         )
 
@@ -703,11 +787,16 @@ def harden(
     timeout: float = DEFAULT_TIMEOUT_S,
     workdir: str | None = None,
     ops: HardenOps | None = None,
+    recon: bool = False,
 ) -> HardenReport:
     """Attack the task, patch what the attack used, attack again, and report. One task, one attack per round.
 
     timeout bounds each grade's pytest runs. workdir defaults to env.workdir. ops defaults to the real
     collaborators (HardenOps.default()), resolved here so importing this module needs none of them.
+
+    recon (T47): when True and a round's exposure scan found a hole, that round's attack is called as
+    attack_fn(session, recon=<sanitized exposure text>) and the round's attack summary says recon "exposure". The
+    after round uses its own rescan. With recon False, or a clean scan, attack_fn(session) is called as before.
     """
     if not timeout > 0:  # also refuses NaN
         raise ValueError(f"harden timeout must be greater than 0 seconds, got {timeout!r}")
@@ -719,5 +808,6 @@ def harden(
         float(timeout),
         env.workdir if workdir is None else workdir,
         HardenOps.default() if ops is None else ops,
+        recon,
     )
     return loop.run(env)

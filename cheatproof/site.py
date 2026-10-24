@@ -85,9 +85,9 @@ BATCH_KEYS = frozenset(
         "updated",
     }
 )
-# cli batch writes these from --network-fetch on (T37). A record from an earlier run lacks them, so they are optional;
+# cli batch writes network_fetch and network_fetch_done from --network-fetch on (T37), and recon and runs from T47. A record from an earlier run lacks them, so they are optional;
 # when present they are type-checked like the rest.
-BATCH_OPTIONAL_KEYS = frozenset({"network_fetch", "network_fetch_done"})
+BATCH_OPTIONAL_KEYS = frozenset({"network_fetch", "network_fetch_done", "recon", "runs"})
 NOT_RUN_KEYS = frozenset({"instance_id", "reason", "error"})  # always written by cli batch
 NOT_RUN_OPTIONAL_KEYS = frozenset({"cost_usd"})  # written only when a paid run's spend was measured
 BATCH_NOT_LOADED = "batch record not loaded"
@@ -338,6 +338,17 @@ def _is_not_run(item: Any) -> bool:
     return "cost_usd" not in item or _is_cost(item["cost_usd"])
 
 
+def _is_runs(value: Any) -> bool:
+    """The T47 run rows cli batch writes: objects with an instance id, and a recon of "exposure" or null."""
+    return isinstance(value, list) and all(
+        isinstance(row, dict)
+        and isinstance(row.get("instance_id"), str)
+        and row.get("recon") in ("exposure", None)
+        and ("recon_types" not in row or _is_str_list(row["recon_types"]))
+        for row in value
+    )
+
+
 def _is_cost(value: Any) -> bool:
     """A finite, non-negative number. A huge integer does not convert to float: that is refused, not raised."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -381,9 +392,12 @@ def _check_batch(data: Any) -> None:
         **{key: isinstance(data[key], bool) for key in ("next_chunk_pending", "finished")},
         **{
             key: _is_str_list(data[key]) if key == "network_fetch_done" else isinstance(data[key], bool)
-            for key in BATCH_OPTIONAL_KEYS
+            for key in ("network_fetch", "network_fetch_done")
             if key in data
         },
+        # T47: recon is the batch setting, "exposure" or null. runs holds one object per run (the writer's rows).
+        **({"recon": data["recon"] in ("exposure", None)} if "recon" in data else {}),
+        **({"runs": _is_runs(data["runs"])} if "runs" in data else {}),
     }
     wrong = sorted(key for key, ok in types_ok.items() if not ok)
     if wrong:
@@ -751,6 +765,16 @@ def _score_section(summary: Mapping[str, Any], excluded: int, batch: _Batch, loa
     )
 
 
+def _strategy_html(attacker: Any) -> str:
+    """The strategy label, then a visible recon=exposure tag when the attacker got the exposure scan (T47)."""
+    attacker = _map(attacker)
+    text = _cell(attacker.get("strategy") if attacker.get("strategy") is not None else "not recorded")
+    kinds = attacker.get("recon_types")
+    shown = f" ({', '.join(_cell(k) for k in kinds)})" if isinstance(kinds, list) and kinds else ""
+    tag = f' <span class="label">recon=exposure{shown}</span>' if attacker.get("recon") == "exposure" else ""
+    return f"{text}{tag}"
+
+
 def _environments_section(entries: Sequence[_Entry]) -> str:
     rows = []
     for entry in entries:
@@ -761,6 +785,7 @@ def _environments_section(entries: Sequence[_Entry]) -> str:
                 _Raw(_link_html(f"env/{entry.name}.html", task["instance_id"])),
                 task["repo"],
                 task["source"],
+                _Raw(_strategy_html(cert["attacker"])),
                 cert["holes_found"],
                 cert["patches_applied"],
                 _gates_text(gates["before"]),
@@ -773,6 +798,7 @@ def _environments_section(entries: Sequence[_Entry]) -> str:
         "Instance",
         "Repo",
         "Source",
+        "Strategy",
         "Holes found",
         "Patches applied",
         "Gates before (gold, empty)",
@@ -987,6 +1013,10 @@ def _round_block(label: str, rnd: Any, diff: str | None) -> str:
         attack_rows = [
             ("Stop reason", attack.get("stop_reason")),
             ("Submitted", attack.get("submitted")),
+            ("Auto-submitted by the harness", attack.get("auto_submitted", "not recorded")),
+            ("Recon", attack.get("recon") or "none"),
+            ("Recon finding types", attack.get("recon_types") or "none"),
+            ("Outcome", attack.get("outcome") or "none"),
             ("Steps", attack.get("steps")),
             ("Tokens in", attack.get("tokens_in")),
             ("Tokens out", attack.get("tokens_out")),

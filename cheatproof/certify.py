@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from cheatproof.harden import ATTACKS_PER_ROUND, VISIBLE_PASSED_BASIS
+from cheatproof.recon import RECON_EXPOSURE
 from cheatproof.sanitize import _always_secret  # private on purpose: sanitize() would redact valid SHAs
 
 if TYPE_CHECKING:
@@ -97,6 +98,9 @@ ATTACKER_KEYS = (
     "strategy",
     "visible_passed_basis",
 )
+# T47: how the attacker was primed. "exposure": its first message held the sanitized exposure scan (recon.py);
+# null: it did not. Optional in an older certificate; a certified certificate must carry it.
+RECON_VALUES = (RECON_EXPOSURE, None)
 HARDEN_KEYS = (
     "instance_id",
     "before",
@@ -214,6 +218,9 @@ def _check_attacker(value: Any) -> None:
     for key, item in value.items():
         _want(isinstance(key, str) and key != "", f"attacker key {_show(key)} must be a non-empty string")
         _want(not SECRET_KEY.search(key), f"attacker key {key!r} looks like a secret and is refused")
+        if key == "recon_types":
+            _want(_str_list(item), "attacker.recon_types must be a list of strings")
+            continue
         _want(_json_scalar(item), f"attacker.{key} must be a finite JSON scalar, got {type(item).__name__}")
     _want(isinstance(value.get("model"), str) and value["model"] != "", "attacker.model must name the model")
     _keys(value, ATTACKER_KEYS, "attacker")
@@ -238,6 +245,11 @@ def _check_attacker(value: Any) -> None:
         value["strategy"] is None or isinstance(value["strategy"], str),
         "attacker.strategy must be a string or null",
     )
+    if "recon" in value:
+        _want(
+            value["recon"] in RECON_VALUES and (value["recon"] is None or isinstance(value["recon"], str)),
+            f"attacker.recon must be {RECON_EXPOSURE!r} or null, got {_show(value['recon'])}",
+        )
     _want(
         value["visible_passed_basis"] == VISIBLE_PASSED_BASIS,
         f"attacker.visible_passed_basis must be {VISIBLE_PASSED_BASIS!r}, got {_show(value['visible_passed_basis'])}",
@@ -300,7 +312,8 @@ def _judged(rnd: Mapping[str, Any] | None) -> bool:
 UNSUBMITTED = "attack hit max_steps without submitting and did not exploit"
 
 
-ATTACK_STOP_REASONS = ("submit", "max_steps")
+# token_limit appears only for an auto-submitted diff (T47): a certified round with it must have an exploit.
+ATTACK_STOP_REASONS = ("submit", "max_steps", "token_limit")
 
 
 def _check_attack_fields(rnd: Mapping[str, Any], where: str) -> None:
@@ -312,7 +325,7 @@ def _check_attack_fields(rnd: Mapping[str, Any], where: str) -> None:
     stop_reason = attack.get("stop_reason")
     _want(
         isinstance(stop_reason, str) and stop_reason in ATTACK_STOP_REASONS,
-        f"certified requires {where}.attack.stop_reason to be submit or max_steps",
+        f"certified requires {where}.attack.stop_reason to be submit, max_steps or token_limit",
     )
     _want(
         isinstance(attack.get("submitted"), bool), f"certified requires {where}.attack.submitted to be a bool"
@@ -329,7 +342,8 @@ def _unsubmitted_round(rnd: Mapping[str, Any]) -> bool:
     mirrors harden._unsubmitted, which gives such an attack no verdict. The fields are checked first by
     _check_attack_fields."""
     attack, holes = rnd["attack"], rnd["holes"]
-    return attack["stop_reason"] == "max_steps" and not attack["submitted"] and not holes["exploited"]
+    ran_out = attack["stop_reason"] in ("max_steps", "token_limit")
+    return ran_out and not attack["submitted"] and not holes["exploited"]
 
 
 def _check_certified(harden: Mapping[str, Any]) -> None:
@@ -368,6 +382,23 @@ def _check_consistent(data: Mapping[str, Any]) -> None:
     """The top-level facts must agree with the harden block they were taken from, and a certified task must hold."""
     harden = data["harden"]
     before, after = harden["before"], harden["after"]
+    # A certificate from before T47 has no recon anywhere and means recon null. One written by T47 code carries recon
+    # in a round's attack summary, and then a certified certificate must say it in the attacker block too.
+    marked = any(
+        rnd is not None and isinstance(rnd["attack"], Mapping) and "recon" in rnd["attack"]
+        for rnd in (before, after)
+    )
+    if data["certified"] and marked:
+        _want("recon" in data["attacker"], "certified requires attacker.recon (exposure or null)")
+    # The attacker block agrees with the rounds' attack summaries, when those carry the label (older ones do not).
+    round_labels = [
+        rnd["attack"]["recon"]
+        for rnd in (before, after)
+        if rnd is not None and isinstance(rnd["attack"], Mapping) and "recon" in rnd["attack"]
+    ]
+    if round_labels and "recon" in data["attacker"]:
+        expected = RECON_EXPOSURE if RECON_EXPOSURE in round_labels else None
+        _want(data["attacker"]["recon"] == expected, "attacker.recon does not match the rounds' attack recon")
     expected_holes = [] if before["holes"] is None else sorted(set(before["holes"]["labels"]))
     _want(data["holes_found"] == expected_holes, "holes_found does not match harden.before.holes.labels")
     _want(data["certified"] == harden["certified"], "certified does not match harden.certified")
@@ -484,6 +515,27 @@ def _clip_free_text(value: Any, key: str | None, path: str) -> Any:
     return value
 
 
+def recon_label(report: HardenReport) -> str | None:
+    """T47: "exposure" when any round's attacker got the exposure text, else None. Read from the rounds' attack
+    summaries, which harden writes from what it really passed."""
+    for rnd in (report.before, report.after):
+        attack = None if rnd is None else rnd.attack
+        if isinstance(attack, Mapping) and attack.get("recon") == RECON_EXPOSURE:
+            return RECON_EXPOSURE
+    return None
+
+
+def recon_kinds(report: HardenReport) -> list[str]:
+    """T47: the finding types the recon text named, over both rounds, in order, without repeats."""
+    kinds: list[str] = []
+    for rnd in (report.before, report.after):
+        attack = None if rnd is None else rnd.attack
+        for kind in (attack.get("recon_types") or []) if isinstance(attack, Mapping) else []:
+            if isinstance(kind, str) and kind not in kinds:
+                kinds.append(kind)
+    return kinds
+
+
 def build_certificate(
     report: HardenReport,
     task: TaskSpec,
@@ -533,6 +585,8 @@ def build_certificate(
         if value is not None:
             block[key] = value
         block.setdefault(key, None)
+    block["recon"] = recon_label(report)
+    block["recon_types"] = recon_kinds(report)
     block["attacks_per_round"] = ATTACKS_PER_ROUND
     block["visible_passed_basis"] = VISIBLE_PASSED_BASIS
     full = _clip_free_text(report.to_dict(), None, "harden")

@@ -285,7 +285,10 @@ class Lab:
             holes=holes,
         )
 
-    def classify(self, trace, final_diff, task, *, visible_passed=None, hidden_passed=None, grader_labels=()):
+    def classify(
+        self, trace, final_diff, task, *, visible_passed=None, hidden_passed=None, grader_labels=(), **kwargs
+    ):
+        self.classify_kwargs = kwargs
         self.classify_calls.append((trace, final_diff, hidden_passed, visible_passed))
         exploited = hidden_passed is True
         labels = tuple(self.labels) if exploited else ()
@@ -1162,6 +1165,11 @@ def test_to_dict_is_json_and_holds_no_raw_diff_log_text_or_evidence():
     attack = data["before"]["attack"]
     assert set(attack) == {
         "submitted",
+        "auto_submitted",
+        "recon",
+        "recon_types",
+        "outcome",
+        "nudges",
         "stop_reason",
         "tokens_in",
         "tokens_out",

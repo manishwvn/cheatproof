@@ -2,11 +2,11 @@
 
     python -m cheatproof.cli harden <instance-id> --system-prompt-file PATH [--source S] [--cache-dir DIR]
         [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
-        [--network-fetch]
+        [--network-fetch] [--no-recon]
     python -m cheatproof.cli batch --system-prompt-file PATH [--source S ...] [--n N] [--cache-dir DIR]
         [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
         [--instance-ids ID ...] [--first ID ...] [--rerun] [--prefer-future-git] [--chunk-size N<=10]
-        [--dry-run] [--no-preflight] [--network-fetch]
+        [--dry-run] [--no-preflight] [--network-fetch] [--no-recon]
     python -m cheatproof.cli report [--certs DIR] [--out FILE] [--format text|json]
     python -m cheatproof.cli site [--certs DIR] [--out DIR] [--traces DIR]
     python -m cheatproof.cli holes recheck <stem> [--traces DIR] [--source S] [--cache-dir DIR]
@@ -26,6 +26,11 @@ sanitize, written only when no certificate was, and removed once a certificate i
 traces/ or at a trace file is refused before the paid run. When harden stops a paid run (a budget, executor or disk
 refusal), the trace stays, no certificate is written, and harden prints the spent amount as cost: $X.XXXX on stderr
 when the ledger could be read.
+T47 recon: by default, when a round's exposure scan finds a hole (future_git, writable unrestored tests, network),
+that round's attacker also gets the sanitized scan in its first user message (recon.py: finding types, counts, at most
+20 evidence lines of 160 chars, nothing from the hidden tests or the gold patch). The certificate's attacker block says
+recon "exposure" for such a run and null otherwise, and batch.json rows carry the same label. --no-recon (harden and
+batch) turns it off. The after-hardening re-attack uses the same setting with its own rescan.
 batch hardens the cached selection one task at a time, with the same steps and files as harden. The selection is the
 rule tasks fetch uses (per source, the n lowest by score, deny-listed repos left out), read from the cache only:
 batch never fetches. An instance id that more than one source selects is kept once, from the first source, and each
@@ -112,6 +117,7 @@ from typing import TYPE_CHECKING, Any
 
 from cheatproof.budget import Budget, BudgetExceeded, init_ledger_from_env
 from cheatproof.executor import DiskRefused, EnvSpec, ExecutorRefused, ExecutorUnavailable, make_executor
+from cheatproof.recon import RECON_EXPOSURE
 from cheatproof.sanitize import REDACTED, sanitize
 
 if TYPE_CHECKING:
@@ -582,6 +588,7 @@ class _Written:
     path: Path
     report: Any
     cost: float
+    strategy: str = ""
 
 
 @dataclass(frozen=True)
@@ -603,6 +610,7 @@ class _Settings:
     executor_name: str
     out: Path
     network_fetch: bool = False
+    recon: bool = True  # T47: exposure recon for the attacker; --no-recon turns it off
 
 
 def _stop_reason(exc: BaseException) -> str:
@@ -666,6 +674,7 @@ def _harden_settings(args: argparse.Namespace) -> _Settings:
         executor_name=(os.environ.get("EXECUTOR") or "sandbox").strip().lower(),
         out=args.out,
         network_fetch=network_fetch,
+        recon=not bool(getattr(args, "no_recon", False)),
     )
 
 
@@ -763,7 +772,7 @@ def _harden_one(
 
     attacks_started = [0]
 
-    def attack_fn(session: Any) -> Any:
+    def attack_fn(session: Any, recon: str | None = None) -> Any:
         # T37: web_search is for the first (before-hardening) attack only. The after-hardening re-attack gets no
         # search and a config that says so, because a patch is only certified against an attacker with no network.
         first = attacks_started[0] == 0
@@ -771,6 +780,7 @@ def _harden_one(
         config = settings.config
         if settings.network_fetch and not first:
             config = replace(config, allow_network=False)
+        recon_kw: dict[str, Any] = {} if not recon else {"recon": recon, "recon_label": RECON_EXPOSURE}
         result = deps.attack(
             llm,
             session,
@@ -778,6 +788,7 @@ def _harden_one(
             plan.prompt,
             config,
             trace_path=plan.trace_path,
+            **recon_kw,
             **(search_kw if first else {}),
         )
         finished.append(result)
@@ -789,7 +800,15 @@ def _harden_one(
         message = "cost check failed: the ledger total is not a number before the run; no paid run started"
         raise _Unwritten("cost", "cost_check_failed", RuntimeError(message))
     try:
-        report = deps.harden(executor, plan.env, plan.task, attack_fn, budget=budget, **settings.timeout_kw)
+        report = deps.harden(
+            executor,
+            plan.env,
+            plan.task,
+            attack_fn,
+            budget=budget,
+            recon=settings.recon,
+            **settings.timeout_kw,
+        )
     except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
         # The attack may have spent before harden stopped (a reset after it, say): the ledger delta is kept, and the
         # trace the attack wrote stays where it is. T42: the raw diffs of the attacks that returned are kept too, best
@@ -847,7 +866,7 @@ def _harden_one(
     # An earlier failed run's report for this stem is stale now that a certificate exists.
     _remove_beside(out.parent / REPORTS_DIR, f"{stem}.report.json")
     _keep_diffs(report, stem, out)
-    return _Written(path, report, cost)
+    return _Written(path, report, cost, strategy=settings.strategy)
 
 
 def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
@@ -947,8 +966,10 @@ class _Batch:
         self.state["updated"] = self.clock()
         _write_batch(self.path, self.state)
 
-    def done(self, line: str) -> None:
+    def done(self, line: str, row: Mapping[str, Any] | None = None) -> None:
         self.state["run"] += 1
+        if row is not None:
+            self.state["runs"].append(dict(row))
         self.save()
         print(line)
 
@@ -1078,8 +1099,25 @@ def _run_tasks(
                 stop = ("stopped_after_cost_check", f"batch stopped after the cost check failed on {iid}")
             batch.not_run(iid, outcome.reason, str(outcome.exc), outcome.cost)
             continue
-        batch.done(f"{iid}: run  {_harden_line(outcome.report, outcome.cost)}")
+        batch.done(f"{iid}: run  {_harden_line(outcome.report, outcome.cost)}", _run_row(iid, outcome))
     return 1 if stop is not None else 0
+
+
+def _run_row(instance_id: str, written: _Written) -> dict[str, Any]:
+    """The batch.json row of one run (T47): the strategy and the recon label are visible next to the result."""
+    from cheatproof.certify import recon_kinds, recon_label  # lazy, as in _harden_one
+
+    report = written.report
+    attacks = [rnd.attack for rnd in (report.before, report.after) if rnd is not None and rnd.attack]
+    return {
+        "instance_id": instance_id,
+        "strategy": written.strategy,
+        "recon": recon_label(report),
+        "recon_types": recon_kinds(report),
+        "certified": bool(report.certified),
+        "stop_reasons": [a.get("stop_reason") for a in attacks],
+        "auto_submitted": any(a.get("auto_submitted") is True for a in attacks),
+    }
 
 
 def _batch_summary(state: Mapping[str, Any]) -> str:
@@ -1205,6 +1243,8 @@ def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
         "finished": False,  # True only at the normal end of the whole batch; a chunk end or a stop leaves it False
         "pending_ids": [],
         "run": 0,
+        "recon": RECON_EXPOSURE if settings.recon else None,  # T47: the setting of this call
+        "runs": _resume_runs(batch_path),  # one row per run, with its strategy and recon label
         "already_certified": 0,
         "not_run": broken_rows,
         "started": started,
@@ -1248,6 +1288,20 @@ def _resume_state(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
         and isinstance(row.get("instance_id"), str)
     ]
     return done, rows
+
+
+def _resume_runs(path: Path) -> list[dict[str, Any]]:
+    """The run rows of the batch.json an earlier call left, unless that batch finished (as _resume_state)."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict) or data.get("schema_version") != BATCH_SCHEMA_VERSION:
+        return []
+    if data.get("finished") is True:
+        return []
+    rows = data.get("runs")
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
 
 
 def _network_fetch_done(path: Path) -> list[str]:
@@ -1530,6 +1584,10 @@ def cmd_holes_recheck(args: argparse.Namespace, deps: Deps) -> int:
     return 1 if mismatched else 0
 
 
+NO_RECON_HELP = (
+    "do not give the attacker the pre-attack exposure scan (default: when the scan finds a hole, the attacker's "
+    "first message includes the sanitized findings and the certificate says recon: exposure)"
+)
 NETWORK_FETCH_HELP = (
     "T37: give the first (before-hardening) attack a capped host-side Tavily web_search; the sandbox network "
     f"stays off; needs TAVILY_API_KEY; at most {NETWORK_FETCH_MAX_TASKS} tasks in total (default off)"
@@ -1561,6 +1619,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     harden.add_argument("--no-preflight", action="store_true", help="skip the collect-only preflight")
     harden.add_argument("--network-fetch", action="store_true", help=NETWORK_FETCH_HELP)
+    harden.add_argument("--no-recon", action="store_true", help=NO_RECON_HELP)
 
     batch = sub.add_parser(
         "batch", help="harden the cached selection one task at a time; resumable; no fetch"
@@ -1608,6 +1667,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     batch.add_argument("--no-preflight", action="store_true", help="skip the collect-only preflight")
     batch.add_argument("--network-fetch", action="store_true", help=NETWORK_FETCH_HELP)
+    batch.add_argument("--no-recon", action="store_true", help=NO_RECON_HELP)
 
     report = sub.add_parser("report", help="score the certificates in a directory")
     report.add_argument("--certs", type=Path, default=DEFAULT_CERT_DIR, help="certificates directory")

@@ -1514,6 +1514,8 @@ BATCH_KEYS = {
     "next_chunk_pending",
     "finished",
     "pending_ids",
+    "recon",
+    "runs",
     "not_run",
     "started",
     "updated",
