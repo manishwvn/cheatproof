@@ -7,6 +7,8 @@
         [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
         [--instance-ids ID ...] [--first ID ...] [--rerun] [--prefer-future-git] [--chunk-size N<=10]
         [--dry-run] [--no-preflight] [--network-fetch] [--no-harness-search] [--no-recon]
+    python -m cheatproof.cli audit-exposure [--source S ...] [--n N] [--instance-ids ID ...] [--cache-dir DIR]
+        [--out DIR] [--timeout S] [--rerun] [--no-preflight] [--dry-run]
     python -m cheatproof.cli report [--certs DIR] [--out FILE] [--format text|json]
     python -m cheatproof.cli site [--certs DIR] [--out DIR] [--traces DIR]
     python -m cheatproof.cli holes recheck <stem> [--traces DIR] [--source S] [--cache-dir DIR]
@@ -74,6 +76,17 @@ prints 'confirmed holes: x; unconfirmed leads: y; certified: z (via ...)', and s
 n >= 10 ('n too small for an interval' below). The JSON output gains a confirmation key; its rate_before and
 hackable_before still count labels, leads included.
 The rates, intervals and totals are computed in certify.py and confirm.py only; this module does no statistics of its own.
+T57 audit-exposure (cheatproof/audit.py): a deterministic audit with no attacker and no model. For each cached task (the
+selection `batch` uses, or --instance-ids; env-broken tasks are skipped by the same collect-only preflight) it starts a
+sandbox session, scans the history exposure, measures whether a future commit adds a line of the gold patch (the fix is
+reachable), applies strip-future-git, checks that the gold gate still passes and the empty gate still fails, scans
+again, and writes one sanitized record per task to --out (default results/exposure, schema 'rewardseal.exposure-audit').
+A task with a valid record there is skipped unless --rerun. About 5 sandbox runs a task (Sandboxes are not billed; the
+counter is a guard), all through Budget.reserve_sandbox_run and the halt checks. --dry-run prints the plan and the
+estimate with no call and no file. Exit 0 finished, 1 budget stop or a write failure or a bad record, 2 usage.
+report and site show the summary M / N_future / N_fix / N_closed computed from those records only (a malformed record
+refuses every number); with no records they fall back to the certificates' exposure_before.future_git count, labelled
+'from attack certificates (not an audit)'.
 site builds the static report site through site.build_site from the certificate files. It is not a paid call:
 no Budget, LLM or executor is built for it. Its traces come from --traces, or from traces/ beside the certificates
 when that directory exists and --traces is not given.
@@ -232,6 +245,11 @@ class Deps:
     # T54: directory -> (confirmation summary, replication entries, refused replication files). It raises on any
     # problem, and `report` then fails. None only in fakes; Deps.default() always sets it.
     confirmation: Callable[[Path], tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]] | None = None
+    # T57: certificates directory -> the exposure-audit summary (audit.exposure_summary), or None when there is nothing
+    # to count. It raises ExposureAuditError on a malformed record. None only in fakes; Deps.default() sets it.
+    exposure_summary: Callable[[Path], dict[str, Any] | None] | None = None
+    # T57: audit.AuditOps for audit-exposure; None means AuditOps.default() (tests pass fakes).
+    audit_ops: Any = None
 
     @classmethod
     def for_dry_run(cls) -> Deps:
@@ -279,6 +297,7 @@ class Deps:
             build_site=_build_site,
             clock=_utc_now,
             confirmation=_confirmation,
+            exposure_summary=_exposure_summary,
             load_selection=load_cached_selection,
             disk_free_gb=_free_gb,
             preflight=_collect_gate,
@@ -1463,6 +1482,7 @@ def render_text(
     batch: Mapping[str, Any] | None = None,
     confirmation: Mapping[str, Any] | None = None,
     replications: Mapping[str, str] | None = None,
+    exposure_summary: Mapping[str, Any] | None = None,
 ) -> str:
     """The score dict as text. Every key that is present is shown; a missing optional key is skipped.
 
@@ -1479,6 +1499,10 @@ def render_text(
         lines += _confirmation_lines(confirmation, replications or {})
     else:
         lines += [_rate_text(label, score[key]) for key, label in RATE_LABELS if key in score]
+    if exposure_summary is not None:  # T57: the deterministic audit, or the labelled certificate fallback
+        from cheatproof.audit import summary_line  # lazy, as the other T57 imports
+
+        lines.append(summary_line(exposure_summary))
     lines.append(UPPER_BOUND_NOTE)
     for key in ("certified", "inconclusive"):
         if key in score:
@@ -1584,6 +1608,14 @@ def _confirmation(directory: Path) -> tuple[dict[str, Any], dict[str, dict[str, 
     return summary, entries, [name for name, _ in replications.problems]
 
 
+def _exposure_summary(certs_dir: Path) -> dict[str, Any] | None:
+    """T57: the audit summary for the records beside the certificates (results/exposure), else the certificates'
+    own future_git count. Raises ExposureAuditError (a ValueError) on a malformed record."""
+    from cheatproof import audit  # lazy: keeps the grader and patches out of module import
+
+    return audit.exposure_summary(certs_dir.parent / audit.EXPOSURE_DIRNAME, certs_dir)
+
+
 def cmd_report(args: argparse.Namespace, deps: Deps) -> int:
     directory: Path = args.certs
     if not directory.is_dir():
@@ -1611,9 +1643,19 @@ def cmd_report(args: argparse.Namespace, deps: Deps) -> int:
             return _usage_error(
                 f"could not count confirmed holes in {directory}: {sanitize(str(exc))[:ERROR_CHARS]}"
             )
+    exposure_summary: dict[str, Any] | None = None
+    if deps.exposure_summary is not None:  # None only for fakes
+        try:
+            exposure_summary = deps.exposure_summary(directory)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            return _usage_error(
+                f"could not read the exposure audit beside {directory}: {sanitize(str(exc))[:ERROR_CHARS]}"
+            )
     shown: dict[str, Any] = dict(score) if batch is None else {**score, "batch": batch}
     if confirmation is not None:
         shown["confirmation"] = {**confirmation, "replication": replications}
+    if exposure_summary is not None:
+        shown["exposure_audit"] = exposure_summary
     payload = json.dumps(confirm.hide_small_intervals(shown), indent=2, sort_keys=True) + "\n"
     if args.out is not None:
         try:
@@ -1631,6 +1673,7 @@ def cmd_report(args: argparse.Namespace, deps: Deps) -> int:
                 batch,
                 confirmation,
                 None if confirmation is None else {t: r["text"] for t, r in replications.items()},
+                exposure_summary,
             )
         )
         if args.out is not None:
@@ -1639,6 +1682,257 @@ def cmd_report(args: argparse.Namespace, deps: Deps) -> int:
         print(f"error: replication files refused: {', '.join(refused)}", file=sys.stderr)
         return 1
     return 0
+
+
+DEFAULT_EXPOSURE_DIR = Path("results/exposure")
+
+
+def _audit_selection(args: argparse.Namespace, deps: Deps) -> list[TaskSpec]:
+    """The tasks to audit: the cached selection per source (as batch), or exactly --instance-ids. ValueError for a
+    usage problem (no cache, an uncached id). Reads the cache only."""
+    from cheatproof import plan as batch_plan
+    from cheatproof.tasks import SOURCES
+
+    names = list(dict.fromkeys(args.source)) if args.source else list(SOURCES)
+    tasks: list[TaskSpec] = []
+    seen: set[str] = set()
+    for name in names:
+        for task in deps.load_selection(name, args.n, args.cache_dir).selected:
+            if task.instance_id not in seen:
+                seen.add(task.instance_id)
+                tasks.append(task)
+    ordered = batch_plan.order_tasks(
+        tasks,
+        lookup=lambda iid: deps.find_tasks(iid, None, args.cache_dir),
+        out=args.out,
+        instance_ids=args.instance_ids,
+    )
+    return ordered.tasks
+
+
+def _has_record(task: TaskSpec, out: Path) -> bool:
+    """True when out holds a valid record for this task. An unreadable or invalid file is not one (it is replaced)."""
+    from cheatproof import audit
+
+    try:
+        audit.load_record(out / audit.record_filename(task.instance_id))
+    except (audit.ExposureAuditError, ValueError, OSError):
+        return False
+    return True
+
+
+def _audit_plan_lines(todo: list[TaskSpec], skipped: list[str]) -> list[str]:
+    from cheatproof import audit
+    from cheatproof import plan as batch_plan
+
+    runs = len(todo) * audit.SANDBOX_RUNS_PER_TASK
+    sandbox = runs * audit.SANDBOX_COST_PER_RUN
+    caps = batch_plan.read_caps(os.environ, _env_file_values())
+    lines = [
+        f"audit plan (dry run, no calls made): {len(todo) + len(skipped)} selected, {len(todo)} to audit"
+    ]
+    lines += [f"  audit  {task.instance_id}" for task in todo]
+    lines += [f"  -      {iid}: already has a record, skipped" for iid in skipped]
+    lines.append(
+        f"estimated sandbox runs: {runs} (about {audit.SANDBOX_RUNS_PER_TASK} per task: the collect-only "
+        f"preflight start, the audit start and 3 resets); Sandboxes about ${sandbox:.2f} (an estimate: Sandboxes "
+        "are not billed, the counter is a guard). No model, attacker or Tavily call: $0 of trial credit"
+    )
+    lines.append(
+        f"caps (ledger not read): SANDBOX_COST_CAP_USD ${caps.sandbox:g}, REAL_SPEND_CAP_USD ${caps.real:g}"
+    )
+    lines += batch_plan.cap_warnings(0.0, sandbox, caps)
+    return lines
+
+
+def cmd_audit_exposure(args: argparse.Namespace, deps: Deps) -> int:
+    """T57: the deterministic exposure audit. See the module docstring. No attacker, model or Tavily call."""
+    from cheatproof import audit
+
+    out: Path = args.out
+    if args.n is not None and args.n < 0:
+        return _usage_error("--n must be 0 or more")
+    if args.timeout is not None and not (math.isfinite(args.timeout) and args.timeout > 0):
+        return _usage_error(f"--timeout must be a positive number of seconds, got {args.timeout!r}")
+    if out.is_symlink():
+        return _usage_error(f"refusing to write through a symbolic link: {out}")
+    try:
+        tasks = _audit_selection(args, deps)
+    except ValueError as exc:  # no current cache, or an id that is not cached
+        return _usage_error(str(exc))
+    done = [] if args.rerun else [t.instance_id for t in tasks if _has_record(t, out)]
+    todo = [t for t in tasks if t.instance_id not in done]
+    if args.dry_run:  # no executor, budget or file is touched
+        print("\n".join(_audit_plan_lines(todo, done)))
+        return 0
+    try:
+        executor = deps.make_executor()
+        _sweep_leftovers(executor)
+        budget = deps.make_budget()
+    except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
+        return _failure(exc)
+    except KeyError as exc:
+        return _missing_setting(exc)
+    except ValueError as exc:
+        return _usage_error(str(exc))
+    ops = deps.audit_ops if deps.audit_ops is not None else audit.AuditOps.default()
+    preflight = None if args.no_preflight else deps.preflight
+    executor_name = (os.environ.get("EXECUTOR") or "sandbox").strip().lower()
+    timeout = args.timeout if args.timeout is not None else audit.DEFAULT_TIMEOUT_S
+    min_free = _min_free_gb()
+    need_runs = audit.SANDBOX_RUNS_PER_TASK - (1 if preflight is None else 0)
+    audited: list[str] = []
+    skipped: Counter[str] = Counter()
+    for iid in done:
+        print(f"{iid}: already has a record, skipped")
+    # The run manifest keeps the denominator: every id ever selected for this directory and why a task has no record.
+    try:
+        previous = audit.load_run(out)
+    except audit.ExposureAuditError as exc:
+        print(f"error: {sanitize(str(exc))[:ERROR_CHARS]}", file=sys.stderr)
+        return 1
+    from cheatproof.tasks import SOURCES
+
+    sources = list(dict.fromkeys([*(previous["source"] if previous else []), *(args.source or SOURCES)]))
+    selected_ids = list(
+        dict.fromkeys([*(previous["selected_ids"] if previous else []), *(t.instance_id for t in tasks)])
+    )
+    excluded: dict[str, str] = dict(previous["excluded"]) if previous else {}
+
+    def save_manifest() -> None:
+        audit.write_run(
+            out, source=sources, selected_ids=selected_ids, excluded=excluded, updated=deps.clock()
+        )
+
+    code = 0
+    try:
+        save_manifest()  # the selection is on disk before the first sandbox run
+    except (OSError, ValueError) as exc:
+        print(f"error: run manifest not written: {type(exc).__name__}", file=sys.stderr)
+        return 1
+    for task in todo:
+        iid = task.instance_id
+        try:
+            env = EnvSpec(image=task.image)
+            audit.record_filename(iid)  # a name that cannot be made is refused before any sandbox run
+        except ValueError as exc:
+            skipped["invalid_task"] += 1
+            excluded[iid] = "other"
+            print(f"{iid}: not audited (invalid_task): {sanitize(str(exc))[:ERROR_CHARS]}")
+            continue
+        free = deps.disk_free_gb(out)
+        if free < min_free:
+            skipped["disk"] += 1
+            print(
+                f"{iid}: not audited (disk): free disk is {free:.1f} GB, below MIN_FREE_DISK_GB={min_free:g}"
+            )
+            continue
+        low = _run_cap_message(budget, need_runs)
+        if low is not None:  # stop between tasks, cleanly: nothing is half-run
+            print(f"stopped before {iid}: {low}")
+            code = 1
+            break
+        try:
+            record = audit.audit_task(
+                executor,
+                budget,
+                task,
+                env=env,
+                preflight=preflight,
+                clock=deps.clock,
+                executor_name=executor_name,
+                timeout=timeout,
+                ops=ops,
+            )
+            audit.write_record(record, out)
+        except BudgetExceeded as exc:  # a cap, a halt or HTTP 402: stop at once
+            print(f"{iid}: not audited (budget): {sanitize(str(exc))[:ERROR_CHARS]}")
+            skipped["budget"] += 1
+            code = 1
+            break
+        except audit.EnvBroken as exc:
+            skipped[ENV_BROKEN] += 1
+            excluded[iid] = "env_broken"
+            print(f"{iid}: not audited ({ENV_BROKEN}): {sanitize(str(exc))[:ERROR_CHARS]}")
+        except (
+            audit.ExposureAuditError,
+            ValueError,
+        ) as exc:  # the record did not validate: nothing was written
+            skipped["invalid_record"] += 1
+            excluded[iid] = "other"
+            print(f"{iid}: not audited (invalid_record): {sanitize(str(exc))[:ERROR_CHARS]}")
+        except audit.AuditUnavailable as exc:
+            skipped["unavailable"] += 1
+            excluded[iid] = exc.kind if exc.kind in audit.EXCLUDED_REASONS else "other"
+            print(f"{iid}: not audited (unavailable): {sanitize(str(exc))[:ERROR_CHARS]}")
+        except (ExecutorRefused, ExecutorUnavailable) as exc:
+            reason = "disk" if isinstance(exc, DiskRefused) else "executor_refused"
+            skipped[reason] += 1
+            excluded[iid] = "other"
+            print(f"{iid}: not audited ({reason}): {sanitize(str(exc))[:ERROR_CHARS]}")
+        except OSError as exc:  # the record could not be written
+            print(f"error: record not written for {iid}: {type(exc).__name__}", file=sys.stderr)
+            code = 1
+            break
+        except RuntimeError as exc:  # one task's failure never kills the loop; it has no record
+            skipped["runtime_error"] += 1
+            excluded[iid] = "other"
+            print(
+                f"{iid}: not audited (runtime_error): {type(exc).__name__}: {sanitize(str(exc))[:ERROR_CHARS]}"
+            )
+        else:
+            audited.append(iid)
+            excluded.pop(iid, None)
+            reason_text = "" if record["closed"] else f" ({record['closed_reason']})"
+            print(
+                f"{iid}: audited  future commits before {record['future_commits_before']}, fix reachable "
+                f"{str(record['fix_reachable']).lower()} ({record['fix_reachable_basis']}), after "
+                f"{record['future_commits_after']}, closed {str(record['closed']).lower()}{reason_text}, "
+                f"sandbox runs {record['sandbox_runs']}"
+            )
+        finally:
+            _release_image(executor, env.image)
+        try:
+            save_manifest()
+        except (OSError, ValueError) as exc:
+            print(f"error: run manifest not written: {type(exc).__name__}", file=sys.stderr)
+            code = 1
+            break
+    not_audited = sum(skipped.values())
+    reasons = ", ".join(f"{k}={v}" for k, v in sorted(skipped.items())) or "none"
+    print(
+        f"audit: audited {len(audited)}, already had a record {len(done)}, not audited {not_audited} ({reasons})"
+    )
+    if code == 1:
+        print("resume: run the same command again; tasks that have a record are skipped")
+    if audit.records_present(out):
+        try:
+            print(audit.summary_line(audit.exposure_summary(out)))
+        except audit.ExposureAuditError as exc:  # a bad record: no number is drawn
+            print(f"error: {sanitize(str(exc))[:ERROR_CHARS]}", file=sys.stderr)
+            return 1
+    return code
+
+
+def _run_cap_message(budget: Any, need: int) -> str | None:
+    """None when at least `need` sandbox runs remain under SANDBOX_RUN_CAP (or the budget does not say). Otherwise the
+    stop message with a resume hint. The cap is the owner's: this command only names the variable, never changes it."""
+    cap = getattr(budget, "sandbox_run_cap", None)
+    snapshot = getattr(budget, "snapshot", None)
+    if isinstance(cap, bool) or not isinstance(cap, int) or snapshot is None:
+        return None
+    try:
+        used = int(snapshot().get("sandbox_runs", 0))
+    except BudgetExceeded as exc:
+        return f"{sanitize(str(exc))[:ERROR_CHARS]}; run the same command again once it is cleared"
+    left = cap - used
+    if left >= need:
+        return None
+    return (
+        f"only {left} sandbox run(s) remain under SANDBOX_RUN_CAP={cap} ({used} used) and one task needs about "
+        f"{need}. This command never changes the cap: raise SANDBOX_RUN_CAP yourself, then run the same command "
+        "again; tasks that already have a record are skipped"
+    )
 
 
 def cmd_site(args: argparse.Namespace, deps: Deps) -> int:
@@ -1816,6 +2110,30 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--no-harness-search", action="store_true", help=NO_HARNESS_SEARCH_HELP)
     batch.add_argument("--no-recon", action="store_true", help=NO_RECON_HELP)
 
+    audit_cmd = sub.add_parser(
+        "audit-exposure",
+        help="T57: deterministic, attacker-free audit of the future-commit exposure (strip patch, gates, rescan)",
+    )
+    audit_cmd.add_argument(
+        "--source", nargs="+", action="extend", help="task source(s) to select from (default: all)"
+    )
+    audit_cmd.add_argument("--n", type=int, help="tasks per source (default: each source's default)")
+    audit_cmd.add_argument(
+        "--instance-ids", nargs="+", help="audit exactly these cached tasks, in this order"
+    )
+    audit_cmd.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR, help="task cache directory")
+    audit_cmd.add_argument(
+        "--out", type=Path, default=DEFAULT_EXPOSURE_DIR, help="directory for the records (one per task)"
+    )
+    audit_cmd.add_argument("--timeout", type=float, help="seconds per grading run (the gates)")
+    audit_cmd.add_argument("--rerun", action="store_true", help="audit again the tasks that have a record")
+    audit_cmd.add_argument("--no-preflight", action="store_true", help="skip the collect-only preflight")
+    audit_cmd.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the plan and the estimated sandbox runs; no calls, no files",
+    )
+
     report = sub.add_parser("report", help="score the certificates in a directory")
     report.add_argument("--certs", type=Path, default=DEFAULT_CERT_DIR, help="certificates directory")
     report.add_argument("--out", type=Path, help="also write the score as JSON to this file")
@@ -1862,12 +2180,14 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
     except SystemExit as exc:  # argparse exits 2 on a usage error and 0 on --help
         return int(exc.code or 0)
     if deps is None:
-        dry = args.command == "batch" and args.dry_run
+        dry = args.command in ("batch", "audit-exposure") and args.dry_run
         deps = Deps.for_dry_run() if dry else Deps.default()
     if args.command == "harden":
         return cmd_harden(args, deps)
     if args.command == "batch":
         return cmd_batch(args, deps)
+    if args.command == "audit-exposure":
+        return cmd_audit_exposure(args, deps)
     if args.command == "site":
         return cmd_site(args, deps)
     if args.command == "budget":
