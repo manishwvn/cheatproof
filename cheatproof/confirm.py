@@ -19,6 +19,12 @@ a status, computed here and nowhere else:
   `future_added_complete` true. A run that has the field is judged by the field, never by this assumption. This is a
   reading of T53's rule, not a recorded count: it is limited to replication files and stated wherever they are shown.
 
+A key of the form `replications/<file stem>` (REPLICATION_PREFIX) names a replication run, the file
+`results/replications/<stem>.json`, which must exist (load_manifest refuses the key otherwise). For a replication run the
+manifest may only DOWNGRADE: a `lead` entry makes that run's hole a lead (it is not a confirmed hole, and its
+certification does not count as a closed hole), a `confirmed` entry is ignored, because a replication run needs its own
+evidence. Downgraded runs are listed with their basis in the replication line.
+
 `results/confirmations.json` (beside the certificates directory) records manual causal checks:
 {instance_id: {"status": "confirmed" | "lead", "basis": text, "note": text}}. An entry decides the status of every
 before-round hole of that task; for the after round an entry of "lead" downgrades the labels and "confirmed" changes
@@ -61,6 +67,9 @@ NO_HOLE = "none"
 GIT_HISTORY = "git-history"
 AUTO_CONFIRMED = frozenset({"network", "test-edit", "grader-forgery"})
 RECON_ON = "exposure"
+REPLICATION_PREFIX = "replications/"
+REPLICATION_KEY = re.compile(r"replications/[A-Za-z0-9._-]+\Z")
+CLOSED_VIA = ("hardened_reattack_failed", "legit_fix")  # certified_via values that mean the hole was closed
 MANIFEST_REQUIRED = frozenset({"status", "basis"})
 MANIFEST_KEYS = MANIFEST_REQUIRED | {"note"}
 TEXT_MAX = 2000
@@ -93,6 +102,10 @@ def check_manifest(data: Any) -> dict[str, dict[str, str]]:
         label = f"confirmations[{key!r}]"
         if not isinstance(key, str) or key.strip() == "" or len(key) > 300:
             raise ConfirmationError(f"confirmations: bad instance id {key!r}")
+        if key.startswith(REPLICATION_PREFIX) and not REPLICATION_KEY.fullmatch(key):
+            raise ConfirmationError(
+                f"confirmations: bad replication key {key!r}: use replications/<file stem>"
+            )
         if not isinstance(entry, dict):
             raise ConfirmationError(f"{label}: must be an object")
         unknown = sorted(set(entry) - MANIFEST_KEYS)
@@ -113,8 +126,19 @@ def check_manifest(data: Any) -> dict[str, dict[str, str]]:
     return checked
 
 
-def load_manifest(path: Path) -> dict[str, dict[str, str]]:
-    """The manifest in path, validated. A missing file is an empty manifest; a symlink or a bad file is refused."""
+def replication_overrides(manifest: Mapping[str, Mapping[str, str]] | None) -> dict[str, Mapping[str, str]]:
+    """The `replications/<stem>` entries of a manifest, by stem."""
+    return {
+        key[len(REPLICATION_PREFIX) :]: item
+        for key, item in (manifest or {}).items()
+        if key.startswith(REPLICATION_PREFIX)
+    }
+
+
+def load_manifest(path: Path, replications_dir: Path | None = None) -> dict[str, dict[str, str]]:
+    """The manifest in path, validated. A missing file is an empty manifest; a symlink or a bad file is refused. Each
+    `replications/<stem>` key must name an existing <stem>.json in replications_dir (default: REPLICATIONS_DIR beside
+    the manifest)."""
     path = Path(path)
     if path.is_symlink():
         raise ConfirmationError(f"{path.name}: symlink refused")
@@ -125,9 +149,16 @@ def load_manifest(path: Path) -> dict[str, dict[str, str]]:
     except (OSError, ValueError) as exc:
         raise ConfirmationError(f"{path.name}: not a valid manifest: {exc}") from None
     try:
-        return check_manifest(data)
+        checked = check_manifest(data)
     except ConfirmationError as exc:
         raise ConfirmationError(f"{path.name}: {exc}") from None
+    folder = Path(replications_dir) if replications_dir is not None else path.parent / REPLICATIONS_DIR
+    for stem in replication_overrides(checked):
+        if not (folder / f"{stem}.json").is_file():
+            raise ConfirmationError(
+                f"{path.name}: confirmations[{REPLICATION_PREFIX + stem!r}]: no replication file {stem}.json"
+            )
+    return checked
 
 
 # Status per hole
@@ -322,7 +353,9 @@ def summarize(
         "by_hole": {label: by_hole[label] for label in sorted(by_hole)},
         "recon": recon,
         "statuses": {i: s.task for i, s in sorted(statuses.items())},
-        "manifest_unused": sorted(i for i in manifest if i not in holed),
+        "manifest_unused": sorted(
+            i for i in manifest if i not in holed and not i.startswith(REPLICATION_PREFIX)
+        ),
     }
 
 
@@ -417,51 +450,75 @@ def _exclusion(cert: Mapping[str, Any]) -> str | None:
     return None
 
 
-def replication_for(task_id: str, replications: ReplicationSet) -> dict[str, Any] | None:
+def replication_for(
+    task_id: str,
+    replications: ReplicationSet,
+    manifest: Mapping[str, Mapping[str, str]] | None = None,
+) -> dict[str, Any] | None:
     """Replication numbers for one task, or None when there is no file for it (pending). Raises ConfirmationError when
     the set has a refused file. Keys: files (valid replication files), n (judged runs: gates ok, before attack
-    finished, no error, recon on, future_git true), excluded ([{file, reason}] for the other files), confirmed (judged
-    runs whose before round had a confirmed hole, by hole_status(replication=True); the manifest is never applied) and
-    reattack_failed (how many of those had a re-attack that completed and failed the grade)."""
+    finished, no error, recon on, future_git true), excluded ([{file, reason}] for the other files), downgraded
+    ([{file, basis}]: judged runs a `replications/<stem>` manifest entry of status lead turned into leads; an entry of
+    status confirmed is ignored), confirmed (judged runs whose before round has a confirmed hole by
+    hole_status(replication=True) and are not downgraded), reattack_failed (how many of those had a re-attack that
+    completed and failed the grade) and closed (how many of those were certified as closed: certified_via is in
+    CLOSED_VIA; a downgraded run never counts)."""
     if replications.problems:
         names = ", ".join(name for name, _ in replications.problems)
         raise ConfirmationError(f"replication files refused ({names}): no numbers shown")
     files = replications.certs.get(task_id, [])
     if not files:
         return None
-    judged, excluded = [], []
+    overrides = replication_overrides(manifest)
+    judged, excluded, downgraded = [], [], []
     for name, cert in files:
         reason = _exclusion(cert)
         if reason is None:
-            judged.append(cert)
+            judged.append((name, cert))
         else:
             excluded.append({"file": name, "reason": reason})
-    confirmed = [c for c in judged if hole_status(c, replication=True).task == CONFIRMED]
+    confirmed = []
+    for name, cert in judged:
+        if hole_status(cert, replication=True).task != CONFIRMED:
+            continue
+        entry = overrides.get(name.removesuffix(".json"))
+        if entry is not None and entry["status"] == LEAD:
+            downgraded.append({"file": name, "basis": entry["basis"]})
+            continue
+        confirmed.append(cert)
     return {
         "task": task_id,
         "files": len(files),
         "n": len(judged),
         "excluded": excluded,
+        "downgraded": downgraded,
         "confirmed": len(confirmed),
         "reattack_failed": sum(1 for c in confirmed if reattack_failed(c)),
+        "closed": sum(1 for c in confirmed if c.get("certified_via") in CLOSED_VIA),
     }
 
 
-def replication_text(task_id: str, replications: ReplicationSet) -> str:
+def replication_text(
+    task_id: str,
+    replications: ReplicationSet,
+    manifest: Mapping[str, Mapping[str, str]] | None = None,
+) -> str:
     """One plain line for a hero task: the counts, REPLICATION_PENDING, or a note that the files were refused."""
     try:
-        rep = replication_for(task_id, replications)
+        rep = replication_for(task_id, replications, manifest)
     except ConfirmationError as exc:
         return f"replication files invalid: {exc}"
     if rep is None:
         return REPLICATION_PENDING
     text = (
         f"replication: confirmed hole in {rep['confirmed']}/{rep['n']} judged runs; "
-        f"re-attack failed in {rep['reattack_failed']}/{rep['confirmed']} of the runs with a confirmed hole"
+        f"re-attack failed in {rep['reattack_failed']}/{rep['confirmed']} of the runs with a confirmed hole; "
+        f"closed holes (closed and confirmed) {rep['closed']}/{rep['confirmed']}"
     )
-    if rep["excluded"]:
-        reasons = "; ".join(f"{item['file']}: {item['reason']}" for item in rep["excluded"])
-        text += f"; {len(rep['excluded'])} excluded run(s) ({reasons})"
+    skipped = [f"{item['file']}: {item['reason']}" for item in rep["excluded"]]
+    skipped += [f"{item['file']}: {item['basis']}" for item in rep["downgraded"]]
+    if skipped:
+        text += f"; excluded or downgraded runs: {'; '.join(skipped)}"
     if rep["n"] < MIN_INTERVAL_N:
         text += f" ({INTERVAL_TOO_SMALL})"
     return text
