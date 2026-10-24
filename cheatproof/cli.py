@@ -1780,11 +1780,36 @@ def cmd_audit_exposure(args: argparse.Namespace, deps: Deps) -> int:
     executor_name = (os.environ.get("EXECUTOR") or "sandbox").strip().lower()
     timeout = args.timeout if args.timeout is not None else audit.DEFAULT_TIMEOUT_S
     min_free = _min_free_gb()
+    need_runs = audit.SANDBOX_RUNS_PER_TASK - (1 if preflight is None else 0)
     audited: list[str] = []
     skipped: Counter[str] = Counter()
     for iid in done:
         print(f"{iid}: already has a record, skipped")
+    # The run manifest keeps the denominator: every id ever selected for this directory and why a task has no record.
+    try:
+        previous = audit.load_run(out)
+    except audit.ExposureAuditError as exc:
+        print(f"error: {sanitize(str(exc))[:ERROR_CHARS]}", file=sys.stderr)
+        return 1
+    from cheatproof.tasks import SOURCES
+
+    sources = list(dict.fromkeys([*(previous["source"] if previous else []), *(args.source or SOURCES)]))
+    selected_ids = list(
+        dict.fromkeys([*(previous["selected_ids"] if previous else []), *(t.instance_id for t in tasks)])
+    )
+    excluded: dict[str, str] = dict(previous["excluded"]) if previous else {}
+
+    def save_manifest() -> None:
+        audit.write_run(
+            out, source=sources, selected_ids=selected_ids, excluded=excluded, updated=deps.clock()
+        )
+
     code = 0
+    try:
+        save_manifest()  # the selection is on disk before the first sandbox run
+    except (OSError, ValueError) as exc:
+        print(f"error: run manifest not written: {type(exc).__name__}", file=sys.stderr)
+        return 1
     for task in todo:
         iid = task.instance_id
         try:
@@ -1792,6 +1817,7 @@ def cmd_audit_exposure(args: argparse.Namespace, deps: Deps) -> int:
             audit.record_filename(iid)  # a name that cannot be made is refused before any sandbox run
         except ValueError as exc:
             skipped["invalid_task"] += 1
+            excluded[iid] = "other"
             print(f"{iid}: not audited (invalid_task): {sanitize(str(exc))[:ERROR_CHARS]}")
             continue
         free = deps.disk_free_gb(out)
@@ -1801,6 +1827,11 @@ def cmd_audit_exposure(args: argparse.Namespace, deps: Deps) -> int:
                 f"{iid}: not audited (disk): free disk is {free:.1f} GB, below MIN_FREE_DISK_GB={min_free:g}"
             )
             continue
+        low = _run_cap_message(budget, need_runs)
+        if low is not None:  # stop between tasks, cleanly: nothing is half-run
+            print(f"stopped before {iid}: {low}")
+            code = 1
+            break
         try:
             record = audit.audit_task(
                 executor,
@@ -1821,38 +1852,59 @@ def cmd_audit_exposure(args: argparse.Namespace, deps: Deps) -> int:
             break
         except audit.EnvBroken as exc:
             skipped[ENV_BROKEN] += 1
+            excluded[iid] = "env_broken"
             print(f"{iid}: not audited ({ENV_BROKEN}): {sanitize(str(exc))[:ERROR_CHARS]}")
         except (
             audit.ExposureAuditError,
             ValueError,
         ) as exc:  # the record did not validate: nothing was written
             skipped["invalid_record"] += 1
+            excluded[iid] = "other"
             print(f"{iid}: not audited (invalid_record): {sanitize(str(exc))[:ERROR_CHARS]}")
         except audit.AuditUnavailable as exc:
             skipped["unavailable"] += 1
+            excluded[iid] = exc.kind if exc.kind in audit.EXCLUDED_REASONS else "other"
             print(f"{iid}: not audited (unavailable): {sanitize(str(exc))[:ERROR_CHARS]}")
         except (ExecutorRefused, ExecutorUnavailable) as exc:
             reason = "disk" if isinstance(exc, DiskRefused) else "executor_refused"
             skipped[reason] += 1
+            excluded[iid] = "other"
             print(f"{iid}: not audited ({reason}): {sanitize(str(exc))[:ERROR_CHARS]}")
         except OSError as exc:  # the record could not be written
             print(f"error: record not written for {iid}: {type(exc).__name__}", file=sys.stderr)
             code = 1
             break
+        except RuntimeError as exc:  # one task's failure never kills the loop; it has no record
+            skipped["runtime_error"] += 1
+            excluded[iid] = "other"
+            print(
+                f"{iid}: not audited (runtime_error): {type(exc).__name__}: {sanitize(str(exc))[:ERROR_CHARS]}"
+            )
         else:
             audited.append(iid)
+            excluded.pop(iid, None)
+            reason_text = "" if record["closed"] else f" ({record['closed_reason']})"
             print(
                 f"{iid}: audited  future commits before {record['future_commits_before']}, fix reachable "
-                f"{str(record['fix_reachable']).lower()}, after {record['future_commits_after']}, closed "
-                f"{str(record['closed']).lower()}, sandbox runs {record['sandbox_runs']}"
+                f"{str(record['fix_reachable']).lower()} ({record['fix_reachable_basis']}), after "
+                f"{record['future_commits_after']}, closed {str(record['closed']).lower()}{reason_text}, "
+                f"sandbox runs {record['sandbox_runs']}"
             )
         finally:
             _release_image(executor, env.image)
+        try:
+            save_manifest()
+        except (OSError, ValueError) as exc:
+            print(f"error: run manifest not written: {type(exc).__name__}", file=sys.stderr)
+            code = 1
+            break
     not_audited = sum(skipped.values())
     reasons = ", ".join(f"{k}={v}" for k, v in sorted(skipped.items())) or "none"
     print(
         f"audit: audited {len(audited)}, already had a record {len(done)}, not audited {not_audited} ({reasons})"
     )
+    if code == 1:
+        print("resume: run the same command again; tasks that have a record are skipped")
     if audit.records_present(out):
         try:
             print(audit.summary_line(audit.exposure_summary(out)))
@@ -1860,6 +1912,27 @@ def cmd_audit_exposure(args: argparse.Namespace, deps: Deps) -> int:
             print(f"error: {sanitize(str(exc))[:ERROR_CHARS]}", file=sys.stderr)
             return 1
     return code
+
+
+def _run_cap_message(budget: Any, need: int) -> str | None:
+    """None when at least `need` sandbox runs remain under SANDBOX_RUN_CAP (or the budget does not say). Otherwise the
+    stop message with a resume hint. The cap is the owner's: this command only names the variable, never changes it."""
+    cap = getattr(budget, "sandbox_run_cap", None)
+    snapshot = getattr(budget, "snapshot", None)
+    if isinstance(cap, bool) or not isinstance(cap, int) or snapshot is None:
+        return None
+    try:
+        used = int(snapshot().get("sandbox_runs", 0))
+    except BudgetExceeded as exc:
+        return f"{sanitize(str(exc))[:ERROR_CHARS]}; run the same command again once it is cleared"
+    left = cap - used
+    if left >= need:
+        return None
+    return (
+        f"only {left} sandbox run(s) remain under SANDBOX_RUN_CAP={cap} ({used} used) and one task needs about "
+        f"{need}. This command never changes the cap: raise SANDBOX_RUN_CAP yourself, then run the same command "
+        "again; tasks that already have a record are skipped"
+    )
 
 
 def cmd_site(args: argparse.Namespace, deps: Deps) -> int:

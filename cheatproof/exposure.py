@@ -354,6 +354,7 @@ def future_scan(
     final_diff: str | None,
     *,
     workdir: str = DEFAULT_WORKDIR,
+    paths: Sequence[str] | None = None,
 ) -> FutureScan:
     """T55: the targeted scan, run after the attack in the attacker's own session, before the grade resets it.
 
@@ -368,7 +369,9 @@ def future_scan(
     FUTURE_MAX_EXECS runs, FUTURE_PATHS_MAX paths) make complete False when hit, as do an unverified history source
     in the pre-attack scan, a diff that could not be read exactly, and a failed run. A scan that could not run
     gives digests None, which classify treats as a lead only."""
-    paths, exact = future_scan_paths(final_diff, task)
+    found_paths, exact = future_scan_paths(final_diff, task)
+    # T57: the audit names the paths itself (the gold patch's source files); the exactness of the diffs still counts.
+    paths = found_paths if paths is None else sorted(dict.fromkeys(p for p in paths if p))
     shown = tuple(paths)
     if report is None or report.future_commit_ids is None:
         return FutureScan(
@@ -476,7 +479,7 @@ def future_touched_paths(
     if len(report.future_commit_ids) <= FUTURE_POSITIVE_MAX:
         starts += report.future_commit_ids
     revs = " ".join(shlex.quote(rev) for rev in dict.fromkeys(starts))
-    cmd = git_command(
+    cmd = _git(
         workdir,
         f"log --all --reflog {revs} --not {shlex.quote(base)} --full-history --no-merges --name-only -z --format="
         f"{_pathspec(wanted)} | tr '\\0' '\\n' | sort -u",
