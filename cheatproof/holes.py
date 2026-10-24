@@ -559,7 +559,8 @@ def _split_trace(trace: Sequence[Any], skipped_records: int) -> tuple[list[dict]
 def _valid(rec: dict) -> bool:
     """Required keys for each record type, as attacker.py writes them. Anything else is skipped and counted."""
     kind = rec.get("type")
-    if kind == "header":
+    # "harness_search" (T52) is the harness's own recon search, not a step of the attacker.
+    if kind in ("header", "harness_search"):
         return True
     if kind == "step":
         digest = rec.get("result_digest")

@@ -402,7 +402,7 @@ def test_the_cap_halt_through_the_cli_stops_without_a_certificate(tmp_path, monk
     spy = tc.Spy()
     capped = counted_budget(tmp_path, cap=0)
 
-    def attack(llm, session, system_prompt, task_prompt, config, trace_path=None, search=None):
+    def attack(llm, session, system_prompt, task_prompt, config, trace_path=None, search=None, **kwargs):
         search("upstream fix")  # the reservation is refused at the cap: BudgetExceeded
         return "attack-result"
 

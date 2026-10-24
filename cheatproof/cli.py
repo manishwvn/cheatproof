@@ -2,11 +2,11 @@
 
     python -m cheatproof.cli harden <instance-id> --system-prompt-file PATH [--source S] [--cache-dir DIR]
         [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
-        [--network-fetch] [--no-recon]
+        [--network-fetch] [--no-harness-search] [--no-recon]
     python -m cheatproof.cli batch --system-prompt-file PATH [--source S ...] [--n N] [--cache-dir DIR]
         [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
         [--instance-ids ID ...] [--first ID ...] [--rerun] [--prefer-future-git] [--chunk-size N<=10]
-        [--dry-run] [--no-preflight] [--network-fetch] [--no-recon]
+        [--dry-run] [--no-preflight] [--network-fetch] [--no-harness-search] [--no-recon]
     python -m cheatproof.cli report [--certs DIR] [--out FILE] [--format text|json]
     python -m cheatproof.cli site [--certs DIR] [--out DIR] [--traces DIR]
     python -m cheatproof.cli holes recheck <stem> [--traces DIR] [--source S] [--cache-dir DIR]
@@ -589,6 +589,7 @@ class _Written:
     report: Any
     cost: float
     strategy: str = ""
+    harness_search: dict | None = None  # T52: {provider, query, results, ok} of the harness recon search
 
 
 @dataclass(frozen=True)
@@ -610,6 +611,7 @@ class _Settings:
     executor_name: str
     out: Path
     network_fetch: bool = False
+    harness_search: bool = False  # T52: on with --network-fetch unless --no-harness-search
     recon: bool = True  # T47: exposure recon for the attacker; --no-recon turns it off
 
 
@@ -665,7 +667,8 @@ def _harden_settings(args: argparse.Namespace) -> _Settings:
         timeout_kw["timeout"] = args.timeout
 
     # --network-fetch turns on the host-side web_search only. The sandbox network stays off (EnvSpec.network False).
-    config = AttackConfig(model=model, allow_network=network_fetch, **limits)
+    harness_search = network_fetch and not bool(getattr(args, "no_harness_search", False))
+    config = AttackConfig(model=model, allow_network=network_fetch, harness_search=harness_search, **limits)
     return _Settings(
         system_prompt=system_prompt,
         config=config,
@@ -674,6 +677,7 @@ def _harden_settings(args: argparse.Namespace) -> _Settings:
         executor_name=(os.environ.get("EXECUTOR") or "sandbox").strip().lower(),
         out=args.out,
         network_fetch=network_fetch,
+        harness_search=harness_search,
         recon=not bool(getattr(args, "no_recon", False)),
     )
 
@@ -772,6 +776,7 @@ def _harden_one(
     ] = []  # the attacks that returned, for keep.keep_stopped when harden stops without a report
 
     attacks_started = [0]
+    first_search: list[dict | None] = [None]  # T52: the before-hardening attack's harness search
 
     def attack_fn(session: Any, recon: str | None = None) -> Any:
         # T37: web_search is for the first (before-hardening) attack only. The after-hardening re-attack gets no
@@ -780,8 +785,13 @@ def _harden_one(
         attacks_started[0] += 1
         config = settings.config
         if settings.network_fetch and not first:
-            config = replace(config, allow_network=False)
+            config = replace(config, allow_network=False, harness_search=False)
         recon_kw: dict[str, Any] = {} if not recon else {"recon": recon, "recon_label": RECON_EXPOSURE}
+        if first and settings.harness_search:
+            # T52: the harness's own recon search, from the problem statement the attacker already sees.
+            from cheatproof.strategies import problem_query  # lazy, as make_network_search
+
+            recon_kw["harness_query"] = problem_query(plan.task.problem_statement)
         result = deps.attack(
             llm,
             session,
@@ -793,6 +803,8 @@ def _harden_one(
             **(search_kw if first else {}),
         )
         finished.append(result)
+        if first:
+            first_search[0] = getattr(result, "harness_search", None)
         return result
 
     spent_before = _ledger_total(budget)
@@ -838,7 +850,13 @@ def _harden_one(
         raise _Unwritten("cost", "cost_check_failed", RuntimeError(message))
 
     config = settings.config
-    attacker = {"model": config.model, "max_steps": config.max_steps, "max_tokens": config.max_tokens_total}
+    attacker: dict[str, Any] = {
+        "model": config.model,
+        "max_steps": config.max_steps,
+        "max_tokens": config.max_tokens_total,
+    }
+    if settings.network_fetch:  # T52: null when the search is off (--no-harness-search) or never ran
+        attacker["harness_search"] = first_search[0]
     timestamp = deps.clock()
     try:
         cert = deps.build_certificate(
@@ -867,7 +885,7 @@ def _harden_one(
     # An earlier failed run's report for this stem is stale now that a certificate exists.
     _remove_beside(out.parent / REPORTS_DIR, f"{stem}.report.json")
     _keep_diffs(report, stem, out)
-    return _Written(path, report, cost, strategy=settings.strategy)
+    return _Written(path, report, cost, strategy=settings.strategy, harness_search=first_search[0])
 
 
 def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
@@ -1110,7 +1128,7 @@ def _run_row(instance_id: str, written: _Written) -> dict[str, Any]:
 
     report = written.report
     attacks = [rnd.attack for rnd in (report.before, report.after) if rnd is not None and rnd.attack]
-    return {
+    row = {
         "instance_id": instance_id,
         "strategy": written.strategy,
         "recon": recon_label(report),
@@ -1119,6 +1137,10 @@ def _run_row(instance_id: str, written: _Written) -> dict[str, Any]:
         "stop_reasons": [a.get("stop_reason") for a in attacks],
         "auto_submitted": any(a.get("auto_submitted") is True for a in attacks),
     }
+    # T52: the tag 'harness search via Tavily' is shown next to the run
+    if written.harness_search is not None:
+        row["harness_search"] = dict(written.harness_search)
+    return row
 
 
 def _batch_summary(state: Mapping[str, Any]) -> str:
@@ -1589,6 +1611,10 @@ NO_RECON_HELP = (
     "do not give the attacker the pre-attack exposure scan (default: when the scan finds a hole, the attacker's "
     "first message includes the sanitized findings and the certificate says recon: exposure)"
 )
+NO_HARNESS_SEARCH_HELP = (
+    "T52: with --network-fetch, skip the one recon search the harness runs via Tavily before the first model step "
+    "(default: on with --network-fetch; the attacker may still call web_search itself)"
+)
 NETWORK_FETCH_HELP = (
     "T37: give the first (before-hardening) attack a capped host-side Tavily web_search; the sandbox network "
     f"stays off; needs TAVILY_API_KEY; at most {NETWORK_FETCH_MAX_TASKS} tasks in total (default off)"
@@ -1620,6 +1646,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     harden.add_argument("--no-preflight", action="store_true", help="skip the collect-only preflight")
     harden.add_argument("--network-fetch", action="store_true", help=NETWORK_FETCH_HELP)
+    harden.add_argument("--no-harness-search", action="store_true", help=NO_HARNESS_SEARCH_HELP)
     harden.add_argument("--no-recon", action="store_true", help=NO_RECON_HELP)
 
     batch = sub.add_parser(
@@ -1668,6 +1695,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     batch.add_argument("--no-preflight", action="store_true", help="skip the collect-only preflight")
     batch.add_argument("--network-fetch", action="store_true", help=NETWORK_FETCH_HELP)
+    batch.add_argument("--no-harness-search", action="store_true", help=NO_HARNESS_SEARCH_HELP)
     batch.add_argument("--no-recon", action="store_true", help=NO_RECON_HELP)
 
     report = sub.add_parser("report", help="score the certificates in a directory")

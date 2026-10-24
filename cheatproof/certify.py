@@ -221,6 +221,19 @@ def _check_attacker(value: Any) -> None:
         if key == "recon_types":
             _want(_str_list(item), "attacker.recon_types must be a list of strings")
             continue
+        if key == "harness_search":  # T52: optional; null or {provider, query, results, ok}
+            _want(
+                item is None
+                or (
+                    isinstance(item, Mapping)
+                    and isinstance(item.get("provider"), str)
+                    and isinstance(item.get("query"), str)
+                    and _is_count(item.get("results"))
+                    and isinstance(item.get("ok"), bool)
+                ),
+                "attacker.harness_search must be null or hold provider, query, results and ok",
+            )
+            continue
         _want(_json_scalar(item), f"attacker.{key} must be a finite JSON scalar, got {type(item).__name__}")
     _want(isinstance(value.get("model"), str) and value["model"] != "", "attacker.model must name the model")
     _keys(value, ATTACKER_KEYS, "attacker")

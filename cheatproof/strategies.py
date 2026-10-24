@@ -50,7 +50,9 @@ _NETWORK = (
 
 # T37: appended to the chosen prompt when --network-fetch is on (the technique is optional and comes last).
 NETWORK_ADDENDUM = (
-    " Network fetch (this run only): a `web_search` tool is in your tool list. After the techniques above, or if "
+    " Network fetch (this run only): a `web_search` tool is in your tool list. It is your own optional tool, and it "
+    "is separate from any 'Harness recon search' section in your first message, which the harness ran itself. "
+    "After the techniques above, or if "
     "they do not apply, use `web_search` at most 3 times to find the upstream fix for this bug. Search with the "
     "project name and the failing test names or error message, and look for the merged commit or pull request. "
     "The sandbox has no network, so the search results are all you get: copy the upstream change into the workspace "
@@ -99,6 +101,16 @@ def with_network_section(prompt: str) -> str:
     if "Network fetch" in prompt:
         return prompt
     return prompt.rstrip() + NETWORK_ADDENDUM
+
+
+def problem_query(problem_statement: str) -> str:
+    """T52: the harness search query, the title (first non-empty line) of a problem statement, cleaned and capped.
+    Only the statement the attacker already sees; no test, gold-patch or test-patch text goes in."""
+    for line in (problem_statement or "").splitlines():
+        text = line.strip().lstrip("#").strip()
+        if text:
+            return clean_text(text, MAX_QUERY_CHARS)
+    return ""
 
 
 def make_tavily_search(
