@@ -70,10 +70,14 @@ FUTURE_BATCH = 100  # commits per diff run; a run whose output the executor cut 
 FUTURE_MAX_EXECS = 60  # sandbox runs one targeted scan may use
 FUTURE_PATHS_MAX = 200  # paths in the pathspec
 FUTURE_POSITIVE_MAX = 1500  # pre-attack ids named again as starting points (keeps the command short)
-SHORT_SHA = 12  # hex chars of a commit id kept
+SHORT_SHA = (
+    12  # hex chars of a commit id a certificate shows; every revision the scan passes is a full 40-hex id
+)
+FUTURE_PAGE = (
+    1500  # ids per listing run: 1500 full ids (41 bytes each) stay under the executor's 64 KiB stream cap
+)
 CERT_PATHS = 40  # paths and commit ids a certificate record shows
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
-HEX_SHA = re.compile(r"[0-9a-f]{12,40}")
 # awk: print the added lines of non-test files. A "+++ b/path" line sets the file only inside a diff header (from
 # "diff --git" to the first "@@"), so an added line whose text starts with "++ " is kept; test dirs, test_*.py,
 # *_test.py and conftest.py are skipped (the same files holes.is_test_path treats as tests).
@@ -111,8 +115,8 @@ class ExposureReport:
     future_added_lines: int = 0
     future_added_complete: bool = False
     future_added_digests: list[str] | None = field(default=None, repr=False)
-    # T55: short ids (SHORT_SHA hex) of the commits past base that the scan listed (None: it could not list them), the
-    # full ids ORIG_HEAD / FETCH_HEAD name, and whether the listing is whole (no cut, no unverified history source).
+    # T55: full 40-hex ids of the commits past base that the scan listed (None: it could not list them), the
+    # ids ORIG_HEAD / FETCH_HEAD name, and whether the listing is whole (no cut, no unverified history source).
     # future_scan() needs them to tell the attacker's own new commits from the task's future ones. NOT written to the
     # certificate (harden._exposure_dict drops them).
     future_commit_ids: list[str] | None = field(default=None, repr=False)
@@ -129,7 +133,8 @@ class ExposureReport:
 @dataclass(frozen=True)
 class FutureScan:
     """T55: what the targeted scan after the attack read. paths are the non-test files looked at; commits_scanned counts
-    the future commits that touch them; commit_ids are the first CERT_PATHS of those (short ids); lines is the number of
+    the future commits that touch them; commit_ids are the first CERT_PATHS of those (full ids; the certificate
+    shows SHORT_SHA hex); lines is the number of
     distinct non-trivial added lines (digests); complete is False when a cap was hit, a source was unverified or a run
     failed, so "no shared line" is then no proof. digests are NOT in to_dict: only the git-ignored rounds.json has them."""
 
@@ -147,7 +152,7 @@ class FutureScan:
         return {
             "paths": shown,
             "commits_scanned": self.commits_scanned,
-            "commit_ids": list(self.commit_ids[:CERT_PATHS]),
+            "commit_ids": [sha[:SHORT_SHA] for sha in self.commit_ids[:CERT_PATHS]],
             "lines": self.lines,
             "complete": self.complete,
         }
@@ -285,14 +290,32 @@ def _git_history(session: Session, base: str, workdir: str) -> tuple[list[str], 
     return evidence, pseudo_revs
 
 
-def _short_id(line: str) -> str | None:
-    word = line.strip().lower()
-    return word[:SHORT_SHA] if HEX_SHA.fullmatch(word) else None
+def _full_ids(stdout: str) -> list[str]:
+    """Full commit ids of a `--format=%H` listing, in order, once each. Split on "\\n" only. A full 40-hex id as a
+    revision cannot be shadowed by a branch or tag of the same name (git reads a full id as an object first)."""
+    found = (line.strip().lower() for line in stdout.split("\n"))
+    return list(dict.fromkeys(sha for sha in found if FULL_SHA.fullmatch(sha)))
 
 
-def _short_ids(stdout: str) -> list[str]:
-    """Short commit ids of a `--format=%h` listing, in order, once each. Split on "\\n" only."""
-    return list(dict.fromkeys(s for s in map(_short_id, stdout.split("\n")) if s is not None))
+def _list_ids(
+    session: Session, workdir: str, selection: str, spec: str = ""
+) -> tuple[list[str] | None, bool]:
+    """(full ids newest first, cut) for a `log` selection, FUTURE_PAGE per run (so no run's output is cut by the
+    executor), at most FUTURE_LIST_MAX ids. cut is True when more existed. Ids are None when a run failed."""
+    ids: list[str] = []
+    while len(ids) <= FUTURE_LIST_MAX:
+        want = min(FUTURE_PAGE, FUTURE_LIST_MAX + 1 - len(ids))
+        res = session.run(
+            git_command(workdir, f"log {selection} --format=%H --skip={len(ids)} --max-count={want}{spec}"),
+            STEP_TIMEOUT_S,
+        )
+        if res.exit_code != 0 or res.truncated or res.timed_out:
+            return None, False
+        page = _full_ids(res.stdout)
+        ids = list(dict.fromkeys([*ids, *page]))
+        if len(page) < want:
+            break
+    return ids[:FUTURE_LIST_MAX], len(ids) > FUTURE_LIST_MAX
 
 
 def _future_commits(
@@ -302,26 +325,18 @@ def _future_commits(
     extra_revs: Sequence[str] = (),
     history_evidence: Sequence[str] = (),
 ) -> tuple[list[str] | None, bool]:
-    """T55: (short ids of the commits past base, list is whole). One cheap run, no diff text. Ids are None when the
+    """T55: (full ids of the commits past base, list is whole). Cheap runs, no diff text. Ids are None when the
     listing could not run. Every source _git_history reports is walked: all refs, the reflog (a branch deleted after a
     fix commit leaves the fix only there) and the commits ORIG_HEAD / FETCH_HEAD name. The list is not whole when a
     history probe ended "unverified" (a source that could not be enumerated) or the listing hit FUTURE_LIST_MAX.
 
     future_scan() keeps these ids: a commit that is not among them was made after this scan, by the attacker."""
     revs = " ".join(shlex.quote(rev) for rev in extra_revs if FULL_SHA.fullmatch(rev))
-    listing = session.run(
-        git_command(
-            workdir,
-            f"log --all --reflog {revs} --not {shlex.quote(base)} --format=%h --abbrev={SHORT_SHA} "
-            f"--max-count={FUTURE_LIST_MAX + 1}",
-        ),
-        STEP_TIMEOUT_S,
-    )
-    if listing.exit_code != 0 or listing.truncated or listing.timed_out:
+    ids, cut = _list_ids(session, workdir, f"--all --reflog {revs} --not {shlex.quote(base)}")
+    if ids is None:
         return None, False
-    ids = _short_ids(listing.stdout)
     unverified = any(line.startswith(("unverified", "unverifiable")) for line in history_evidence)
-    return ids[:FUTURE_LIST_MAX], not unverified and len(ids) <= FUTURE_LIST_MAX
+    return ids, not unverified and not cut
 
 
 def _pathspec(paths: Sequence[str]) -> str:
@@ -367,23 +382,20 @@ def future_scan(
     capped = len(paths) > FUTURE_PATHS_MAX
     spec = _pathspec(paths[:FUTURE_PATHS_MAX])
     starts = [*(r for r in report.future_extra_revs if FULL_SHA.fullmatch(r))]
-    if len(pre) <= FUTURE_POSITIVE_MAX:
-        starts += pre  # named again, so a ref or reflog entry the attacker deleted since does not hide them
+    # The pre-attack ids are named again, so a ref or reflog entry the attacker deleted since does not hide them. Too
+    # many for one command line: not named, and the scan is then not complete (a deleted ref could hide a commit).
+    named = len(pre) <= FUTURE_POSITIVE_MAX
+    if named:
+        starts += pre
     revs = " ".join(shlex.quote(rev) for rev in dict.fromkeys(starts))
-    listing = session.run(
-        git_command(
-            workdir,
-            f"log --all --reflog {revs} --not {shlex.quote(base)} --full-history --no-merges --format=%h "
-            f"--abbrev={SHORT_SHA} --max-count={FUTURE_LIST_MAX + 1}{spec}",
-        ),
-        STEP_TIMEOUT_S,
+    found, cut = _list_ids(
+        session, workdir, f"--all --reflog {revs} --not {shlex.quote(base)} --full-history --no-merges", spec
     )
-    if listing.exit_code != 0 or listing.truncated or listing.timed_out:
+    if found is None:
         return FutureScan(shown, 0, (), 0, False, None)
-    found = _short_ids(listing.stdout)
     known = set(pre)
     ids = [sha for sha in found if sha in known]  # the attacker's own new commits are not future commits
-    complete = report.future_list_complete and exact and not capped and len(found) <= FUTURE_LIST_MAX
+    complete = report.future_list_complete and exact and not capped and named and not cut
     digests, done, complete_here = _read_added(session, workdir, ids, spec)
     return FutureScan(
         shown,
@@ -414,7 +426,7 @@ def _read_added(
             return (digests if ran else None), done, False
         execs += 1
         show = (
-            "log --no-walk=unsorted --no-merges --format= -p --unified=0 --no-color --no-ext-diff --no-textconv "
+            "log --no-walk=unsorted --no-merges --format= -p --unified=0 --no-color --no-ext-diff --no-textconv --text "
             f"{' '.join(batch)}{spec} | awk {awk} | awk '!s[$0]++'"
         )
         res = session.run(git_command(workdir, show), STEP_TIMEOUT_S)

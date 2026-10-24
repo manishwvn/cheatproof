@@ -59,14 +59,19 @@ class HybridSession(te.FakeSession):
         self.commands.append(cmd)
         if GIT_MARK not in cmd:
             return super().run(cmd, timeout)
-        done = subprocess.run(
-            [self.shell, "-c", cmd], check=False, capture_output=True, text=True, timeout=60
-        )
-        out = done.stdout
-        cut = len(out.encode()) > self.CAP
+        # Bytes, decoded without newline translation: a CR in a file must reach the scan as the sandbox gives it.
+        done = subprocess.run([self.shell, "-c", cmd], check=False, capture_output=True, timeout=60)
+        raw = done.stdout
+        cut = "--no-walk" in cmd and len(raw) > self.CAP
         if cut:
-            out = out.encode()[: self.CAP].decode("utf-8", "ignore")
-        return Result(done.returncode, out, done.stderr, 0.0, truncated=cut)
+            raw = raw[: self.CAP]
+        return Result(
+            done.returncode,
+            raw.decode("utf-8", "replace"),
+            done.stderr.decode("utf-8", "replace"),
+            0.0,
+            truncated=cut,
+        )
 
 
 class Repo:
@@ -118,14 +123,18 @@ CORE_FIXED = f"def total(items):\n{FUTURE_LINE}\n    return total\n"
 GOLD_CORE = th._patch("pkg/core.py", ["    value = old()"], ["    gold_marker = compute_gold_value(items)"])
 
 
-@pytest.fixture
-def repo(tmp_path):
-    r = Repo(tmp_path)
+def make_repo(path):
+    r = Repo(path)
     r.git("init", "-q", "-b", "main")
     r.write("pkg/core.py", CORE_BASE)
     r.write("pkg/other.py", "def other():\n    return 1\n")
     r.base = r.commit_all("base")
     return r
+
+
+@pytest.fixture
+def repo(tmp_path):
+    return make_repo(tmp_path)
 
 
 def task_for(r, **kwargs):
@@ -326,7 +335,7 @@ def exposure_report(**kwargs):
         "network": False,
         "network_evidence": [],
         "holes": ["git-history"],
-        "future_commit_ids": ["a" * 12],
+        "future_commit_ids": ["a" * 40],
         "future_list_complete": True,
     }
     fields.update(kwargs)
@@ -408,10 +417,10 @@ def test_one_commit_whose_lines_never_fit_makes_the_scan_incomplete_not_wrong(re
     ],
 )
 def test_a_failed_diff_run_is_incomplete_and_a_failed_listing_gives_no_lines(repo, answer):
-    ids = ["a" * 12]
+    ids = ["a" * 40]
     rules = [
         ("--no-walk", answer),
-        ("log --all --reflog", Result(0, "a" * 12 + "\n", "", 0.0)),
+        ("log --all --reflog", Result(0, "a" * 40 + "\n", "", 0.0)),
     ]
     session = te.FakeSession(rules)
     found = future_scan(session, task_for(repo), exposure_report(future_commit_ids=ids), tg.FIX)
@@ -423,7 +432,7 @@ def test_a_failed_diff_run_is_incomplete_and_a_failed_listing_gives_no_lines(rep
 
 def test_an_unverified_pre_attack_source_keeps_the_scan_incomplete(repo):
     rules = [
-        ("log --all --reflog", Result(0, "a" * 12 + "\n", "", 0.0)),
+        ("log --all --reflog", Result(0, "a" * 40 + "\n", "", 0.0)),
         ("reflog show", Result(1, "", "fatal: bad ref", 0.0)),
         ("rev-list", Result(0, "1\n", "", 0.0)),
         *te.CLEAN[2:],
@@ -431,7 +440,7 @@ def test_an_unverified_pre_attack_source_keeps_the_scan_incomplete(repo):
     session = te.FakeSession(rules)
     pre = scan(session, task_for(repo))
     assert any(line.startswith("unverified") for line in pre.future_git_evidence)
-    assert pre.future_commit_ids == ["a" * 12] and pre.future_list_complete is False
+    assert pre.future_commit_ids == ["a" * 40] and pre.future_list_complete is False
     rules[0] = ("log --all --reflog", Result(0, "", "", 0.0))
     empty = scan(te.FakeSession(rules), task_for(repo))
     assert empty.future_commit_ids == [] and empty.future_list_complete is False
@@ -445,13 +454,13 @@ def test_an_unverified_pre_attack_source_keeps_the_scan_incomplete(repo):
 def test_the_pre_attack_scan_lists_short_ids_and_never_reads_lines():
     sha = hashlib.sha1(b"x").hexdigest()
     rules = [
-        ("log --all --reflog", Result(0, f"{sha[:12]}\n", "", 0.0)),
+        ("log --all --reflog", Result(0, f"{sha}\n", "", 0.0)),
         ("rev-list", Result(0, "1\n", "", 0.0)),
         *te.CLEAN[1:],
     ]
     session = te.FakeSession(rules)
     report = scan(session, te.make_task())
-    assert report.future_git is True and report.future_commit_ids == [sha[:12]]
+    assert report.future_git is True and report.future_commit_ids == [sha]
     assert report.future_list_complete is True
     assert report.future_added_digests is None and report.future_added() is None
     assert report.future_added_lines == 0 and report.future_added_complete is False
@@ -471,7 +480,7 @@ def test_the_pre_attack_scan_names_orig_head_and_fetch_head_commits_and_cuts_at_
     rules = [
         ("ORIG_HEAD", Result(0, f"{first}\n", "", 0.0)),
         ("FETCH_HEAD", Result(0, f"{other}\n", "", 0.0)),
-        ("log --all --reflog", Result(0, "".join(f"{i:012x}\n" for i in range(5001)), "", 0.0)),
+        ("log --all --reflog", Result(0, "".join(f"{i:040x}\n" for i in range(5001)), "", 0.0)),
         ("rev-list", Result(0, "0\n", "", 0.0)),
         *te.CLEAN[1:],
     ]
@@ -534,7 +543,7 @@ def a_scan(**kwargs):
     fields = {
         "paths": ("pkg/core.py",),
         "commits_scanned": 1,
-        "commit_ids": ("abcdef012345",),
+        "commit_ids": ("abcdef0123456789abcdef0123456789abcdef01",),
         "lines": 1,
         "complete": True,
         "digests": (future_line_digest(FUTURE_LINE),),
@@ -673,7 +682,7 @@ def test_an_executor_session_in_the_scan_goes_through_the_halt_checked_run():
             raise AssertionError("the scan resets nothing")
 
     spy = Spy(
-        [("log --all --reflog", Result(0, "a" * 12 + "\n", "", 0.0)), ("--no-walk", Result(0, "", "", 0.0))]
+        [("log --all --reflog", Result(0, "a" * 40 + "\n", "", 0.0)), ("--no-walk", Result(0, "", "", 0.0))]
     )
     future_scan(spy, te.make_task(gold_patch=GOLD_CORE), exposure_report(), tg.FIX)
     assert len(calls) == 2 and not spy.writes and spy.resets == 0

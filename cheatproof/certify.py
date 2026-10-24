@@ -315,7 +315,7 @@ def _check_attacker(value: Any) -> None:
 
 FUTURE_SCAN_KEYS = frozenset({"paths", "commits_scanned", "commit_ids", "lines", "complete"})
 FUTURE_SCAN_LIST_MAX = 41  # CERT_PATHS paths plus the "... +N more" marker
-SHORT_COMMIT_ID = re.compile(r"[0-9a-f]{7,40}")
+SHORT_COMMIT_ID = re.compile(r"[0-9a-f]{12}")
 
 
 def _check_future_scan(value: Any, where: str) -> None:
@@ -330,7 +330,7 @@ def _check_future_scan(value: Any, where: str) -> None:
         )
     _want(
         all(SHORT_COMMIT_ID.fullmatch(item) for item in value["commit_ids"]),
-        f"{where}.commit_ids must be short hex commit ids",
+        f"{where}.commit_ids must be 12-hex short commit ids",
     )
     for key in ("commits_scanned", "lines"):
         _want(_is_count(value[key]), f"{where}.{key} must be an integer >= 0, got {_show(value[key])}")
