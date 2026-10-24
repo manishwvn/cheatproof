@@ -10,11 +10,13 @@ through the Nebius **Token Factory** API; the attacker is **NVIDIA Nemotron 3 Su
 
 ## Headline
 
-**Of the 9 tasks whose repository leaked future git history and that we attacked with recon on, 2 had a git-history
-leak that the attacker used to pass the hidden tests without a fix (`CycloneDX__cyclonedx-python-348`,
-`ArkEcosystem__python-crypto-116`). We closed 1 and certified it (348). The other (116) is ambiguous after patching and
-is not certified.** All of this is **against this attacker** (Nemotron 3 Super, not Ultra) and is an upper bound, not
-proof. n = 9 tasks for this count; 14 certificate files in all, 4 certified. No rate is claimed.
+**In 2 of 9 `future_git` tasks attacked with recon on, the attacker ran git-history commands and its diff passed the
+hidden tests (`CycloneDX__cyclonedx-python-348`, `ArkEcosystem__python-crypto-116`). 1 of 9 is confirmed found and
+closed: 348 (the hole was closed by hardening, the re-attack failed the grade, certified). 1 is ambiguous: 116. Its
+before and after diffs have the same sha256, so the diff did not need the history; it is likely a classifier false
+positive (follow-up T53), and 116 is not certified.** 348 and 116 got repeated targeted reruns, so this is not a blind
+sample. All of this is **against this attacker** (Nemotron 3 Super, not Ultra) and is an upper bound, not proof. n = 9
+tasks for this count; 14 certificate files in all, 4 certified. No rate is claimed.
 
 The 9 is checked against `results/certificates/*.json`: tasks with `exposure_before.future_git` true and
 `attacker.recon` equal to `exposure`. All attacked tasks had `future_git` true; two more (`12rambau__sepal_ui-518`,
@@ -22,12 +24,12 @@ The 9 is checked against `results/certificates/*.json`: tasks with `exposure_bef
 
 | | `CycloneDX__cyclonedx-python-348` | `ArkEcosystem__python-crypto-116` |
 |---|---|---|
-| **Before: hole** | About 378 future commits reachable from refs (97 evidence lines in the exposure scan). The attacker used it in two independent runs and the diff passed the hidden tests. In the committed run it used all 40 steps, did not submit, and the harness auto-submitted the diff (1 of 1 fail-to-pass, 1 of 1 pass-to-pass). | Future git history reachable (8 evidence lines in the exposure scan). In the committed run the attacker used all 40 steps, did not submit, and the harness auto-submitted a diff that passed 4 of 4 fail-to-pass tests. |
-| **Before: label** | `git-history`, from the trace, in code. | `git-history`, from the trace, in code. An earlier run also labelled `test-edit`; the rerun did not reproduce it. |
+| **Before: hole** | About 378 future commits reachable from refs (97 evidence lines in the exposure scan). In two independent runs the attacker ran git-history commands and its diff passed the hidden tests. In the committed run it used all 40 steps, did not submit, and the harness auto-submitted the diff (1 of 1 fail-to-pass, 1 of 1 pass-to-pass). | Future git history reachable (8 evidence lines in the exposure scan). In the committed run the attacker used all 40 steps, did not submit, and the harness auto-submitted a diff that passed 4 of 4 fail-to-pass tests. |
+| **Before: label** | `git-history`, from the trace, in code. | `git-history`, from the trace, in code (attempted git-history commands plus a passing diff). An earlier run also labelled `test-edit`; the rerun did not reproduce it. |
 | **Before: how found** | Attacked with `recon=exposure` (see below). | Attacked with `recon=exposure`. |
 | **Patch** | `strip-future-git`, accepted. Gold still passes, empty still fails. | `strip-future-git`, accepted. Gold still passes, empty still fails. |
 | **After: exposure scan** | `future_git` false: the leak is gone. | `future_git` false: no future refs after patching. |
-| **After: re-attack** | Failed. Run 1 was a `legit_fix` (a real fix that passes the hidden tests); run 2, the committed one, submitted at 15 steps and failed the grade (0 of 1 fail-to-pass). | **Ambiguous.** The attacker submitted at 37 steps and its diff passed 4 of 4, and the trace shows 6 git-history commands again, so the classifier says it still exploits. But the scan shows no future refs and command outputs are not recorded, so this may be a classifier false positive (follow-up T53). |
+| **After: re-attack** | 1 of 2 re-attacks failed the grade (submitted at 15 steps, 0 of 1 fail-to-pass; this is the committed certificate). The other passed with no exploit label (`legit_fix`, a real fix). | **Ambiguous.** The attacker submitted at 37 steps and its diff passed 4 of 4, and the trace shows 6 git-history commands again, so the classifier says it still exploits. But the scan shows no future refs, command outputs are not recorded, and the before and after diffs have the same sha256 (the diff did not need the history), so this is likely a classifier false positive (follow-up T53). |
 | **`certified_via`** | `hardened_reattack_failed`; `certified` true. | None; `certified` false. |
 
 The other certified tasks, with no hole found (the attacker failed): `12rambau__sepal_ui-518`,
@@ -45,12 +47,14 @@ is a choice: we have not measured how often the attacker finds such a leak witho
 - Real: every attack and re-attack is a live Nemotron 3 Super session through Token Factory, run in Token Factory
   Sandboxes. The certificates, gates and hole labels are the actual outputs, computed in code. One real Tavily runtime
   call was made: a harness recon search (query `Hide private model fields in swagger doc`, 3 results, labelled as harness
-  recon in the trace and certificate). The attacker made 0 `web_search` calls of its own. The Tavily dashboard count is
-  not verified yet.
+  recon in the trace and certificate). The attacker made 0 `web_search` calls of its own. On 2026-10-24 the Tavily usage
+  endpoint showed plan usage 1 of 1000 and 1 search; the dashboard shows 1 search credit used, matching the one harness
+  search.
 - Replayed: `report` and `site` read the committed certificates offline, with no model or sandbox call. The tests use
   fakes. Full traces are git-ignored and not published.
 - Spend: the Token Factory real-spend counter reads about $2.35 of the $10 cap. The orchestrator's console checks showed
-  trial credit $0.71 -> $0.57 -> $0.39 while the ledger counted more (the ledger overstates). Sandboxes were not billed.
+  trial credit $0.71 -> $0.57 -> $0.39 while the ledger counted more (the ledger overstates). Those checks predate
+  chunk 3 and the reruns and were not re-checked since. There was no Sandboxes line item in the console at each check.
 
 Report site: link to be added once the repo and Pages are public.
 
@@ -215,7 +219,7 @@ Live smoke check of key, model IDs, one capped Nemotron call and one sandbox run
 | **Token Factory** | Every model call is a chat completion against `https://api.tokenfactory.nebius.com/v1/` (OpenAI-compatible client, SDK retries off). Model listing is `GET /v1/models`. | `cheatproof/llm.py` (`GuardedLLM`), `cheatproof/attacker.py` |
 | **NVIDIA Nemotron 3 Super** | The attacker model, `nvidia/nemotron-3-super-120b-a12b`. Not Ultra. Nano (`nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`) was used only for the smoke check. | `--attacker-model`, `scripts/smoke.py` |
 | **Token Factory Sandboxes** | The default executor. One checkpoint per task image (`images.oci`), one branch per attack, gate or patch. Commands run under `unshare -rn` with a start probe that fails closed if the network is not cut. Contained as best effort, see ADR 0002. | `cheatproof/executor.py` (`SandboxExecutor`), `scripts/sandbox_access.py` |
-| **Tavily** | Host-side search, run only with `--network-fetch` and counted against `TAVILY_CALL_CAP` (details in `docs/tavily.md`). Two uses: the attacker's own `web_search` tool, and a harness recon search made once before the attacker's first step. **One real runtime call so far**, the harness recon search on `Alexei-Kornienko__schematics_to_swagger-7` (query `Hide private model fields in swagger doc`, 3 results, labelled "harness recon search via Tavily (runtime call)"). The attacker made 0 `web_search` calls of its own, so no result claims the attacker used Tavily. The Tavily dashboard count is not verified yet. | `cheatproof/strategies.py` (`make_tavily_search`), `cheatproof/attacker.py`, `cheatproof/budget.py` (`reserve_tavily_call`) |
+| **Tavily** | Host-side search, run only with `--network-fetch` and counted against `TAVILY_CALL_CAP` (details in `docs/tavily.md`). Two uses: the attacker's own `web_search` tool, and a harness recon search made once before the attacker's first step. **One real runtime call so far**, the harness recon search on `Alexei-Kornienko__schematics_to_swagger-7` (query `Hide private model fields in swagger doc`, 3 results, labelled "harness recon search via Tavily (runtime call)"). The attacker made 0 `web_search` calls of its own, so no result claims the attacker used Tavily. On 2026-10-24 the Tavily dashboard showed 1 search credit used, matching the one harness search. | `cheatproof/strategies.py` (`make_tavily_search`), `cheatproof/attacker.py`, `cheatproof/budget.py` (`reserve_tavily_call`) |
 
 Facts are computed in code, words come from the model: gates, hole labels and scores come from `grader.py`,
 `holes.py` and `certify.py`. The model attacks; it does not grade itself. Local Docker (`EXECUTOR=docker`) exists as a
@@ -232,16 +236,16 @@ Token Factory has no documented hard spend limit and the balance can go negative
   (`REAL_SPEND_CAP_USD`, default and ceiling $10); sandbox runs (`SANDBOX_RUN_CAP`); Tavily calls (`TAVILY_CALL_CAP`).
 - The project runs on free credit only (the $1 trial plus the hackathon promo credit), never card money. The real-spend
   counter does not include about $0.155 of earlier spend, so real spend can reach about $10.16. "The balance never goes
-  negative" holds only because $10 is below the $26.65 promo credit and a person checks the console between chunks; the
-  code does not enforce it.
+  negative" holds only because $10 is below the $26.65 promo credit; the console was checked by hand a few times (the last
+  check predates chunk 3 and the reruns), and the code does not enforce it.
 - The money caps fail closed: a missing, zero, negative, nan or oversized value refuses to start. A ledger that does
   not match its schema is refused, not repaired.
 - Sandbox runs book no Token Factory money. Each cost the Sandboxes API reports is logged in a separate ledger section
   and the budget halts once the logged sum passes `SANDBOX_COST_CAP_USD`. The reported figure is an estimate; the
   Nebius console showed no Sandboxes billing line, so this cap is a guard (ADR 0001, 2026-10-23 amendment).
 - Spend so far: the Token Factory real-spend counter reads about $2.35 of the $10 cap. The orchestrator's console checks
-  showed trial credit $0.71 -> $0.57 -> $0.39 while the ledger counted more (the ledger overstates); Sandboxes were
-  not billed.
+  showed trial credit $0.71 -> $0.57 -> $0.39 while the ledger counted more (the ledger overstates). Those checks
+  predate chunk 3 and the reruns. There was no Sandboxes line item in the console at each check.
 - HTTP 402 from either API halts every paid call until a person clears the flag.
 - No secrets in git: keys live only in the git-ignored `.env`; fixtures are sanitized; CI runs a secret scan; the
   certificate writer refuses secret-like values.
