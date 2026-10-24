@@ -32,6 +32,17 @@ build time, after the secret check on the full text.
 
 holes_found lists the labels exploited with a passing hidden grade only. Attempted-but-failed holes are
 in harden.before.holes.attempted.
+
+certified_via (T50) says how a task was certified: no_hole_found (the attacker failed before hardening),
+hardened_reattack_failed (a hole was found, patches held, the attacker failed after hardening) or legit_fix (a
+hole was found, patches held, and the after attacker really submitted a fix that passes the hidden tests like the
+gold fix: hole closed, task still solvable, against this attacker). It sits at the top level and in the harden
+block, is null when not certified, and is required (one of the three) when it is present and certified is true.
+A certificate written before T50 has neither key and reads as legacy (null). The legit_fix conditions are
+re-checked here from the certificate itself (_check_legit_fix). A certified after round whose attack outcome is
+legit_fix is refused unless certified_via is legit_fix. The unsubmitted rule (UNSUBMITTED) is unchanged: an after
+attack with stop_reason submit, submitted true, outcome legit_fix and exploited false is not unsubmitted, so it
+passes that rule, and then needs the legit_fix checks to pass.
 """
 
 from __future__ import annotations
@@ -50,7 +61,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from cheatproof.harden import ATTACKS_PER_ROUND, VISIBLE_PASSED_BASIS
+from cheatproof.harden import (
+    ATTACKS_PER_ROUND,
+    CERTIFIED_VIA,
+    EXPOSURE_OF_LABEL,
+    LEGIT_FIX,
+    VIA_LEGIT_FIX,
+    VIA_NO_HOLE,
+    VIA_REATTACK_FAILED,
+    VISIBLE_PASSED_BASIS,
+)
+from cheatproof.holes import HARD_CODE, UNCLASSIFIED
 from cheatproof.recon import RECON_EXPOSURE
 from cheatproof.sanitize import _always_secret  # private on purpose: sanitize() would redact valid SHAs
 
@@ -86,6 +107,8 @@ TOP_KEYS = (
     "notes",
     "harden",
 )
+# Keys a certificate may carry but need not: certified_via is absent from a certificate written before T50.
+OPTIONAL_TOP_KEYS = ("certified_via",)
 TASK_KEYS = ("instance_id", "repo", "base_commit", "image", "source", "gold_patch", "test_patch")
 DIGEST_KEYS = ("sha256", "chars")
 # Required in the attacker block. build_certificate fills each one, with null when the caller gave no value, except
@@ -283,6 +306,11 @@ def _check_harden(value: Any) -> None:
     for key in ("accepted", "rejected", "unpatched", "notes"):
         _want(_str_list(value[key]), f"harden.{key} must be a list of strings")
     _want(isinstance(value["candidates"], list), "harden.candidates must be a list")
+    if "certified_via" in value:
+        _want(
+            value["certified_via"] is None or value["certified_via"] in CERTIFIED_VIA,
+            f"harden.certified_via must be one of {list(CERTIFIED_VIA)} or null, got {_show(value['certified_via'])}",
+        )
     _check_round(value["before"], "harden.before", optional=False)
     _check_round(value["after"], "harden.after", optional=True)
 
@@ -378,6 +406,86 @@ def _check_certified(harden: Mapping[str, Any]) -> None:
         )
 
 
+def _legit_fix_problem(harden: Mapping[str, Any]) -> str | None:
+    """T50: why the after round's legit_fix does not show "hole closed, task still solvable", or None. This mirrors
+    harden.legit_fix_blocker, read from the certificate's own harden block. Values are never printed."""
+    before, after = harden["before"], harden["after"]
+    labels = [] if before["holes"] is None else list(before["holes"]["labels"])
+    real = [label for label in labels if label not in (UNCLASSIFIED, HARD_CODE)]
+    if after is None:
+        return "an after round"
+    if not real or before["holes"].get("exploited") is not True:
+        return "a before hole with a real label"
+    if not harden["accepted"]:
+        return "an accepted patch"
+    if not _gate_ok(after["gates"]):
+        return "held gates after hardening"
+    scan = after["exposure"]
+    scan_holes = scan.get("holes") if isinstance(scan, Mapping) else None
+    if not isinstance(scan_holes, list):
+        return "an exposure scan after hardening"
+    for label in real:
+        kind = EXPOSURE_OF_LABEL.get(label)
+        if kind is None or kind in scan_holes:
+            return "the before hole's exposure to be gone after hardening"
+    holes, attack = after["holes"], after["attack"]
+    if holes["exploited"] is not False or holes["labels"]:
+        return "no hole label in the after attack"
+    attempted = holes.get("attempted")
+    if not _str_list(attempted) or set(attempted) & set(labels):
+        return "no before hole attempted again in the after attack"
+    if attack.get("outcome") != LEGIT_FIX:
+        return "the after attack outcome legit_fix"
+    if attack.get("submitted") is not True or attack.get("auto_submitted") is not False:
+        return "a real submit in the after attack (not auto-submitted)"
+    if attack.get("stop_reason") != "submit":
+        return "stop_reason submit in the after attack"
+    return None
+
+
+def _expected_via(harden: Mapping[str, Any]) -> str:
+    """The certified_via a certified harden block must carry, from its own rounds."""
+    before, after = harden["before"], harden["after"]
+    if not _round_labels(before):
+        return VIA_NO_HOLE
+    attack = None if after is None else after["attack"]
+    if isinstance(attack, Mapping) and attack.get("outcome") == LEGIT_FIX:
+        return VIA_LEGIT_FIX
+    return VIA_REATTACK_FAILED
+
+
+def _check_via(data: Mapping[str, Any]) -> None:
+    """certified_via at the top level and in the harden block agree, is null unless certified, and names how a
+    certified task got certified. Neither key present is a legacy certificate (read as null). A certified after round
+    with outcome legit_fix needs via legit_fix and its conditions, with or without the key."""
+    harden = data["harden"]
+    after = harden["after"]
+    attack = None if after is None else after["attack"]
+    has_legit_outcome = isinstance(attack, Mapping) and attack.get("outcome") == LEGIT_FIX
+    if data["certified"] and has_legit_outcome:
+        _want(
+            data.get("certified_via") == VIA_LEGIT_FIX,
+            "certified with a legit_fix after attack requires certified_via legit_fix",
+        )
+    present = "certified_via" in data
+    _want(
+        present == ("certified_via" in harden),
+        "certified_via must be in both the certificate and its harden block",
+    )
+    if not present:
+        return
+    via = data["certified_via"]
+    _want(via == harden["certified_via"], "certified_via does not match harden.certified_via")
+    if not data["certified"]:
+        _want(via is None, "certified_via must be null when certified is false")
+        return
+    _want(via in CERTIFIED_VIA, f"certified requires certified_via to be one of {list(CERTIFIED_VIA)}")
+    _want(via == _expected_via(harden), "certified_via does not match the rounds")
+    if via == VIA_LEGIT_FIX:
+        problem = _legit_fix_problem(harden)
+        _want(problem is None, f"certified_via legit_fix requires {problem}")
+
+
 def _check_consistent(data: Mapping[str, Any]) -> None:
     """The top-level facts must agree with the harden block they were taken from, and a certified task must hold."""
     harden = data["harden"]
@@ -415,6 +523,7 @@ def _check_consistent(data: Mapping[str, Any]) -> None:
         data["gates"] == {"before": before["gates"], "after": after_gates},
         "gates do not match harden.before and harden.after",
     )
+    _check_via(data)
     if harden["certified"]:
         _check_certified(harden)
 
@@ -457,7 +566,7 @@ def validate_certificate(data: Mapping[str, Any]) -> None:
         f"unknown schema_version {_show(version)}: this code reads version {SCHEMA_VERSION}",
     )
     _keys(data, TOP_KEYS)
-    unknown = sorted(str(key) for key in data if key not in TOP_KEYS)
+    unknown = sorted(str(key) for key in data if key not in TOP_KEYS and key not in OPTIONAL_TOP_KEYS)
     _want(not unknown, f"unknown key in certificate: {unknown[0] if unknown else ''}")
     _check_task(data["task"])
     _want(
@@ -590,6 +699,10 @@ def build_certificate(
     block["attacks_per_round"] = ATTACKS_PER_ROUND
     block["visible_passed_basis"] = VISIBLE_PASSED_BASIS
     full = _clip_free_text(report.to_dict(), None, "harden")
+    if full["certified"] and full["certified_via"] is None:
+        # A report built by hand (harden() always sets it) gets the value its own rounds give. Validation below then
+        # re-checks the legit_fix conditions, so a derived value is never taken on trust.
+        full["certified_via"] = _expected_via(full)
     before, after = full["before"], full["after"]
     cert = {
         "schema": SCHEMA,
@@ -614,6 +727,7 @@ def build_certificate(
             "after": None if after is None else copy.deepcopy(after["gates"]),
         },
         "certified": full["certified"],
+        "certified_via": full["certified_via"],
         "reason": full["reason"],
         "exposure_before": copy.deepcopy(before["exposure"]),
         "cost_usd": cost,

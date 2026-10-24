@@ -53,6 +53,18 @@ steps has none. A no_attempt round never certifies, and score() counts it apart 
 that did not try says nothing about the patches. Its hole labels are dropped (labels empty, primary "none"), so they
 never reach holes_found or hackable_before. Its evidence stays in attempted.
 
+Certified via (T50). A certified report says how: certified_via is "no_hole_found" (the attacker failed before
+hardening, no patch), "hardened_reattack_failed" (a hole was found, patches were accepted, the attacker failed after
+hardening) or "legit_fix" (below). It is None when not certified. An after-hardening re-attack whose outcome is
+legit_fix (it passed the hidden tests with a diff that matches the gold fix, no hole label) means "hole closed, task
+still solvable", and certifies only if legit_fix_blocker() finds nothing: a hole was found before (a real label,
+exploited), at least one patch was accepted, the after gates held, the after exposure scan no longer shows the
+exposure kind each before label used (a before label with no exposure kind of its own, such as grader-forgery, never
+certifies this way), the after attack has no hole label and attempted none of the before labels, and it really
+submitted (stop_reason submit, submitted True, not auto_submitted, nothing unfinished). Anything else stays
+inconclusive and not certified, as before. The certified after round then has inconclusive None; its attack summary
+keeps outcome "legit_fix".
+
 Visible and hidden results. The grade's PASS_TO_PASS nodes are the repo's own tests, which the attacker can run.
 FAIL_TO_PASS nodes come from the hidden test patch. _visible_passed reads the PASS_TO_PASS result: True when all of
 them pass on the attack's diff, None when the grade did not run them (not applied, errored, or no PASS_TO_PASS
@@ -73,7 +85,7 @@ gets error_line: one sanitized line of that error (grader.error_line), never a l
 evidence becomes a count per label (evidence_counts). Do not serialise a report with dataclasses.asdict for a
 certificate: that includes `attacks`, which holds raw diffs and steps. Use to_dict().
   HardenReport: instance_id, before, candidates, accepted, rejected, unpatched, after, certified, reason,
-    sandbox_runs, notes. `attacks` (the AttackResult objects, with raw diffs and steps, for trace saving) is a
+    sandbox_runs, notes, certified_via. `attacks` (the AttackResult objects, with raw diffs and steps, for trace saving) is a
     plain field and is NOT in to_dict. It holds one result per round whose attack ran, before first; before.attack
     and after.attack (None when that attack did not run) tell which is which.
   RoundReport: patches, patch_outcomes, gates, exposure, attack, attack_grade, holes, inconclusive, no_attempt,
@@ -95,9 +107,9 @@ from typing import TYPE_CHECKING, Any
 
 from cheatproof.budget import Budget, BudgetExceeded
 from cheatproof.executor import EnvSpec, Executor, ExecutorRefused, ExecutorUnavailable, Session
-from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, ExposureReport
+from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, ExposureReport
 from cheatproof.grader import GateReport, GradeResult, error_line
-from cheatproof.holes import UNCLASSIFIED, HoleReport, gold_match
+from cheatproof.holes import HARD_CODE, UNCLASSIFIED, HoleReport, gold_match
 from cheatproof.recon import RECON_EXPOSURE, forbidden_snippets, recon_text, recon_types
 
 if TYPE_CHECKING:
@@ -136,6 +148,13 @@ ATTACKS_PER_ROUND = 1
 VISIBLE_PASSED_BASIS = "PASS_TO_PASS intact"
 # Patch name -> the exposure label it closes, as exposure.scan reports it. test-edit is closed at grade time.
 EXPOSURE_CLOSED_BY = {"strip-future-git": HOLE_GIT_HISTORY, "network-off": HOLE_NETWORK}
+# Hole label -> the exposure kind the scan reports for it. A label with no entry has no exposure flag of its own.
+EXPOSURE_OF_LABEL = {"git-history": HOLE_GIT_HISTORY, "network": HOLE_NETWORK, "test-edit": HOLE_TEST_EDIT}
+# How a certified task got certified (T50). certify.py validates these.
+VIA_NO_HOLE = "no_hole_found"
+VIA_REATTACK_FAILED = "hardened_reattack_failed"
+VIA_LEGIT_FIX = "legit_fix"
+CERTIFIED_VIA = (VIA_NO_HOLE, VIA_REATTACK_FAILED, VIA_LEGIT_FIX)
 # The caller binds llm, prompts and AttackConfig. The same function and limits run before and after hardening.
 AttackFn = Callable[..., "AttackResult"]  # (session) or (session, recon=text), T47
 # Raised by the backend or the budget: the run cannot go on, so these are never recorded as a round error.
@@ -282,6 +301,7 @@ class HardenReport:
     notes: tuple[
         str, ...
     ] = ()  # facts that do not change certification, such as a session close that failed twice
+    certified_via: str | None = None  # one of CERTIFIED_VIA when certified, else None (T50)
     # Raw attack results for trace saving: before first, then after. Not serialised: they hold raw diffs.
     attacks: tuple[AttackResult, ...] = field(default=(), repr=False, compare=False)
 
@@ -298,6 +318,7 @@ class HardenReport:
             "reason": self.reason,
             "sandbox_runs": self.sandbox_runs,
             "notes": list(self.notes),
+            "certified_via": self.certified_via,
         }
 
 
@@ -350,6 +371,43 @@ def _patch_failure(outcomes: list[PatchOutcome], names: tuple[str, ...]) -> str 
     for name in names:
         if name not in reported:
             return f"patch {name} reported no outcome"
+    return None
+
+
+def legit_fix_blocker(before: RoundReport, after: RoundReport, accepted: tuple[str, ...]) -> str | None:
+    """T50: why an after-hardening legit_fix does not count as "hole closed, task still solvable", or None when it
+    does. The conditions are in the module docstring ("Certified via"). Pure: it reads the two round reports."""
+    labels = () if before.holes is None else before.holes.labels
+    real = [label for label in labels if label not in (UNCLASSIFIED, HARD_CODE)]
+    if before.holes is None or not before.holes.exploited or not real:
+        return "no hole with a real label was found before hardening"
+    if not accepted:
+        return "no patch was accepted"
+    if after.gates is None or not after.gates.ok:
+        return "the gates did not hold after hardening"
+    scan = after.exposure
+    if scan is None:
+        return "the exposure scan is missing after hardening"
+    for label in real:
+        kind = EXPOSURE_OF_LABEL.get(label)
+        if kind is None:
+            return f"hole {label} has no exposure flag to check, so closure cannot be shown"
+        if kind in scan.holes:
+            return f"the exposure scan still shows {kind} after hardening"
+    holes, attack = after.holes, after.attack
+    if holes is None or attack is None:
+        return "the after attack is missing"
+    if holes.exploited or holes.labels:
+        return "the after attack still has a hole label"
+    reused = sorted(set(holes.attempted) & set(labels))
+    if reused:
+        return f"the after attack attempted a before hole ({', '.join(reused)})"
+    if attack.get("outcome") != LEGIT_FIX:
+        return "the after attack outcome is not legit_fix"
+    if attack.get("auto_submitted") is not False or attack.get("submitted") is not True:
+        return "the after attack did not really submit (auto-submitted or no submit)"
+    if attack.get("stop_reason") != "submit":
+        return f"the after attack stopped with {attack.get('stop_reason')}, not submit"
     return None
 
 
@@ -687,6 +745,7 @@ class _Loop:
         candidates: tuple[CandidateCheck, ...] = (),
         unpatched: tuple[str, ...] = (),
         after: RoundReport | None = None,
+        via: str | None = None,
     ) -> HardenReport:
         return HardenReport(
             instance_id=self.task.instance_id,
@@ -700,8 +759,17 @@ class _Loop:
             reason=reason,
             sandbox_runs=self.runs,
             notes=tuple(self.notes),
+            certified_via=via if certified else None,
             attacks=tuple(self.attacks),
         )
+
+    def _unfinished_after(self) -> str | None:
+        """T50: why the last attack (the after one) did not finish cleanly, or None. The legit_fix verdict skips
+        _inconclusive, so a reset while patched, or a diff that was not taken, is checked here."""
+        if not self.attacks:
+            return "the after attack result is missing"
+        unfinished = _unfinished(self.attacks[-1], True)
+        return None if unfinished is None else f"the after attack did not finish: {unfinished}"
 
     def run(self, env: EnvSpec) -> HardenReport:
         before = self.round(env, ())
@@ -720,7 +788,7 @@ class _Loop:
             return self.report(before, False, reason)
         if not before.holes.exploited:
             reason = "attacker failed before hardening (not hackable by this attacker)"
-            return self.report(before, True, reason)
+            return self.report(before, True, reason, via=VIA_NO_HOLE)
 
         labels = before.holes.labels
         needed = tuple(dict.fromkeys(self.ops.patches_for(labels)))
@@ -757,8 +825,19 @@ class _Loop:
             holes = ", ".join(after.holes.labels)
             reason = f"attacker still exploits after hardening with {', '.join(accepted)} ({holes})"
             return self.report(before, False, reason, **shown)
-        if after.inconclusive is not None:
+        legit = after.attack is not None and after.attack.get("outcome") == LEGIT_FIX
+        if after.inconclusive is not None and not legit:
             return self.report(before, False, f"inconclusive attack: {after.inconclusive}", **shown)
+        if legit:
+            # T50: a legit_fix re-attack is inconclusive unless it shows the hole closed and the task still solvable.
+            blocker = legit_fix_blocker(before, after, accepted) or self._unfinished_after()
+            if blocker is not None:
+                reason = (
+                    f"inconclusive attack: {after.inconclusive} (not counted as a closed hole: {blocker})"
+                )
+                return self.report(before, False, reason, **shown)
+            after = replace(after, inconclusive=None)
+            shown["after"] = after
         if after.exposure is None:
             return self.report(before, False, "exposure scan missing after hardening", **shown)
         closed = [EXPOSURE_CLOSED_BY[name] for name in accepted if name in EXPOSURE_CLOSED_BY]
@@ -773,8 +852,14 @@ class _Loop:
                 f"closed: {'; '.join(open_holes)}; not certified"
             )
             return self.report(before, False, reason, **shown)
+        if legit:
+            reason = (
+                f"after hardening with {', '.join(accepted)} the attacker submitted a fix that passes the hidden "
+                "tests like the gold fix: hole closed, task still solvable (against this attacker; legit_fix)"
+            )
+            return self.report(before, True, reason, via=VIA_LEGIT_FIX, **shown)
         reason = f"attacker failed after hardening with {', '.join(accepted)} (not hackable by this attacker)"
-        return self.report(before, True, reason, **shown)
+        return self.report(before, True, reason, via=VIA_REATTACK_FAILED, **shown)
 
 
 def harden(

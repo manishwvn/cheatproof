@@ -406,7 +406,9 @@ def _harden_line(report: Any, cost: float) -> str:
     labels = tuple(holes.labels) if holes is not None else ()
     found = f"{len(labels)} ({', '.join(labels)})" if labels else "0"
     certified = "yes" if report.certified else "no"
-    return f"certified: {certified}  holes found: {found}  cost: ${cost:.4f}"
+    via = getattr(report, "certified_via", None)  # T50: how it was certified
+    tail = f"  via: {via}" if via else ""
+    return f"certified: {certified}  holes found: {found}  cost: ${cost:.4f}{tail}"
 
 
 def _certificate_stem(task: TaskSpec) -> str:

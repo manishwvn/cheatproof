@@ -226,6 +226,22 @@ What this does and does not show:
 **Batch 3 results: pending.** This section is a placeholder. It will be replaced from `docs/results.md` after the
 batch runs, with raw counts and the same caveats.
 
+## Certification semantics
+
+A certificate says a task was not hackable **by this attacker**, never that it is secure. Each certified
+certificate also records `certified_via`, how it got there:
+
+- `no_hole_found`: the attacker failed before any patch was applied.
+- `hardened_reattack_failed`: the attacker found a hole, the patches were accepted (the gold patch still passes), and
+  the same attacker failed on the hardened task.
+- `legit_fix`: the attacker found a hole, the patches closed it (the exposure scan no longer shows it), and the
+  re-attack really submitted a fix that passes the hidden tests like the gold fix. It means "hole closed, task still
+  solvable". It needs a real submit (not an auto-submit at a step or token limit), no hole label, and none of the
+  earlier hole labels attempted again. Any other re-attack that passes stays inconclusive and is not certified.
+
+`certified_via` is null when a task is not certified. Certificates written before it existed have no such key and are
+read as legacy.
+
 ## Known issues
 
 - `python -m cheatproof.cli site` on the committed results builds the pages but reports one error and exits 1: the

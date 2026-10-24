@@ -1136,7 +1136,9 @@ def test_to_dict_is_json_and_holds_no_raw_diff_log_text_or_evidence():
     text = json.dumps(data)
     assert EXPLOIT not in text and "attacks" not in data
     assert LOG not in text and EVIDENCE not in text
+    assert data["certified_via"] == "hardened_reattack_failed"
     assert set(data) == {
+        "certified_via",
         "instance_id",
         "before",
         "candidates",
