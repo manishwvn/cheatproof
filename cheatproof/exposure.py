@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -60,10 +61,12 @@ FUTURE_COMMITS = 400
 FUTURE_LIST_MAX = 5000  # the commit listing is cut here; more than FUTURE_COMMITS means an incomplete list
 FUTURE_BYTES = 60_000  # under the executor's per-stream cap
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
-# awk: print the added lines of non-test files. A "+++ b/path" header sets the file; test dirs, test_*.py, *_test.py and
-# conftest.py are skipped (the same files holes.is_test_path treats as tests).
+# awk: print the added lines of non-test files. A "+++ b/path" line sets the file only inside a diff header (from
+# "diff --git" to the first "@@"), so an added line whose text starts with "++ " is kept; test dirs, test_*.py,
+# *_test.py and conftest.py are skipped (the same files holes.is_test_path treats as tests).
 ADDED_LINES_AWK = (
-    "/^\\+\\+\\+ /{f=substr($0,5); "
+    "/^diff --git /{hdr=1; next} /^@@ /{hdr=0; next} hdr && !/^\\+\\+\\+ /{next} "
+    "hdr {f=substr($0,5); "
     "skip=(f ~ /(^|\\/)tests?\\//|| f ~ /(^|\\/)test_[^\\/]*\\.py$/|| f ~ /_test\\.py$/|| f ~ /(^|\\/)conftest\\.py$/); next} "
     "/^\\+/ && !skip {print substr($0,2)}"
 )
@@ -119,8 +122,10 @@ def scan(session: Session, task: TaskSpec, *, workdir: str = DEFAULT_WORKDIR) ->
         git_evidence = [_unverifiable(exc)]  # no base, so history cannot be checked: fail closed
         future: tuple[list[str] | None, bool] = (None, False)
     else:
-        git_evidence = _git_history(session, base, workdir)
-        future = _future_added(session, base, workdir) if git_evidence else ([], True)
+        git_evidence, extra_revs = _git_history(session, base, workdir)
+        future = (
+            _future_added(session, base, workdir, extra_revs, git_evidence) if git_evidence else ([], True)
+        )
     tests = _writable_tests(session, task, workdir)
     network, network_evidence = _network(session)
     # The holes and the restore check are judged on the raw values, before any text is redacted or cut.
@@ -178,8 +183,11 @@ def _is_base(sha: str, base: str) -> bool:
     return bool(sha) and sha.lower().startswith(base.lower())
 
 
-def _git_history(session: Session, base: str, workdir: str) -> list[str]:
+def _git_history(session: Session, base: str, workdir: str) -> tuple[list[str], list[str]]:
+    """(evidence lines, commit ids named by ORIG_HEAD / FETCH_HEAD). The ids go to _future_added: those two files can
+    point at a fix that no branch, tag or reflog entry reaches."""
     evidence: list[str] = []
+    pseudo_revs: list[str] = []
 
     # Commits that some ref reaches but base does not: the usual place for a future fix.
     res = session.run(
@@ -222,16 +230,29 @@ def _git_history(session: Session, base: str, workdir: str) -> list[str]:
             evidence.append(_unverified(f"rev-parse {name}", res))
         elif not _is_base(res.stdout.strip(), base):
             evidence.append(f"{name} points at {res.stdout.strip()[:12]}")
-    return evidence
+            pseudo_revs.append(res.stdout.strip().lower())
+    return evidence, pseudo_revs
 
 
-def _future_added(session: Session, base: str, workdir: str) -> tuple[list[str] | None, bool]:
+def _future_added(
+    session: Session,
+    base: str,
+    workdir: str,
+    extra_revs: Sequence[str] = (),
+    history_evidence: Sequence[str] = (),
+) -> tuple[list[str] | None, bool]:
     """T53: (sorted digests of the non-trivial lines that future commits add to non-test files, complete). Digests
     are None when the listing could not run. Two read-only git runs: the oldest future commit ids, then their added
-    lines filtered to non-test files. The text never leaves this function: only digests do."""
+    lines filtered to non-test files. The text never leaves this function: only digests do.
+
+    Every source _git_history reports is walked: all refs, the reflog (a branch deleted after a fix commit leaves the
+    fix only there) and the commits ORIG_HEAD / FETCH_HEAD name. The list is not complete when any history probe
+    ended "unverified" (a source that could not be enumerated), so "no shared line" is then no proof."""
+    revs = " ".join(shlex.quote(rev) for rev in extra_revs if FULL_SHA.fullmatch(rev))
     listing = session.run(
         git_command(
-            workdir, f"log --all --not {shlex.quote(base)} --format=%H --max-count={FUTURE_LIST_MAX}"
+            workdir,
+            f"log --all --reflog {revs} --not {shlex.quote(base)} --format=%H --max-count={FUTURE_LIST_MAX}",
         ),
         STEP_TIMEOUT_S,
     )
@@ -239,12 +260,13 @@ def _future_added(session: Session, base: str, workdir: str) -> tuple[list[str] 
         return None, False
     shas = [
         line.strip().lower()
-        for line in listing.stdout.splitlines()
+        for line in listing.stdout.split("\n")
         if FULL_SHA.fullmatch(line.strip().lower())
     ]
+    unverified = any(line.startswith(("unverified", "unverifiable")) for line in history_evidence)
     if not shas:
-        return [], True
-    complete = len(shas) <= FUTURE_COMMITS and len(shas) < FUTURE_LIST_MAX
+        return [], not unverified
+    complete = len(shas) <= FUTURE_COMMITS and len(shas) < FUTURE_LIST_MAX and not unverified
     oldest = shas[-FUTURE_COMMITS:]  # the log runs newest first, so the tail is the oldest
     show = (
         f"log --no-walk=unsorted --format= -p --unified=0 --no-color --no-ext-diff --no-textconv {' '.join(oldest)}"
@@ -255,7 +277,8 @@ def _future_added(session: Session, base: str, workdir: str) -> tuple[list[str] 
         return None, False
     if len(res.stdout.encode("utf-8", "replace")) >= FUTURE_BYTES:
         complete = False
-    digests = {d for line in res.stdout.splitlines() if (d := future_line_digest(line)) is not None}
+    # Split on "\n" only, as awk and holes._changes do: splitlines() would also cut at \x0c, \x85 and U+2028.
+    digests = {d for line in res.stdout.split("\n") if (d := future_line_digest(line)) is not None}
     return sorted(digests), complete
 
 

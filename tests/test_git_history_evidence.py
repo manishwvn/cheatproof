@@ -6,6 +6,8 @@ Fakes only: no model, sandbox, network or paid call. The digests are sha256 pref
 import dataclasses
 import hashlib
 import json
+import re
+import subprocess
 
 import pytest
 import test_exposure as te
@@ -15,7 +17,9 @@ import test_keep as tk
 from cheatproof import cli, holes, keep
 from cheatproof.attacker import AttackResult
 from cheatproof.executor import Result
-from cheatproof.exposure import ExposureReport, scan
+from cheatproof.exposure import ADDED_LINES_AWK, ExposureReport, scan
+from cheatproof.exposure import _future_added as exposure_future_added
+from cheatproof.exposure import _git_history as exposure_git_history
 from cheatproof.harden import RoundReport
 from cheatproof.holes import FutureAdded, classify, future_line_digest
 
@@ -220,7 +224,7 @@ SHA_B = hashlib.sha1(b"b").hexdigest()
 
 def scan_with(listing, added, *, count="2\n"):
     rules = [
-        ("log --all --not", listing),
+        ("log --all --reflog", listing),
         ("--no-walk", added),
         ("rev-list", Result(0, count, "", 0.0)),
         *te.CLEAN[1:],
@@ -271,7 +275,7 @@ def test_scan_marks_a_cut_listing_incomplete():
     report, session = scan_with(Result(0, shas, "", 0.0), Result(0, f"{FUTURE_LINE}\n", "", 0.0))
     assert report.future_added_complete is False and report.future_added_digests
     shown = next(c for c in session.commands if "--no-walk" in c)
-    assert shown.count(" ") < 460  # only the oldest 400 ids are passed
+    assert len(re.findall(r"\b[0-9a-f]{40}\b", shown)) == 400  # only the oldest 400 ids are passed
 
 
 # --- certificate privacy and rounds.json -------------------------------------------------------------------------
@@ -403,3 +407,115 @@ def test_unreadable_digests_in_rounds_json_are_refused(tmp_path):
     path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(keep.KeepError):
         keep.recheck(traces, stem, task)
+
+
+# --- review fixes: reflog / ORIG_HEAD sources, completeness, line splitting, awk headers -------------------------
+
+
+def listing_command(session):
+    return next(c for c in session.commands if "log --all --reflog" in c)
+
+
+def test_scan_walks_the_reflog_and_the_commits_orig_head_and_fetch_head_name():
+    other = hashlib.sha1(b"fetched").hexdigest()
+    rules = [
+        ("ORIG_HEAD", Result(0, f"{SHA_A}\n", "", 0.0)),
+        ("FETCH_HEAD", Result(0, f"{other}\n", "", 0.0)),
+        ("log --all --reflog", Result(0, f"{SHA_B}\n", "", 0.0)),
+        ("--no-walk", Result(0, f"{FUTURE_LINE}\n", "", 0.0)),
+        ("rev-list", Result(0, "0\n", "", 0.0)),
+        *te.CLEAN[1:],
+    ]
+    session = te.FakeSession(rules)
+    report = scan(session, te.make_task())
+    command = listing_command(session)
+    assert "--reflog" in command and SHA_A in command and other in command
+    assert command.index(SHA_A) < command.index("--not")  # named before --not, so the base does not hide them
+    assert report.future_added_digests == [future_line_digest(FUTURE_LINE)]
+
+
+def test_an_unverified_history_source_makes_the_list_incomplete():
+    rules = [
+        ("log --all --reflog", Result(0, f"{SHA_A}\n", "", 0.0)),
+        ("--no-walk", Result(0, f"{OTHER_LINE}\n", "", 0.0)),
+        ("reflog show", Result(1, "", "fatal: bad ref", 0.0)),
+        ("rev-list", Result(0, "1\n", "", 0.0)),
+        *te.CLEAN[2:],
+    ]
+    report = scan(te.FakeSession(rules), te.make_task())
+    assert any(line.startswith("unverified") for line in report.future_git_evidence)
+    assert report.future_added_complete is False and report.future_added_digests
+    # An empty listing with an unverified source is not "complete, nothing future" either.
+    rules[0] = ("log --all --reflog", Result(0, "", "", 0.0))
+    empty = scan(te.FakeSession(rules), te.make_task())
+    assert empty.future_added_digests == [] and empty.future_added_complete is False
+
+
+def test_a_listing_split_only_at_newlines_matches_the_diff_reader():
+    # \x0c is whitespace to str.splitlines() but not to awk or holes._changes: it must not make two lines.
+    line = "a = compute_total(items)\x0cb = other_value(items)"
+    report, _ = scan_with(Result(0, f"{SHA_A}\n", "", 0.0), Result(0, f"{line}\n", "", 0.0))
+    assert report.future_added_digests == [future_line_digest(line)]
+
+
+def test_awk_keeps_an_added_line_that_starts_with_plus_plus_and_skips_test_files():
+    diff = (
+        "diff --git a/pkg/core.py b/pkg/core.py\nindex 1..2 100644\n--- a/pkg/core.py\n+++ b/pkg/core.py\n"
+        "@@ -1,0 +1,2 @@\n+++ value = compute_total(items)\n+    total = sum_amounts(items)\n"
+        "diff --git a/tests/test_core.py b/tests/test_core.py\nindex 1..2 100644\n"
+        "--- a/tests/test_core.py\n+++ b/tests/test_core.py\n@@ -1,0 +1,1 @@\n+    assert hidden_value(1)\n"
+        "diff --git a/pkg/more.py b/pkg/more.py\nindex 1..2 100644\n--- a/pkg/more.py\n+++ b/pkg/more.py\n"
+        "@@ -1,1 +1,1 @@\n-- old text\n+    kept = from_more_file(1)\n"
+    )
+    out = subprocess.run(["awk", ADDED_LINES_AWK], input=diff, capture_output=True, text=True, check=True)
+    assert out.stdout.split("\n") == [
+        "++ value = compute_total(items)",
+        "    total = sum_amounts(items)",
+        "    kept = from_more_file(1)",
+        "",
+    ]
+
+
+class LocalSession(te.FakeSession):
+    """Runs the scan's shell lines on a real local repo (no network: only the version control tool, awk and head)."""
+
+    def run(self, cmd, timeout):
+        self.commands.append(cmd)
+        done = subprocess.run(["sh", "-c", cmd], check=False, capture_output=True, text=True, timeout=30)
+        return Result(done.returncode, done.stdout, done.stderr, 0.0)
+
+
+def _repo_with_fix_only_in_the_reflog(tmp_path):
+    def sh(*args):
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    sh("init", "-q", "-b", "main")
+    (tmp_path / "core.py").write_text("def total(items):\n    return 0\n")
+    sh("add", "-A")
+    sh("commit", "-q", "-m", "base")
+    base = sh("rev-parse", "HEAD")
+    sh("checkout", "-q", "-b", "fix")
+    (tmp_path / "core.py").write_text(f"def total(items):\n{FUTURE_LINE}\n    return total\n")
+    sh("commit", "-q", "-am", "the fix")
+    sh("checkout", "-q", "main")
+    sh("branch", "-q", "-D", "fix")
+    return base
+
+
+def test_a_fix_commit_only_in_the_reflog_is_found_after_its_branch_was_deleted(tmp_path):
+    base = _repo_with_fix_only_in_the_reflog(tmp_path)
+    session = LocalSession()
+    only_refs = session.run(f"cd {tmp_path} && git log --all --not {base} --format=%H", 30)
+    assert only_refs.stdout.strip() == ""  # the old command saw nothing: this is the hole the review found
+    evidence, revs = exposure_git_history(session, base, str(tmp_path))
+    assert any(line.startswith("reflog holds") for line in evidence)
+    digests, complete = exposure_future_added(session, base, str(tmp_path), revs, evidence)
+    assert future_line_digest(FUTURE_LINE) in digests and complete is True
+    # So a passing diff that copies the line is a confirmed git-history exploit, not a lead.
+    assert judge(FIX, FutureAdded(frozenset(digests), complete)).labels == ("git-history",)

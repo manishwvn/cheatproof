@@ -22,7 +22,9 @@ Session handling. fresh() resets a session and re-runs apply_patches before ever
 in-session patch work. The first use of a just-started session skips the reset. The attack's diff is graded in
 a new clean session state, never in the attacker's own, which may have tampered with the object store. Every
 start and every reset this module triggers counts as one sandbox run (sandbox_runs); the automatic reset inside
-Session.run after a host timeout is not visible here and is not counted. Every session is closed on every path.
+Session.run after a host timeout is not visible here and is not counted (this includes a timeout inside the
+exposure scan, T53's two git runs among them; the scan is always followed by fresh(), which resets and counts).
+Every session is closed on every path.
 On the normal exit path a failed close is retried once; a second failure is a note in the report, not an error.
 BudgetExceeded, ExecutorRefused and ExecutorUnavailable always propagate. Any other exception inside a round or
 a candidate check is recorded (type and message, at most 300 chars) and makes certified False.
