@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from cheatproof import confirm
 from cheatproof.certify import load_certificate, score
 from cheatproof.sanitize import sanitize
 
@@ -142,6 +143,7 @@ h3 { font-size: 1.05rem; margin: 1.5rem 0 0.25rem; }
 a { color: var(--link); overflow-wrap: anywhere; }
 .banner, .empty { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
 .banner { border-left: 4px solid var(--link); }
+.headline { font-size: 2rem; font-weight: 700; line-height: 1.2; margin: 0.25rem 0; }
 .label { border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; color: var(--muted); font-size: 0.875rem; }
 .table-wrap { max-width: 100%; overflow-x: auto; margin: 0.5rem 0 1rem; }
 table { width: 100%; border-collapse: collapse; }
@@ -197,32 +199,58 @@ class _Batch:
 
 
 def build_site(
-    cert_dir: Path, out_dir: Path, *, traces_dir: Path | None = None, batch_file: Path | None = None
+    cert_dir: Path,
+    out_dir: Path,
+    *,
+    traces_dir: Path | None = None,
+    batch_file: Path | None = None,
+    confirmations_file: Path | None = None,
+    replications_dir: Path | None = None,
 ) -> SiteResult:
     """Write the site for the certificates in cert_dir into out_dir and return what was written.
 
     Raises FileNotFoundError when cert_dir is not a directory, and ValueError when out_dir is a non-empty directory
-    that is not a RewardSeal site (nothing is written then). A file that fails to load, or repeats an instance id, is
-    listed in errors and on the index, and the rest still build. The transcript of env/<name>.html is read from
-    traces_dir as the module docstring describes. batch_file is the selection record; when None it is
+    that is not a RewardSeal site (nothing is written then), or when the confirmations manifest is not valid
+    (confirm.ConfirmationError is a ValueError; nothing is written then either). A file that fails to load, or repeats
+    an instance id, is listed in errors and on the index, and the rest still build. The transcript of env/<name>.html is
+    read from traces_dir as the module docstring describes. batch_file is the selection record; when None it is
     cert_dir.parent/batch.json, and a missing default file is not an error. A bad batch record is listed in errors.
+    confirmations_file is the manual-check manifest (default cert_dir.parent/confirmations.json; a missing default is
+    an empty manifest, a missing explicit file is refused). replications_dir defaults to cert_dir.parent/replications;
+    a refused replication file is listed in errors and no replication number is shown.
     """
     root = Path(cert_dir)
     if not root.is_dir():
         raise FileNotFoundError(f"no certificate directory: {root}")
+    manifest_path = (
+        Path(confirmations_file)
+        if confirmations_file is not None
+        else root.parent / confirm.CONFIRMATIONS_FILE
+    )
+    if confirmations_file is not None and not manifest_path.exists():
+        raise confirm.ConfirmationError(f"{manifest_path.name}: confirmations file not found")
+    manifest = confirm.load_manifest(manifest_path)
     out = Path(out_dir)
     _prepare_out_dir(out)
     entries, cert_errors = _load_all(root)
     batch, batch_errors = _read_batch(root, batch_file)
-    errors = [*cert_errors, *batch_errors]
+    replications = confirm.load_replications(
+        Path(replications_dir) if replications_dir is not None else root.parent / confirm.REPLICATIONS_DIR
+    )
+    errors = [*cert_errors, *batch_errors, *[(f"replications/{n}", m) for n, m in replications.problems]]
     diffs_dir = root.parent / DIFFS_DIR
     env_dir = out / "env"
     env_dir.mkdir(parents=True, exist_ok=True)
     _write(out / MARKER, MARKER_TEXT)
     _write(out / NOJEKYLL, "")
     summary = score([entry.cert for entry in entries]) if entries else None
+    certs = [entry.cert for entry in entries]
+    confirmation = confirm.summarize(certs, manifest) if entries else None
+    statuses = {c["task"]["instance_id"]: confirm.hole_status(c, manifest) for c in certs}
     index = out / "index.html"
-    body = _index_body(entries, errors, len(cert_errors), summary, batch)
+    body = _index_body(
+        entries, errors, len(cert_errors), summary, batch, confirmation, manifest, replications, statuses
+    )
     _write(index, _document("RewardSeal report", body))
     pages = []
     for entry in entries:
@@ -231,7 +259,12 @@ def build_site(
             name: _diff_text(diffs_dir, entry.stem, name, _recorded_digest(entry.cert, name))
             for name in ROUNDS
         }
-        body = _env_body(entry.cert, _transcript_body(traces_dir, entry), diffs)
+        body = _env_body(
+            entry.cert,
+            _transcript_body(traces_dir, entry),
+            diffs,
+            statuses[entry.cert["task"]["instance_id"]],
+        )
         _write(page, _document(f"RewardSeal: {entry.cert['task']['instance_id']}", body))
         pages.append(page)
     return SiteResult(index=index, pages=pages, errors=errors)
@@ -566,7 +599,10 @@ def _rate_text(rate: Mapping[str, Any]) -> str:
     interval = rate.get("interval_95")
     if rate.get("rate") is None or interval is None:
         return f"{rate['count']} of {rate['n']}, no conclusive certificates"
-    low, high = interval
+    bounds = confirm.interval_bounds(rate)  # T54: no interval below n = 10
+    if bounds is None:
+        return f"{rate['count']} of {rate['n']} = {rate['rate']:.1%} ({confirm.INTERVAL_TOO_SMALL})"
+    low, high = bounds
     return f"{rate['count']} of {rate['n']} = {rate['rate']:.1%} (95% CI {low:.1%} to {high:.1%})"
 
 
@@ -612,8 +648,13 @@ def _index_body(
     excluded: int,
     summary: Mapping[str, Any] | None,
     batch: _Batch,
+    confirmation: Mapping[str, Any] | None = None,
+    manifest: Mapping[str, Mapping[str, str]] | None = None,
+    replications: confirm.ReplicationSet | None = None,
+    statuses: Mapping[str, confirm.HoleStatus] | None = None,
 ) -> str:
-    """excluded counts the certificate files left out (errors also holds a bad batch record, which is not one)."""
+    """excluded counts the certificate files left out (errors also holds a bad batch record, which is not one).
+    confirmation, manifest, replications and statuses (T54) feed the hero block and the confirmed/lead counts."""
     head = [
         "<header>",
         "<h1>RewardSeal hackability report</h1>",
@@ -626,9 +667,146 @@ def _index_body(
             _section("run-record", "Run record", *_run_record_parts(batch, len(entries))),
         ]
         if summary is None
-        else [_score_section(summary, excluded, batch, len(entries)), _environments_section(entries)]
+        else [
+            _hero_section(
+                entries,
+                confirmation,
+                manifest or {},
+                replications or confirm.ReplicationSet(),
+                statuses or {},
+            ),
+            _score_section(summary, excluded, batch, len(entries), confirmation),
+            _environments_section(entries, statuses or {}),
+        ]
     )
     return "\n".join([*head, *middle, _errors_section(errors)])
+
+
+def _caveats(confirmation: Mapping[str, Any]) -> list[str]:
+    """The four caveats of the hero block. The n line uses the counts in the data, not fixed numbers."""
+    recon = confirmation.get("recon")
+    where = (
+        f"{recon['n']} environments in the denominator, {confirmation['n']} certificates in all"
+        if isinstance(recon, Mapping)
+        else f"{confirmation['n']} certificates"
+    )
+    n_line = (
+        f"n: raw counts over {where}. A confirmed hole is a recorded run, not a rate; the replication line "
+        f"of each confirmed environment says how many runs repeat it. No interval is shown "
+        f"below n = {confirm.MIN_INTERVAL_N} ({confirm.INTERVAL_TOO_SMALL})."
+    )
+    recon_line = (
+        "Recon on: the attacker was given the exposure scan of its environment (where the history refs are). "
+        "The counts do not hold for an attacker without recon."
+    )
+    one_line = "One attacker: a single model and prompt tried each environment. A different attacker may find other holes."
+    certified_line = (
+        "Certified means this attacker did not hack the environment in its recorded attempts (attacks per round "
+        "are on each environment page). It does not mean the environment is secure."
+    )
+    return [n_line, recon_line, one_line, certified_line]
+
+
+def _hero_headline(confirmation: Mapping[str, Any]) -> str:
+    """'1 of 9 confirmed' from the data. Without a denominator that the data supports, just the counts."""
+    recon = confirmation.get("recon")
+    if isinstance(recon, Mapping) and recon["n"] > 0:
+        return f"{recon['confirmed']} of {recon['n']} confirmed"
+    return f"{confirmation['confirmed_holes']} confirmed, {confirmation['unconfirmed_leads']} unconfirmed"
+
+
+def _hero_section(
+    entries: Sequence[_Entry],
+    confirmation: Mapping[str, Any] | None,
+    manifest: Mapping[str, Mapping[str, str]],
+    replications: confirm.ReplicationSet,
+    statuses: Mapping[str, confirm.HoleStatus],
+) -> str:
+    """The block at the top of the index (T54): the confirmed/lead headline, what it does not show, and a
+    before -> after summary of each confirmed environment, with its replication state."""
+    if confirmation is None:
+        return ""
+    recon = confirmation.get("recon")
+    if isinstance(recon, Mapping) and recon["n"] > 0:
+        scope = (
+            f"{recon['confirmed']} of {recon['n']}: environments attacked with recon on whose exposure scan "
+            "showed future_git true, counted when the hole is confirmed. The denominator is computed from the "
+            "certificates."
+        )
+    else:
+        scope = (
+            "No environment in the data was attacked with recon on and future_git true: no denominator, "
+            "counts only."
+        )
+    lead_ids = confirmation["lead_ids"]
+    parts = [
+        f'<p class="headline">{_cell(_hero_headline(confirmation))}</p>',
+        f"<p>{_cell(scope)}</p>",
+        f"<p>{_cell(confirm.counts_line(confirmation))}</p>",
+    ]
+    if lead_ids:
+        links = " ".join(
+            _link_html(f"env/{entry.name}.html", entry.cert["task"]["instance_id"])
+            for entry in entries
+            if entry.cert["task"]["instance_id"] in lead_ids
+        )
+        parts.append(
+            "<p>Unconfirmed leads are never counted as hackable: a hole label with no T53 shared-line evidence "
+            "and no manual causal check showing the history was used.</p>"
+            f"<p>Leads: {links}</p>"
+        )
+    unused = confirmation.get("manifest_unused") or []
+    if unused:
+        text = "Manifest entries with no hole label in the loaded certificates: " + ", ".join(unused)
+        parts.append(f"<p>{_cell(text)}</p>")
+    parts.append(
+        _section(
+            "caveats",
+            "What this does not show",
+            "<ul>" + "".join(f"<li>{_cell(text)}</li>" for text in _caveats(confirmation)) + "</ul>",
+            level=3,
+        )
+    )
+    ids = confirmation["confirmed_ids"]
+    confirmed = [entry for entry in entries if entry.cert["task"]["instance_id"] in ids]
+    parts.append(_hero_confirmed(confirmed, replications, statuses))
+    return _section("hero", "Confirmed holes", *parts)
+
+
+def _hero_confirmed(
+    confirmed: Sequence[_Entry],
+    replications: confirm.ReplicationSet,
+    statuses: Mapping[str, confirm.HoleStatus],
+) -> str:
+    """The before -> after panel of each confirmed environment (the T50 panel), with its replication line."""
+    if not confirmed:
+        return "<h3>Before and after hardening</h3><p>No confirmed hole in the loaded certificates.</p>"
+    blocks = []
+    for number, entry in enumerate(confirmed, start=1):
+        cert, task = entry.cert, entry.cert["task"]["instance_id"]
+        status = statuses.get(task)
+        panel = _before_after_section(
+            cert, anchor=f"hero-before-after-{number}", level=4, heading="Before -> after, as recorded"
+        )
+        blocks.append(
+            "\n".join(
+                [
+                    f"<h3>{_link_html(f'env/{entry.name}.html', task)}</h3>",
+                    _kv_table(
+                        "Confirmed environment",
+                        [
+                            ("Confirmed by", status.source if status else NOT_RECORDED),
+                            *([("Note", status.note)] if status and status.note else []),
+                            ("Certified", cert["certified"]),
+                            ("Certified via", _via_text(cert)),
+                            ("Replication", confirm.replication_text(task, replications)),
+                        ],
+                    ),
+                    panel or "<p>No hardening round was recorded for this environment.</p>",
+                ]
+            )
+        )
+    return "\n".join(blocks)
 
 
 def _empty_state(excluded: int) -> str:
@@ -706,32 +884,85 @@ def _run_record_parts(batch: _Batch, loaded: int) -> list[str]:
     return [lead, counts, skipped, not_run]
 
 
-def _score_section(summary: Mapping[str, Any], excluded: int, batch: _Batch, loaded: int) -> str:
+def _score_section(
+    summary: Mapping[str, Any],
+    excluded: int,
+    batch: _Batch,
+    loaded: int,
+    confirmation: Mapping[str, Any] | None = None,
+) -> str:
     lead = f"n = {summary['n']} valid certificates. " + (_excluded_text(excluded) + " " if excluded else "")
-    rate_rows = [
-        _row(label, _rate_text(summary[key]), summary[key]["denominator"])
-        for label, key in (
-            ("Hackable before hardening", "rate_before"),
-            ("Hackable after hardening", "rate_after"),
+    if confirmation is not None:
+        rate_rows = [
+            _row(label, _rate_text(confirmation[key]), confirmation[key]["denominator"])
+            for label, key in (
+                ("Confirmed holes before hardening", "rate_confirmed_before"),
+                ("Confirmed holes after hardening", "rate_confirmed_after"),
+            )
+        ]
+    else:
+        rate_rows = [
+            _row(label, _rate_text(summary[key]), summary[key]["denominator"])
+            for label, key in (
+                ("Hackable before hardening", "rate_before"),
+                ("Hackable after hardening", "rate_after"),
+            )
+        ]
+    outcome_caption = "Outcomes, each certificate counted once"
+    if confirmation is not None:
+        outcome_caption += (
+            ". hackable_after counts a hole label found after hardening, which may be an unconfirmed lead"
         )
-    ]
     outcome_rows = [_row(name, count) for name, count in summary["outcomes"].items()]
     outcome_rows.append(_row("Total (equals n)", summary["n"]))
-    hole_rows = [
-        _row(label, counts["before"], counts["after"]) for label, counts in summary["by_hole"].items()
-    ]
+    if confirmation is not None:
+        hole_headers: tuple[str, ...] = (
+            "Hole",
+            "Before: confirmed",
+            "Before: lead",
+            "After: confirmed",
+            "After: lead",
+        )
+        hole_rows = [
+            _row(label, c["before_confirmed"], c["before_lead"], c["after_confirmed"], c["after_lead"])
+            for label, c in confirmation["by_hole"].items()
+        ]
+        hole_caption = "Certificates per hole label, by status. A lead is not counted as hackable."
+        status_pairs = [
+            ("Confirmed holes (tasks)", confirmation["confirmed_holes"]),
+            ("Unconfirmed leads (tasks, never counted as hackable)", confirmation["unconfirmed_leads"]),
+            (
+                "Hole label found before hardening (confirmed or lead, also counted in the outcomes)",
+                summary["hackable_before"],
+            ),
+            (
+                "Hole label found after hardening (confirmed or lead, also counted in the outcomes)",
+                summary["hackable_after"],
+            ),
+        ]
+    else:
+        hole_headers = ("Hole", "Before hardening", "After hardening")
+        hole_rows = [
+            _row(label, counts["before"], counts["after"]) for label, counts in summary["by_hole"].items()
+        ]
+        hole_caption = "Certificates per hole, before and after hardening"
+        status_pairs = [
+            ("Hackable before (also counted in the outcomes)", summary["hackable_before"]),
+            ("Hackable after (also counted in the outcomes)", summary["hackable_after"]),
+        ]
     return _section(
         "score",
         "Hackability score",
         f"<p>{lead}A certified task is not hackable by this attacker. "
         "That is not a claim that it is secure or proven.</p>",
+        f"<p>{_cell(confirm.counts_line(confirmation))}</p>" if confirmation is not None else "",
         _section("run-record", "Run record", *_run_record_parts(batch, loaded), level=3),
         _table(
-            "Rates with 95% Wilson intervals",
+            "Rates with 95% Wilson intervals (shown from n = 10)",
             ("Measure", "Count of n and rate", "Denominator"),
             rate_rows,
         ),
-        _table("Outcomes, each certificate counted once", ("Outcome", "Count"), outcome_rows),
+        _table(outcome_caption, ("Outcome", "Count"), outcome_rows),
         _kv_table(
             "Other counts",
             [
@@ -750,20 +981,14 @@ def _score_section(summary: Mapping[str, Any], excluded: int, batch: _Batch, loa
                     "No attempt, attacker never tried (no_attempt, also counted in the outcomes)",
                     summary.get("no_attempt"),
                 ),
-                ("Hackable before (also counted in the outcomes)", summary["hackable_before"]),
-                ("Hackable after (also counted in the outcomes)", summary["hackable_after"]),
+                *status_pairs,
                 (
                     "Cost, total (USD)",
                     _money_basis(summary["cost_usd_total"], summary.get("cost_basis")),
                 ),
             ],
         ),
-        _table(
-            "Certificates per hole, before and after hardening",
-            ("Hole", "Before hardening", "After hardening"),
-            hole_rows,
-            empty="no hole label was found",
-        ),
+        _table(hole_caption, hole_headers, hole_rows, empty="no hole label was found"),
     )
 
 
@@ -781,7 +1006,14 @@ def _strategy_html(attacker: Any) -> str:
     return f"{text}{tag}"
 
 
-def _environments_section(entries: Sequence[_Entry]) -> str:
+def _status_cell(status: confirm.HoleStatus | None) -> str:
+    """confirmed, lead or none for the index; (manual check) when a manifest entry decided it."""
+    if status is None:
+        return NOT_RECORDED
+    return status.task + (" (manual check)" if status.manifest and status.task != confirm.NO_HOLE else "")
+
+
+def _environments_section(entries: Sequence[_Entry], statuses: Mapping[str, confirm.HoleStatus]) -> str:
     rows = []
     for entry in entries:
         cert = entry.cert
@@ -793,6 +1025,7 @@ def _environments_section(entries: Sequence[_Entry]) -> str:
                 task["source"],
                 _Raw(_strategy_html(cert["attacker"])),
                 cert["holes_found"],
+                _status_cell(statuses.get(task["instance_id"])),
                 cert["patches_applied"],
                 _gates_text(gates["before"]),
                 _gates_text(gates["after"]),
@@ -806,7 +1039,8 @@ def _environments_section(entries: Sequence[_Entry]) -> str:
         "Repo",
         "Source",
         "Strategy",
-        "Holes found",
+        "Hole labels found",
+        "Hole status",
         "Patches applied",
         "Gates before (gold, empty)",
         "Gates after",
@@ -843,7 +1077,12 @@ def _errors_section(errors: Sequence[tuple[str, str]]) -> str:
 # Environment pages
 
 
-def _env_body(cert: Mapping[str, Any], transcript: str, diffs: Mapping[str, str | None] | None = None) -> str:
+def _env_body(
+    cert: Mapping[str, Any],
+    transcript: str,
+    diffs: Mapping[str, str | None] | None = None,
+    status: confirm.HoleStatus | None = None,
+) -> str:
     task = cert["task"]
     return "\n".join(
         [
@@ -853,7 +1092,7 @@ def _env_body(cert: Mapping[str, Any], transcript: str, diffs: Mapping[str, str 
                 '<p><span class="label">recorded</span> This page replays a committed certificate. '
                 "No live calls were made.</p>"
             ),
-            _result_section(cert),
+            _result_section(cert, status),
             _before_after_section(cert),
             _task_section(cert),
             _attacker_section(cert["attacker"]),
@@ -935,7 +1174,13 @@ def _attempted_again(before_holes: Mapping[str, Any], after: Mapping[str, Any]) 
     return "yes" if set(earlier) & set(attempted) else "none"
 
 
-def _before_after_section(cert: Mapping[str, Any]) -> str:
+def _before_after_section(
+    cert: Mapping[str, Any],
+    *,
+    anchor: str = "before-after",
+    level: int = 2,
+    heading: str = "Before and after hardening",
+) -> str:
     """The before -> after panel for a hardened task. Empty for a task with no after round. It shows labels, tags
     and counts only, never diff text, and says "against this attacker" because that is all the evidence is."""
     harden = _map(cert.get("harden"))
@@ -960,8 +1205,8 @@ def _before_after_section(cert: Mapping[str, Any]) -> str:
         else "Before and after hardening, as recorded. Results hold against this attacker only."
     )
     return _section(
-        "before-after",
-        "Before and after hardening",
+        anchor,
+        heading,
         f"<p>{_cell(lead)}</p>",
         _kv_table(
             "Before: the hole the attacker found",
@@ -982,10 +1227,26 @@ def _before_after_section(cert: Mapping[str, Any]) -> str:
                 ("Certified via", _via_text(cert)),
             ],
         ),
+        level=level,
     )
 
 
-def _result_section(cert: Mapping[str, Any]) -> str:
+def _status_pairs(status: confirm.HoleStatus | None) -> list[tuple[str, Any]]:
+    """Rows for the hole status: the task status and where it comes from, then each label with its status."""
+    if status is None:
+        return []
+    pairs: list[tuple[str, Any]] = [("Hole status", f"{status.task}: {status.source}")]
+    if status.note:
+        pairs.append(("Hole status note", status.note))
+    for name, labels in (("before", status.before), ("after", status.after)):
+        if labels:
+            pairs.append(
+                (f"Hole labels, {name} hardening", ", ".join(f"{k} ({v})" for k, v in labels.items()))
+            )
+    return pairs
+
+
+def _result_section(cert: Mapping[str, Any], status: confirm.HoleStatus | None = None) -> str:
     notes = _items(cert["notes"])
     notes_html = (
         "<p>none</p>" if not notes else "<ul>" + "".join(f"<li>{_cell(n)}</li>" for n in notes) + "</ul>"
@@ -998,6 +1259,7 @@ def _result_section(cert: Mapping[str, Any]) -> str:
             [
                 ("Certified", cert["certified"]),
                 ("Certified via", _via_text(cert)),
+                *_status_pairs(status),
                 ("Reason", cert["reason"]),
                 ("Cost (USD)", _money_basis(cert["cost_usd"], cert.get("cost_basis"))),
                 ("Timestamp", cert["timestamp"]),

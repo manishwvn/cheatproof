@@ -68,7 +68,12 @@ env-broken with one sanitized line (--no-preflight skips it). Exit 1 for harden.
 report prints certify.score_directory() as it is: rates with their n, raw counts, outcomes, holes and sources.
 When batch.json sits beside the certificates directory, report also prints the batch counts and adds a batch key
 to the JSON output.
-The rates, intervals and totals are computed in certify.py only; this module does no statistics of its own.
+T54: report also counts confirmed holes and unconfirmed leads apart (cheatproof/confirm.py: status per hole, the
+manifest results/confirmations.json beside the certificates directory, replications under results/replications/),
+prints 'confirmed holes: x; unconfirmed leads: y; certified: z (via ...)', and shows a Wilson interval only from
+n >= 10 ('n too small for an interval' below). The JSON output gains a confirmation key; its rate_before and
+hackable_before still count labels, leads included.
+The rates, intervals and totals are computed in certify.py and confirm.py only; this module does no statistics of its own.
 site builds the static report site through site.build_site from the certificate files. It is not a paid call:
 no Budget, LLM or executor is built for it. Its traces come from --traces, or from traces/ beside the certificates
 when that directory exists and --traces is not given.
@@ -115,6 +120,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from cheatproof import confirm
 from cheatproof.budget import Budget, BudgetExceeded, init_ledger_from_env
 from cheatproof.executor import DiskRefused, EnvSpec, ExecutorRefused, ExecutorUnavailable, make_executor
 from cheatproof.recon import RECON_EXPOSURE
@@ -146,6 +152,7 @@ RATE_LABELS = (
     ("rate_before", "hackable before hardening"),
     ("rate_after", "hackable after hardening"),
 )
+LABEL_COUNT_NOTE = " (a label was found; unconfirmed leads are included, see the confirmation lines)"
 BATCH_FILE = "batch.json"  # beside the certificates directory; rewritten whole after every task
 BATCH_SCHEMA_VERSION = 1
 ENV_BROKEN = "env-broken"  # not-run reason: the collect-only preflight failed, so no attacker token was spent
@@ -1416,25 +1423,58 @@ def _rate_text(label: str, rate: Any) -> str:
         if not isinstance(value, int | float):
             value = count / n
         text = f"{label}: {count} of {n} = {value:.1%}"
-        interval = rate.get("interval_95")
-        if isinstance(interval, list | tuple) and len(interval) == 2:
-            text += f" (95% CI {interval[0]:.1%}–{interval[1]:.1%})"
+        bounds = confirm.interval_bounds(rate)  # T54: no interval below n = 10
+        if bounds is not None:
+            text += f" (95% CI {bounds[0]:.1%}–{bounds[1]:.1%})"
+        elif n < confirm.MIN_INTERVAL_N:
+            text += f" ({confirm.INTERVAL_TOO_SMALL})"
     if rate.get("denominator") is not None:
         text += f"; denominator: {rate['denominator']}"
     return text
 
 
-def render_text(score: Mapping[str, Any], directory: Path, batch: Mapping[str, Any] | None = None) -> str:
+def _confirmation_lines(summary: Mapping[str, Any], replications: Mapping[str, str]) -> list[str]:
+    """T54: the confirmed holes, the unconfirmed leads and the replication line of each confirmed task."""
+    lines = [confirm.counts_line(summary)]
+    lines.append(_rate_text("confirmed holes before hardening", summary["rate_confirmed_before"]))
+    lines.append(_rate_text("confirmed holes after hardening", summary["rate_confirmed_after"]))
+    leads = summary["lead_ids"]
+    lines.append(
+        f"unconfirmed leads (never counted as hackable): before {len(leads)}"
+        + (f" ({', '.join(leads)})" if leads else "")
+        + f"; after {summary['after_leads']}"
+    )
+    recon = summary.get("recon")
+    if isinstance(recon, Mapping):
+        lines.append(
+            f"recon on, future_git true: {recon['confirmed']} of {recon['n']} environments have a confirmed hole"
+        )
+    lines += [f"replication {task}: {text}" for task, text in replications.items()]
+    return lines
+
+
+def render_text(
+    score: Mapping[str, Any],
+    directory: Path,
+    batch: Mapping[str, Any] | None = None,
+    confirmation: Mapping[str, Any] | None = None,
+    replications: Mapping[str, str] | None = None,
+) -> str:
     """The score dict as text. Every key that is present is shown; a missing optional key is skipped.
 
-    batch is the batch.json dict when one sits beside the certificates; its counts come last.
+    batch is the batch.json dict when one sits beside the certificates; its counts come last. confirmation is
+    confirm.summarize(): with it the report counts confirmed holes, not labels, and lists unconfirmed leads apart;
+    replications maps a confirmed task id to its replication line.
     """
     n = score["n"]
     header = f"n={n} certificates in {directory}"
     if "n_after" in score:
         header += f" (n_after={score['n_after']} with an after round)"
     lines = [header]
-    lines += [_rate_text(label, score[key]) for key, label in RATE_LABELS if key in score]
+    if confirmation is not None:
+        lines += _confirmation_lines(confirmation, replications or {})
+    else:
+        lines += [_rate_text(label, score[key]) for key, label in RATE_LABELS if key in score]
     lines.append(UPPER_BOUND_NOTE)
     for key in ("certified", "inconclusive"):
         if key in score:
@@ -1461,13 +1501,32 @@ def render_text(score: Mapping[str, Any], directory: Path, batch: Mapping[str, A
     if isinstance(outcomes, Mapping):
         lines.append("outcomes (raw counts):")
         if outcomes:
+            note = LABEL_COUNT_NOTE if confirmation is not None else ""
             lines += [
-                f"  {name}: {count}" for name, count in sorted(outcomes.items(), key=lambda kv: str(kv[0]))
+                f"  {name}: {count}{note if name == 'hackable_after' else ''}"
+                for name, count in sorted(outcomes.items(), key=lambda kv: str(kv[0]))
             ]
         else:
             lines.append("  none")
     by_hole = score.get("by_hole")
-    if isinstance(by_hole, Mapping):
+    if confirmation is not None:
+        by_hole_status = confirmation["by_hole"]
+        lines.append("holes (certificates per label; leads are not hackable):")
+        if by_hole_status:
+            width = max([len("hole")] + [len(str(label)) for label in by_hole_status])
+            lines.append(
+                f"  {'hole':<{width}}  {'before confirmed':>16}  {'before lead':>11}"
+                f"  {'after confirmed':>15}  {'after lead':>10}"
+            )
+            for label in sorted(by_hole_status, key=str):
+                c = by_hole_status[label]
+                lines.append(
+                    f"  {label!s:<{width}}  {c['before_confirmed']:>16}  {c['before_lead']:>11}"
+                    f"  {c['after_confirmed']:>15}  {c['after_lead']:>10}"
+                )
+        else:
+            lines.append("  none")
+    elif isinstance(by_hole, Mapping):
         lines.append("holes (certificates per hole):")
         if by_hole:
             width = max([len("hole")] + [len(str(label)) for label in by_hole])
@@ -1480,7 +1539,8 @@ def render_text(score: Mapping[str, Any], directory: Path, batch: Mapping[str, A
             lines.append("  none")
     by_source = score.get("by_source")
     if isinstance(by_source, Mapping):
-        lines.append("by source (raw counts):")
+        by_source_note = "; hackable_before counts labels, leads included" if confirmation is not None else ""
+        lines.append(f"by source (raw counts{by_source_note}):")
         if by_source:
             for source in sorted(by_source, key=str):
                 counts = by_source[source]
@@ -1496,6 +1556,32 @@ def render_text(score: Mapping[str, Any], directory: Path, batch: Mapping[str, A
     if batch is not None:
         lines += _batch_lines(batch)
     return "\n".join(lines)
+
+
+def _confirmation(
+    directory: Path, manifest: Mapping[str, Any]
+) -> tuple[dict[str, Any] | None, dict[str, dict[str, Any]]]:
+    """T54: confirm.summarize over the certificates in directory, plus a replication entry for each confirmed task.
+    (None, {}) when the certificates cannot be loaded here (deps.score_directory is a fake in some tests)."""
+    from cheatproof.certify import load_certificate
+
+    try:
+        certs = [load_certificate(path) for path in sorted(directory.glob("*.json")) if path.is_file()]
+        summary = confirm.summarize(certs, manifest)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None, {}
+    replications = confirm.load_replications(directory.parent / confirm.REPLICATIONS_DIR)
+    entries: dict[str, dict[str, Any]] = {}
+    for task in summary["confirmed_ids"]:
+        try:
+            counts = confirm.replication_for(task, replications)
+        except confirm.ConfirmationError:
+            counts = None
+        entries[task] = {
+            "counts": counts,
+            "text": confirm.replication_text(task, replications),
+        }
+    return summary, entries
 
 
 def cmd_report(args: argparse.Namespace, deps: Deps) -> int:
@@ -1515,7 +1601,14 @@ def cmd_report(args: argparse.Namespace, deps: Deps) -> int:
         return _usage_error(f"no certificates scored under {directory}")
 
     batch = _read_batch(directory.parent / BATCH_FILE)
-    shown: Mapping[str, Any] = score if batch is None else {**score, "batch": batch}
+    try:
+        manifest = confirm.load_manifest(directory.parent / confirm.CONFIRMATIONS_FILE)
+    except confirm.ConfirmationError as exc:
+        return _usage_error(f"could not read the confirmations: {sanitize(str(exc))[:ERROR_CHARS]}")
+    confirmation, replications = _confirmation(directory, manifest)
+    shown: dict[str, Any] = dict(score) if batch is None else {**score, "batch": batch}
+    if confirmation is not None:
+        shown["confirmation"] = {**confirmation, "replication": replications}
     payload = json.dumps(shown, indent=2, sort_keys=True) + "\n"
     if args.out is not None:
         try:
@@ -1526,7 +1619,15 @@ def cmd_report(args: argparse.Namespace, deps: Deps) -> int:
     if args.format == "json":
         sys.stdout.write(payload)
     else:
-        print(render_text(score, directory, batch))
+        print(
+            render_text(
+                score,
+                directory,
+                batch,
+                confirmation,
+                None if confirmation is None else {t: r["text"] for t, r in replications.items()},
+            )
+        )
         if args.out is not None:
             print(f"wrote {args.out}")
     return 0
