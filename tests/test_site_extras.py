@@ -375,3 +375,9 @@ def test_sample_note_counts_pr_path_numbers_exactly():
     note = site_extras._sample_web_note([(Path("sample.json"), record)])
     assert "1 tasks, 1 searches, 3 results, 1 with a counted gold line, 1 matching" in note
     assert "1 of 1 tasks have a single counted gold line" in note
+
+
+def test_long_unbroken_text_wraps_on_every_page(records):
+    out = build(records)
+    for name in ("index.html", "limitations.html", "explorer.html", "controls.html"):
+        assert "p, li { overflow-wrap: anywhere; }" in (out / name).read_text(), name

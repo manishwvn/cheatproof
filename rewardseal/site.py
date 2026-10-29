@@ -169,6 +169,7 @@ h1 { font-size: 1.6rem; line-height: 1.25; overflow-wrap: anywhere; }
 h2 { font-size: 1.25rem; margin: 2rem 0 0.5rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--line); }
 h3 { font-size: 1.05rem; margin: 1.5rem 0 0.25rem; }
 a { color: var(--link); overflow-wrap: anywhere; }
+p, li { overflow-wrap: anywhere; }
 .banner, .empty { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
 .banner { border-left: 4px solid var(--link); }
 .headline { font-size: 2rem; font-weight: 700; line-height: 1.2; margin: 0.25rem 0; }
