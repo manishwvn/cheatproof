@@ -164,7 +164,12 @@ def test_controls_gallery_uses_correct_cases_and_record_links(records):
         "incomplete-scan": ["CS-SI__eodag-249", "Azure__azure-cli-1876", "Absence unproven"],
         "attribution-116": ["ArkEcosystem__python-crypto-116", "PR #88", "lead", "step 31"],
         "same-recon-348": [TASK, "not exercised", "unclassified"],
-        "retrieval-control": ["Dorthu__openapi3-75", "no model"],
+        "retrieval-control": [
+            "Dorthu__openapi3-75",
+            "no model",
+            "Oracle-assisted scripted control, not autonomous discovery",
+            "does not prove model causality",
+        ],
         "web-null": ["0 of 13", "2026-10-29", "One search tool"],
     }
     for anchor, texts in expected.items():

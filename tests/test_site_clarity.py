@@ -54,6 +54,8 @@ def test_commands_and_certificate_links_use_the_evidence_pin(records, pinned):
         (records / "PINNED_SHA").write_text(PIN + "\n")
     base = site.GITHUB_BLOB.replace("/main/", f"/{PIN}/") if pinned else site.GITHUB_BLOB
     index, pages = build(records)
+    assert "<title>Recorded attack-check report | RewardSeal</title>" in index
+    assert "<h1>Recorded attack-check report</h1><p>RewardSeal</p>" in index
     assert f'<a href="{base}results/evidence/348-causal.md">2. Commands</a>' in index
     assert (
         "verbatim commands; outputs are 300-character heads plus a sha256, full outputs not retained" in index
@@ -105,7 +107,7 @@ def test_run_record_reconciles_every_selected_task(records):
     ]
     assert by_task["Azure__azure-cli-1876"][1:] == ["none", "no", "audited", "audited only"]
     assert "certified inconclusive" in by_task["BQSKit__bqskit-267"][1]
-    assert by_task["12rambau__sepal_ui-518"][-1] == "certified, first attack failed (no hardening)"
+    assert by_task["12rambau__sepal_ui-518"][-1] == "certified, initial attack failed (no hardening)"
 
 
 def test_selection_is_a_union_and_outside_certificates_are_counted(records):
@@ -163,7 +165,7 @@ def test_second_audit_is_separate_with_counts_and_sampling_frame(records):
     selection = json.loads((records / "exposure-sample" / "_selection.json").read_text())
     assert rows["Seed"] == str(selection["seed"])
     assert rows["Rule"] == selection["rule"]
-    assert rows["Frame (from docs/results.md)"] == "first 1000 dataset rows; repos 0-9 and A-E"
+    assert rows["Frame (from docs/results.md)"] == "1000-row dataset frame; repos 0-9 and A-E"
     assert rows["Population"] == "random within that frame only"
     assert rows["What it is NOT"] == "NOT SWE-rebench at large and NOT blended with the 13"
     sample = index.split('id="second-audit"', 1)[1].split("</section>", 1)[0]
@@ -222,8 +224,11 @@ def test_plain_words_notes_follow_the_fields_that_need_them(records):
 def test_like_for_like_warning_uses_both_rounds(records, change):
     _, pages = build(records)
     page = page_for(pages)
-    assert "This re-attack is not like for like." in page
-    assert "(recon: exposure, 40 steps); after hardening it was not (recon: none, 15 steps)" in page
+    assert "This re-attack is not like for like: recon differed." in page
+    assert "Same step and token budget configured for both rounds: 40 steps / 500000 tokens." in page
+    assert "(recon: exposure, 40 steps used (budget configured: 40))" in page
+    assert "(recon: none, 15 steps used (budget configured: 40))" in page
+    assert "attacker submitted after 15 steps used" in page
     assert "earlier hole attempted again: none" in page
     assert "It does not isolate the effect of the patch." in page
     path = next((records / "certificates").glob("*348*.json"))
@@ -236,7 +241,18 @@ def test_like_for_like_warning_uses_both_rounds(records, change):
         after["recon"] = None
     path.write_text(json.dumps(cert))
     _, pages = build(records)
-    assert ("This re-attack is not like for like." in page_for(pages)) == (change != "same")
+    assert ("This re-attack is not like for like:" in page_for(pages)) == (change == "recon")
+    if change == "steps":
+        assert "Steps used differ; usage alone does not indicate a configured budget difference." in page_for(
+            pages
+        )
+
+
+def test_steps_used_labels_configured_budget_only_when_recorded():
+    assert site._steps_used({"steps": 15}, {"max_steps": 40}) == "15 steps used (budget configured: 40)"
+    assert site._steps_used({"steps": 15}, {}) == "15 steps used"
+    assert site._configured_budget({}) == ""
+    assert "17 steps / 12345 tokens" in site._configured_budget({"max_steps": 17, "max_tokens": 12345})
 
 
 def test_sixty_second_box_has_the_release_rule(records):
@@ -249,7 +265,8 @@ def test_sixty_second_box_has_the_release_rule(records):
         "(a) gold passes and empty fails",
         "(b) the exposure scan after hardening shows no future commits",
         "(c) a re-attack under the same conditions failed; otherwise withhold",
-        "Certified means a recorded attack failed, nothing more.",
+        site.CERTIFIED_MEANING,
+        site.LEGACY_CAVEAT,
         "the list of every number allowed.",
     ):
         assert text in guide

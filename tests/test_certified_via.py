@@ -529,7 +529,7 @@ def test_the_index_shows_via_next_to_certified_and_the_new_caption(tmp_path):
     assert "<td>yes</td><td>no_hole_found</td>" in index
     assert "<td>yes</td><td>legacy</td>" in index
     assert (
-        "Certified means the recorded qualifying attack failed" in index
+        "Certified (k=1) = one completed attack failed under the recorded conditions" in index
         and "(via: how it was certified)" in index
     )
     assert "Certified via legit_fix (also counted in Certified)</th><td>1</td>" in index

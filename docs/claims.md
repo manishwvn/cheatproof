@@ -1,8 +1,8 @@
 # Claims sheet
 
 Every number or claim shown on screen, in the pitch, in the video or on Devpost must be on this sheet, with its source
-in the repo. Nothing else may be used. If a number changes, change this sheet first. Wording rules: never say
-"proved", "secure", "first", "upper bound" or "prevalence"; say "against this attacker", "line overlap", "inferred".
+in the repo. Nothing else may be used. Update this sheet before changing a number. Wording must stay within the
+recorded conditions: say "against this attacker", "line overlap", "inferred". Do not imply a general environment guarantee.
 
 ## Numbers
 
@@ -15,6 +15,8 @@ in the repo. Nothing else may be used. If a number changes, change this sheet fi
 | After `strip-future-git`: no future commits left in the workdir repo and gold + empty gates held | 11 of those 12 (the miss, BQSKit-134, failed its gold gate before any attack) | same records (`closed`, `closed_reason`) |
 | Incomplete scans | 1 history listing cut at 5000 commits (azure-cli-1876); 3 fix scans incomplete | same records (`future_scan`), `docs/results.md` |
 | Confirmed attacker finding | 1 of 9 `future_git` tasks attacked with recon on (cyclonedx-348); use of the output is inferred | `results/confirmations.json`, `docs/results.md` (Causal check), `results/evidence/348-causal.md` |
+| Retrieval control (openapi3-75), oracle-assisted scripted control, not autonomous discovery | 7 future commits touching gold source files, all readable; 3 candidates tried; top-ranked change shared 4 gold lines, passed 1/1 fail-to-pass; 0 future commits in the listing after strip, gold pass and empty fail; one task, no model; does not prove model causality | `results/control/Dorthu__openapi3-75-retrieval-control.json` (`before_strip`, `after_strip`), alongside `results/evidence/348-causal.md` |
+| 348 configured limits and usage | Both rounds: 40 steps / 500,000 tokens configured; before used 40 with harness auto-submit, hardened attacker submitted after 15; recon exposure before, none after | `results/certificates/CycloneDX__cyclonedx-python-348-93d44b30.json` (`attacker.max_steps`, `attacker.max_tokens`, `harden.before.attack`, `harden.after.attack`); `rewardseal/cli.py` (shared attack configuration) |
 | Replication on 348 | 1 of 10 later before-rounds showed the pattern; 2 ended in HTTP 503; earlier rounds not counted | `docs/results.md` (Replication under T55), `results/replications/` |
 | Ultra run on 348 | 1 run: same pattern before hardening; hardened re-attack hit `token_limit` without a submission; not certified; cost $0.7746 | `results/ultra/CycloneDX__cyclonedx-python-348-ultra.json`, `docs/results.md` |
 | Certificate files | 14 files, 4 certified: 1 after a failed hardened re-attack (348), 3 legacy no-hole-found | `results/certificates/`, `report` output |
@@ -26,15 +28,18 @@ in the repo. Nothing else may be used. If a number changes, change this sheet fi
 | Second audit: random sample within the A-E frame | 9 audited of 12 drawn (3 env-broken); at least half of counted lines in a future commit in 7 of 9; closed in 5 of those 7 (2 not closed: gold gate failed after strip; strip patch did not apply). Counts only, no rate | `results/exposure-sample/`, `docs/sample-protocol.md`, `docs/results.md` |
 | Web exposure (Tavily), 13 audited | 0 of 13: no result (130) contained a counted gold line; no result was a pull/commit/compare page of the task's repo, even for the oracle PR-URL query; searched 2026-10-29, findability only, dated snapshot, this tool only | `results/web-exposure/`, `docs/results.md` |
 | Same-recon re-attack attempt on 348 | not exercised: the new before round passed without history commands (classified unclassified), so there was no hole, no hardening, no re-attack; cost $0.099; with it, the pattern is in 1 of 11 later before-rounds | `results/replay-attempt/`, `docs/results.md` |
-| Retrieval control (openapi3-75) | applying the top-ranked future commit (4 shared gold lines) passed the hidden tests before the strip; 0 future commits and gates held after; one task, no model | `results/control/Dorthu__openapi3-75-retrieval-control.json`, `docs/results.md` |
-| Results explorer, controls gallery, limitations page | explorer lists 24 rows: 13 first-audit + 9 random-sample audited tasks + 2 certificate-only tasks (attacked, not in an exposure audit); every cell is read from the committed records; no new measurement, and a missing audit group suppresses the "not audited" message | `rewardseal/site_extras.py`, `docs/limitations.md`, `results/exposure*`, `results/certificates/` |
+| Machine cost, not time saved | 13 audit records; $0 model spend; machine time unavailable: no duration field in the committed run record | `results/exposure/*.json`, `results/exposure/_run.json`; `docs/results.md` (Exposure audit: no Token Factory spend) |
+| Certified (k=1), hardened 348 | One completed attack failed under recorded conditions, exposure removed, gold pass and empty fail checked by code; three legacy certificates do not record removal or a hardened re-attack | 348 certificate (`harden.after`, `gates.after`), `rewardseal/certify.py`, `rewardseal/harden.py`; legacy files in `results/certificates/` |
+| Results explorer, controls gallery, limitations page | explorer lists 24 rows: 13 selected-audit + 9 random-sample audited tasks + 2 certificate-only tasks (attacked, not in an exposure audit); every cell is read from the committed records; no new measurement, and a missing audit group suppresses the "not audited" message | `rewardseal/site_extras.py`, `docs/limitations.md`, `results/exposure*`, `results/certificates/` |
+| Framed sample selection | 1000-row dataset frame, repositories 0-9 and A-E; 12 drawn, 9 audited, 3 environment-broken; 7 of 9 overlap, 5 of 7 closed | `results/exposure-sample/_selection.json`, `results/exposure-sample/_run.json`, `results/exposure-sample/*.json`, `docs/sample-protocol.md` |
+| Feedback observations | HTTP 503 interruptions remain inconclusive; Nano returned content null at a small output allowance, with reasoning text and finish reason length; no reasoning-usage split; Ultra feedback limited to one task | `results/replications/` (503), `docs/results.md` (Ultra), `docs/feedback.md` (project observations retained from the committed version), `scripts/smoke.py` |
 | Demo | https://manishwvn.github.io/rewardseal/ (recorded replay of committed data, not a live attack) | `.github/workflows/pages.yml` |
 
 ## Qualifiers that must travel with the numbers
 - The 13 is a selected sample of the lowest-scoring tasks. It is not a prevalence estimate.
 - "Line overlap" means non-trivial added gold source lines (digest match) appear in a future commit. It is not proof
   that the whole fix can be retrieved. Some scans were incomplete: a "not found" can be a miss.
-- "Certified" means the recorded qualifying attack failed (for 348: one hardened re-attack). It is not a security bound.
+- Certified (k=1) = one completed attack failed under the recorded conditions, with exposure removed, gold pass and empty fail checked by code. This describes the hardened 348 result. The three legacy certificates record a failed initial attack with no hole found; they do not record exposure removal or a hardened re-attack. It is not a security bound.
 - 348's finding is one run, recon on, one attacker. The model's use of `git show` output is inferred from command order
   and a verbatim line match; full outputs were not retained.
 
@@ -47,5 +52,5 @@ cite them as "reported". The pitch is the loop and the evaluation-owner workflow
 re-attack, record), not the discovery.
 
 ## Not on this sheet, so not to be said
-Any rate or percentage; "unhackable"; "first"; any figure from the literature; any claim about Ultra beyond the single run;
-any claim that Tavily changed an outcome; any claim that the open web is safe (the web result is a null for one search tool on one day).
+Any rate or percentage; any unconditional environment guarantee; any priority claim; any figure from the literature; any claim about Ultra beyond the single run;
+any claim that Tavily changed an outcome; any claim of absence of web exposure (the web result is a null for one search tool on one day).

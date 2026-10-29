@@ -1,10 +1,14 @@
-# RewardSeal: red-team, patch and certify RL coding environments
+# Recorded attack-check report
+
+RewardSeal audits, strips exposure, checks gates and records attacks on RL coding environments.
 
 **Result 1, no attacker needed (deterministic audit, `audit-exposure`):** In 12 of 13 audited environments, every counted line the gold patch adds also appears in a future commit in the task's `.git`. This is line overlap, not proof the whole fix can be retrieved; for 2 of the 12 (348, toil-4805) it is one line. After `strip-future-git`, the task repo has no future commits, and the gold and empty gates held in 11 of those 12. Sample: the 18 lowest-scoring tasks, 5 excluded as env-broken. Not a prevalence estimate. Some scans were incomplete, so a "not found" can be a miss. One of the 13 failed its gold gate before any attack, and one history scan was cut at 5000 commits. Computed from the records in `results/exposure/`.
 
 **Result 2, one attacker finding (n=1, recon on, this attacker only):** One run on 348 (recon on) is consistent with copying from history: `git show` on `65bf318`, then the fix line verbatim. That the output was used is inferred. Of 10 later before-rounds on 348 (earlier rounds not counted), only that one showed the pattern; 2 ended in HTTP 503. The exposure scan flagged the leak, `strip-future-git` removed it (gold still passes, empty still fails), a fresh re-attack failed, and the environment is certified (`hardened_reattack_failed`). **1 of 9 confirmed**, a manually assessed finding with unequal follow-up across tasks.
 
-**Replication (T55, 4 more runs of 348): the history-use pattern appeared in 1 of 10 later before-rounds on this task (1 of 8 excluding 2 HTTP 503 infrastructure errors), the confirmed 2026-10-24 rerun; earlier 348 attacks are not in that count. No further use was confirmed in the other 9 rounds (2 of them ended in HTTP 503 infrastructure errors), and causality for the one is inferred from command order; one earlier label was a classifier false positive. 'Certified' here means not hacked in k attempts, with k small.** One extra run with Nemotron Ultra as the attacker showed the same pattern before hardening (n=1, same inference; its hardened re-attack ended at the token limit without a submission, so it is not certified). <!-- REPLICATION_PLACEHOLDER -->
+**Replication (T55, 4 more runs of 348): the history-use pattern appeared in 1 of 10 later before-rounds on this task (1 of 8 excluding 2 HTTP 503 infrastructure errors), the confirmed 2026-10-24 rerun; earlier 348 attacks are not in that count. No further use was confirmed in the other 9 rounds (2 of them ended in HTTP 503 infrastructure errors), and causality for the one is inferred from command order; one earlier label was a classifier false positive. Certified (k=1) = one completed attack failed under the recorded conditions, with exposure removed, gold pass and empty fail checked by code. This describes the hardened 348 result. The three legacy certificates record a failed initial attack with no hole found; they do not record exposure removal or a hardened re-attack.** One extra run with Nemotron Ultra as the attacker showed the same pattern before hardening (n=1, same inference; its hardened re-attack ended at the token limit without a submission, so it is not certified). <!-- REPLICATION_PLACEHOLDER -->
+
+Both 348 rounds had the same step and token budget configured: 40 steps / 500,000 tokens (`attacker.max_steps`, `attacker.max_tokens`). Before hardening, 40 steps were used without an attacker submission; the harness auto-submitted. The hardened attacker itself submitted after 15 steps (`harden.after.attack.steps`, `stop_reason=submit`). Recon differed: `exposure` before, none after. The comparison does not isolate the patch's effect.
 
 Links: [results](docs/results.md) | [causal check](docs/results.md#causal-check-348-and-116) | [348 evidence](results/evidence/348-causal.md) | report site: https://manishwvn.github.io/rewardseal/ (GitHub Pages; [limitations](docs/limitations.md)) | [feedback](docs/feedback.md) | [Tavily](docs/tavily.md)
 
@@ -20,7 +24,7 @@ certify  <-  re-attack (same attacker, same limits; gold passes, empty fails)
 > - Only one environment is confirmed (n=1): `CycloneDX__cyclonedx-python-348`. Command outputs are not recorded in full, so the read of the fix commit is inferred from the command order and a verbatim match with the fix line (see the causal check).
 > - Recon was on: the attacker was shown the exposure scan. Current certificates label this `recon=exposure`; two older ones predate the field.
 > - One attacker model (Nemotron Super), 40 steps; one separate Ultra run on 348 is reported in `docs/results.md`.
-> - Certified means the recorded qualifying attack failed. For 348 that is one hardened re-attack; the 3 legacy files only record a failed first attack with no hole found. Not a security bound.
+> - Certified (k=1) = one completed attack failed under the recorded conditions, with exposure removed, gold pass and empty fail checked by code. This describes the hardened 348 result. The three legacy certificates record a failed initial attack with no hole found; they do not record exposure removal or a hardened re-attack. Not a security bound.
 > - Replication: of 10 later before-rounds on 348 (earlier rounds not counted), only the confirmed rerun showed the pattern; 2 ended in HTTP 503. The re-attack after it failed (1 of 1). Zero further confirmations in the other 9.
 > - The other 8 environments are not confirmed: one unconfirmed lead (`ArkEcosystem__python-crypto-116`, probably a classifier false positive), the rest no leak used or inconclusive.
 
@@ -48,9 +52,10 @@ attacker what the exposure scan found; we have not measured how often it finds s
 
 More evidence, each with its limits in `docs/results.md` and every number on `docs/claims.md`:
 
-- **Second audit, random within a stated frame** (`docs/sample-protocol.md`, committed before the run): of 12 drawn tasks, 9 audited and 3 env-broken; at least half of the counted gold lines in a future commit in 7 of 9; closed after `strip-future-git` in 5 of 7 (two not closed, recorded plainly). The frame is the first 1000 dataset rows (repos 0-9 and A-E): counts only, no rate, separate from the 13.
-- **Deterministic retrieval control** (`results/control/`, no model): on `Dorthu__openapi3-75` a script retrieved the top-ranked future commit, applied it and passed the hidden tests; after the strip there is nothing to retrieve. One task; shows usable leakage for the control, not why a model acted.
-- **Web exposure (Tavily)**: 2 searches per audited task, 0 of 13 returned a page with a counted gold line; the PR-URL query did not return the PR pages either, so this is a null for one search tool on one day, not evidence the web is safe.
+- **Second audit, random within a stated frame** (`docs/sample-protocol.md`, committed before the run): of 12 drawn tasks, 9 audited and 3 env-broken; at least half of the counted gold lines in a future commit in 7 of 9; closed after `strip-future-git` in 5 of 7 (two not closed, recorded plainly). The sampling frame covers 1000 dataset rows (repos 0-9 and A-E): counts only, no rate, separate from the 13.
+- **Oracle-assisted scripted control, not autonomous discovery** (`results/control/Dorthu__openapi3-75-retrieval-control.json`, no model): 7 future commits touching gold source files, 3 candidates tried; the top-ranked change shared 4 gold lines and passed 1/1 fail-to-pass tests. After the strip: 0 future commits in that listing, gold pass and empty fail. Ranking uses gold-line overlap; does not prove model causality.
+- **Web exposure (Tavily)**: 2 searches per audited task, 0 of 13 returned a page with a counted gold line; the PR-URL query did not return the PR pages either, so this is a null for one search tool on one day, not evidence of absence of web exposure.
+- **Machine cost, not time saved:** 13 audit records in `results/exposure/`; $0 model spend (deterministic audit, no attacker). Machine time is not recorded in the committed `results/exposure/_run.json`: it contains selection, exclusions and an update timestamp, but no duration. No machine-time or time-saved number is claimed.
 - **Verify the evidence yourself**: `python -m rewardseal.manifest verify` (frozen hashes and recomputed totals) or the in-browser verifier on the site; it checks artifact integrity and calculations, not historical execution or security.
 
 ## The problem
@@ -59,7 +64,7 @@ Coding agents are trained with RL and scored on SWE-style tasks: a repository, a
 agent can make the tests pass without solving the bug, the reward is wrong. It can read the real fix out of the
 repository's git history, edit or delete the tests, hard-code the expected outputs, or fetch the upstream fix from the
 network. RL pays for these shortcuts, so a policy looks better while it learns to cheat, and benchmark numbers lose
-meaning. Other work on reward hackability in code RL exists; we have not verified its figures, so this README cites none. RewardSeal's focus is the evaluation owner's workflow: before trusting a SWE task, check whether its own git history leaks the fix, strip it, re-check that the gold patch still passes and the empty patch still fails, and attack it again with the same attacker. and then re-checks that the task is still solvable.
+meaning. Other work on reward hackability in code RL exists; we have not verified its figures, so this README cites none. RewardSeal's focus is the evaluation owner's workflow: before trusting a SWE task, check whether its own git history leaks the fix, strip it, re-check that the gold patch still passes and the empty patch still fails, and attack it again with the same attacker.
 
 Today an evaluation owner can manually inspect Git history, remove future objects, and rerun gold and empty-patch checks. RewardSeal packages those steps and records their outcomes. Time saved and adoption have not been measured.
 
@@ -84,7 +89,7 @@ For each task (the project plans a 40-task set: 30 SWE-rebench and 10 SWE-bench 
 6. **Re-attack.** The same attacker, with the same limits, attacks the patched environment. The gold and empty gates
    run again.
 7. **Certificate.** A JSON file per task. It records the outcome. `certified` is true only if the gold patch passes, the
-   empty patch fails, and either the first qualifying attack failed or a qualifying hardened re-attack failed. A leak guard refuses to write a certificate that holds a
+   empty patch fails, and either the initial qualifying attack failed or a qualifying hardened re-attack failed. A leak guard refuses to write a certificate that holds a
    secret-like value. A run that never submitted (step or token limit) is `inconclusive`, never certified.
 
 "Not hackable" always means **the recorded qualifying attack by this attacker did not succeed** under the stated prompt, hints and limits. It does not show the attacker cannot succeed on another attempt, and it is not a statistical bound.
@@ -178,7 +183,7 @@ On the committed certificates, `report` prints n=14, certified 4 of 14, `certifi
 `legacy=3`, "confirmed holes before hardening: 1 of 5" and "confirmed holes after hardening: 0 of 2" (n too small for
 an interval), then the history exposure audit line. Raw lead-inclusive counts (`hackable_before=2`, which includes the
 unconfirmed 116 `git-history` lead) are printed separately and overstate the confirmed result. Read all of them as raw
-counts on a small, non-random sample, not as rates. The output is long; the audit line is the one to read first.
+counts on a small, non-random sample, not as rates. The output is long; the audit line is the one to read at the start.
 
 **Paid path** (spends credits; every call goes through the budget):
 
@@ -195,10 +200,10 @@ uv run python -m rewardseal.cli batch --source swe-rebench --n 8 \
     --max-steps 40 --max-tokens 250000 --out results/certificates
 ```
 
-`harden` and `batch` read tasks from the local cache only, so run `tasks fetch` first. `results/combined.txt` is the
+`harden` and `batch` read tasks from the local cache only, so run `tasks fetch` before this. `results/combined.txt` is the
 attacker prompt used for the results (`rewardseal.strategies.COMBINED`). Run `batch` one small chunk at a time
 (`--chunk-size`, default 3, max 10): it has no stop before a run that would pass a cap. By default, when the exposure
-scan finds a hole, the attacker's first message includes the sanitized findings (`recon=exposure` in the certificate,
+scan finds a hole, the attacker's initial message includes the sanitized findings (`recon=exposure` in the certificate,
 `batch.json` and the site); `--no-recon` turns that off.
 
 Runs keep traces, raw diffs and restore sets locally under the git-ignored `results/traces/` (never committed); command outputs in traces are truncated (hash, size and a head).
@@ -227,13 +232,13 @@ Caps: **$10 real-spend** on Token Factory spend (`REAL_SPEND_CAP_USD`; promo cre
 and the cap sits below the promo balance, which is meant to keep the balance from going negative), **$4 daily**, **$20 total**; the
 Sandboxes estimate counter has its own $5 cap (`SANDBOX_COST_CAP_USD` in `.env.example`; the figure is an estimate and
 the console showed no Sandboxes line). Missing or invalid caps refuse to start, HTTP 402 halts every paid call, and
-the Nebius console is checked between chunks (the ledger overstates, the safe side). Secrets are kept out of git by design: keys
+the Nebius console is checked between chunks (the ledger overstates, the conservative side). Secrets are kept out of git by design: keys
 live only in the git-ignored `.env`, fixtures are sanitized, CI runs a secret scan, and the certificate writer refuses
 secret-like values.
 
 ## Certification semantics
 
-Certification records the outcome of the qualifying attack and the gates; it is not a security guarantee. `certified_via` records how:
+Certified (k=1) = one completed attack failed under the recorded conditions, with exposure removed, gold pass and empty fail checked by code. This describes the hardened 348 result. The three legacy certificates record a failed initial attack with no hole found; they do not record exposure removal or a hardened re-attack. Certification is not a security guarantee. `certified_via` records how:
 
 - `no_hole_found`: the attacker failed before any patch was applied.
 - `hardened_reattack_failed`: the attacker found a hole, the patches were accepted (gold still passes), and the same
