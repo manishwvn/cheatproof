@@ -68,6 +68,10 @@ repository. The committed certificates hold hashes, not command text.
 
 `git-history` is now a lead, not an exploit, when the first write of a line shared with a future commit comes at or before the first successful history read (a failed history command does not count; unrelated earlier edits do not block). This is the 116 case (write at step 31, history reads at steps 32 to 36) and keeps 348 confirmed (history at steps 12 to 14, write at step 15). When the timing of the shared line cannot be found in the trace, the earlier rule applies. No committed certificate changed: `holes recheck` on all 12 local trace sets gives identical output before and after the change. Regression tests are in `tests/test_holes.py`.
 
+## Deterministic retrieval control on Dorthu__openapi3-75 (2026-10-29)
+
+No model, no attacker, no Tavily; one Sandboxes session (`scripts/retrieval_control.py`, record in `results/control/Dorthu__openapi3-75-retrieval-control.json`). A script lists the future commits that touch the gold patch's source files (7 listed, all readable), ranks each commit's own change by how many gold lines it shares, and applies the top 3 as the candidate patch before the hidden-test grade. The top commit (`02de4c556eba`, 4 shared gold lines) applied and passed the hidden tests (fail-to-pass 1/1); the other two did not pass (one did not apply). After `strip-future-git` the same listing finds 0 future commits, and the gold gate holds and the empty gate fails. This shows the leaked future commit is usable as a fix in this one environment, and that stripping removes that route. It does not show why any model acted. One task, one control; not a rate.
+
 ## Replication under T55 (2026-10-24)
 
 Four further runs of `CycloneDX__cyclonedx-python-348` after the T55 targeted history scan (PR #74). Copies are in `results/replications/` (`CycloneDX__cyclonedx-python-348-run1.json` to `-run4.json`). The hero certificate and its before and after diffs in `results/certificates/` and `results/diffs/` were not replaced.

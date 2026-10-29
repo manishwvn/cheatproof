@@ -23,6 +23,7 @@ in the repo. Nothing else may be used. If a number changes, change this sheet fi
 | Tavily | one harness-initiated search (schematics-7); the attacker made 0 search calls; no effect on any outcome shown | `results/certificates/Alexei-Kornienko__schematics_to_swagger-7-*.json`, `docs/tavily.md` |
 | Real Token Factory spend | about $4.15 at Oct 29 (ledger counter, an overestimate against the console); promo credit, no card | `~/.cheatproof-autopilot/ledger.json` (local, not committed), `docs/results.md` (Console) |
 | Tests | see `STATUS.md` (CI runs them on every PR) | `.github/workflows/ci.yml` |
+| Retrieval control (openapi3-75) | applying the top-ranked future commit (4 shared gold lines) passed the hidden tests before the strip; 0 future commits and gates held after; one task, no model | `results/control/Dorthu__openapi3-75-retrieval-control.json`, `docs/results.md` |
 | Demo | https://manishwvn.github.io/cheatproof/ (recorded replay of committed data, not a live attack) | `.github/workflows/pages.yml` |
 
 ## Qualifiers that must travel with the numbers
