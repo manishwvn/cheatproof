@@ -77,7 +77,7 @@ from cheatproof.harden import (
     VISIBLE_PASSED_BASIS,
 )
 from cheatproof.holes import HARD_CODE, LEGIT_FIX, UNCLASSIFIED
-from cheatproof.recon import RECON_EXPOSURE
+from cheatproof.recon import RECON_EXPOSURE, RECON_REPLAY
 from cheatproof.sanitize import _always_secret  # private on purpose: sanitize() would redact valid SHAs
 
 if TYPE_CHECKING:
@@ -128,7 +128,7 @@ ATTACKER_KEYS = (
 )
 # T47: how the attacker was primed. "exposure": its first message held the sanitized exposure scan (recon.py);
 # null: it did not. Optional in an older certificate; a certified certificate must carry it.
-RECON_VALUES = (RECON_EXPOSURE, None)
+RECON_VALUES = (RECON_EXPOSURE, RECON_REPLAY, None)
 HARDEN_KEYS = (
     "instance_id",
     "before",
@@ -305,7 +305,7 @@ def _check_attacker(value: Any) -> None:
     if "recon" in value:
         _want(
             value["recon"] in RECON_VALUES and (value["recon"] is None or isinstance(value["recon"], str)),
-            f"attacker.recon must be {RECON_EXPOSURE!r} or null, got {_show(value['recon'])}",
+            f"attacker.recon must be {RECON_EXPOSURE!r}, {RECON_REPLAY!r} or null, got {_show(value['recon'])}",
         )
     _want(
         value["visible_passed_basis"] == VISIBLE_PASSED_BASIS,
@@ -343,6 +343,13 @@ def _check_round(value: Any, where: str, *, optional: bool) -> None:
         return
     _want(isinstance(value, Mapping), f"{where} must be an object")
     _keys(value, ROUND_KEYS, where)
+    attack = value.get("attack")
+    if isinstance(attack, Mapping) and "recon" in attack:
+        label = attack["recon"]
+        _want(
+            label is None or (isinstance(label, str) and label in RECON_VALUES),
+            f"{where}.attack.recon must be a known recon label or null",
+        )
     holes = value["holes"]
     if holes is not None:
         _want(
@@ -588,7 +595,13 @@ def _check_consistent(data: Mapping[str, Any]) -> None:
         if rnd is not None and isinstance(rnd["attack"], Mapping) and "recon" in rnd["attack"]
     ]
     if round_labels and "recon" in data["attacker"]:
-        expected = RECON_EXPOSURE if RECON_EXPOSURE in round_labels else None
+        expected = (
+            RECON_EXPOSURE
+            if RECON_EXPOSURE in round_labels
+            else RECON_REPLAY
+            if RECON_REPLAY in round_labels
+            else None
+        )
         _want(data["attacker"]["recon"] == expected, "attacker.recon does not match the rounds' attack recon")
     expected_holes = [] if before["holes"] is None else sorted(set(before["holes"]["labels"]))
     _want(data["holes_found"] == expected_holes, "holes_found does not match harden.before.holes.labels")
@@ -714,6 +727,10 @@ def recon_label(report: HardenReport) -> str | None:
         attack = None if rnd is None else rnd.attack
         if isinstance(attack, Mapping) and attack.get("recon") == RECON_EXPOSURE:
             return RECON_EXPOSURE
+    for rnd in (report.before, report.after):
+        attack = None if rnd is None else rnd.attack
+        if isinstance(attack, Mapping) and attack.get("recon") == RECON_REPLAY:
+            return RECON_REPLAY
     return None
 
 

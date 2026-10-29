@@ -126,7 +126,7 @@ from cheatproof.holes import (
     downgrade_legit_fix,
     shared_future_lines,
 )
-from cheatproof.recon import RECON_EXPOSURE, forbidden_snippets, recon_text, recon_types
+from cheatproof.recon import RECON_EXPOSURE, RECON_REPLAY, forbidden_snippets, recon_text, recon_types
 
 if TYPE_CHECKING:
     from cheatproof.attacker import AttackResult
@@ -594,8 +594,13 @@ class _Loop:
         workdir: str,
         ops: HardenOps,
         recon: bool = False,
+        recon_replay: bool = False,
     ) -> None:
         self.recon = recon
+        self.recon_replay = recon_replay
+        self.before_recon: str | None = None
+        self.before_recon_types: list[str] = []
+        self.after_round = False
         self.executor = executor
         self.task = task
         self.attack_fn = attack_fn
@@ -682,11 +687,16 @@ class _Loop:
         state.exposure = self.ops.scan(box.session, self.task, workdir=self.workdir)
         self._fresh(box, state)
         text = self._recon_text(state)
+        kinds = recon_types(state.exposure) if text is not None and state.exposure is not None else []
+        label = RECON_EXPOSURE if text is not None else None
+        if not self.after_round:
+            self.before_recon, self.before_recon_types = text, kinds.copy()
+        elif self.recon_replay and self.before_recon is not None:
+            text, kinds, label = self.before_recon, self.before_recon_types.copy(), RECON_REPLAY
         # Without recon the attack function is called as before, with the session only.
         result = self.attack_fn(box.session) if text is None else self.attack_fn(box.session, recon=text)
         self.attacks.append(result)
-        kinds = recon_types(state.exposure) if text is not None and state.exposure is not None else []
-        state.attack = _attack_summary(result, RECON_EXPOSURE if text is not None else None, kinds)
+        state.attack = _attack_summary(result, label, kinds)
         patched = bool(state.patches)
         if not patched and _reset_during(result):
             self.notes.append(
@@ -830,6 +840,8 @@ class _Loop:
 
     def run(self, env: EnvSpec) -> HardenReport:
         before = self.round(env, ())
+        if self.recon_replay and self.before_recon is None:
+            self.notes.append("recon replay not applied: before round had no recon text")
         if before.error is not None:
             return self.report(before, False, f"round before hardening failed: {before.error}")
         if before.gates is not None and not before.gates.ok:
@@ -863,6 +875,7 @@ class _Loop:
             reason = f"attacker exploited {', '.join(labels)} and nothing could be applied ({detail}); not hardened"
             return self.report(before, False, reason, candidates=candidates, unpatched=no_patch)
 
+        self.after_round = True
         after = self.round(env, accepted)
         shown = {"candidates": candidates, "unpatched": no_patch, "after": after}
         if after.error is not None:
@@ -930,6 +943,7 @@ def harden(
     workdir: str | None = None,
     ops: HardenOps | None = None,
     recon: bool = False,
+    recon_replay: bool = False,
 ) -> HardenReport:
     """Attack the task, patch what the attack used, attack again, and report. One task, one attack per round.
 
@@ -938,8 +952,11 @@ def harden(
 
     recon (T47): when True and a round's exposure scan found a hole, that round's attack is called as
     attack_fn(session, recon=<sanitized exposure text>) and the round's attack summary says recon "exposure". The
-    after round uses its own rescan. With recon False, or a clean scan, attack_fn(session) is called as before.
+    By default the after round uses its own rescan. recon_replay reuses the before text when available; otherwise
+    it records a no-op note and uses the normal rescan. With recon False or a clean scan, no text is passed.
     """
+    if recon_replay and not recon:
+        raise ValueError("recon_replay requires recon")
     if not timeout > 0:  # also refuses NaN
         raise ValueError(f"harden timeout must be greater than 0 seconds, got {timeout!r}")
     loop = _Loop(
@@ -951,5 +968,6 @@ def harden(
         env.workdir if workdir is None else workdir,
         HardenOps.default() if ops is None else ops,
         recon,
+        recon_replay,
     )
     return loop.run(env)

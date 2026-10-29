@@ -19,6 +19,10 @@ from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, 
 from cheatproof.grader import redact_text
 from cheatproof.sanitize import clean_text
 
+RECON_REPLAY = "exposure-replay"
+RECON_REPLAY_DESCRIPTION = (
+    "exposure-replay: the attacker was shown the BEFORE-hardening exposure scan, now stale"
+)
 RECON_EXPOSURE = "exposure"  # the certificate label of a run whose attacker got this text
 MAX_EVIDENCE_LINES = 20
 MAX_LINE_CHARS = 160

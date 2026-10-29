@@ -136,7 +136,7 @@ from typing import TYPE_CHECKING, Any
 from cheatproof import confirm
 from cheatproof.budget import Budget, BudgetExceeded, init_ledger_from_env
 from cheatproof.executor import DiskRefused, EnvSpec, ExecutorRefused, ExecutorUnavailable, make_executor
-from cheatproof.recon import RECON_EXPOSURE
+from cheatproof.recon import RECON_EXPOSURE, RECON_REPLAY
 from cheatproof.sanitize import REDACTED, sanitize
 
 if TYPE_CHECKING:
@@ -438,7 +438,12 @@ def _harden_line(report: Any, cost: float) -> str:
     certified = "yes" if report.certified else "no"
     via = getattr(report, "certified_via", None)  # T50: how it was certified
     tail = f"  via: {via}" if via else ""
-    return f"certified: {certified}  holes found: {found}  cost: ${cost:.4f}{tail}"
+    replay = next(
+        (note for note in getattr(report, "notes", ()) if note.startswith("recon replay not applied:")), ""
+    )
+    return f"certified: {certified}  holes found: {found}  cost: ${cost:.4f}{tail}" + (
+        f"  {replay}" if replay else ""
+    )
 
 
 def _certificate_stem(task: TaskSpec) -> str:
@@ -644,6 +649,7 @@ class _Settings:
     out: Path
     network_fetch: bool = False
     harness_search: bool = False  # T52: on with --network-fetch unless --no-harness-search
+    recon_replay: bool = False
     recon: bool = True  # T47: exposure recon for the attacker; --no-recon turns it off
 
 
@@ -711,6 +717,7 @@ def _harden_settings(args: argparse.Namespace) -> _Settings:
         network_fetch=network_fetch,
         harness_search=harness_search,
         recon=not bool(getattr(args, "no_recon", False)),
+        recon_replay=bool(getattr(args, "recon_replay", False)),
     )
 
 
@@ -810,6 +817,7 @@ def _harden_one(
     ] = []  # the attacks that returned, for keep.keep_stopped when harden stops without a report
 
     attacks_started = [0]
+    before_recon_shown = [False]
     first_search: list[dict | None] = [None]  # T52: the before-hardening attack's harness search
 
     def attack_fn(session: Any, recon: str | None = None) -> Any:
@@ -820,7 +828,12 @@ def _harden_one(
         config = settings.config
         if settings.network_fetch and not first:
             config = replace(config, allow_network=False, harness_search=False)
-        recon_kw: dict[str, Any] = {} if not recon else {"recon": recon, "recon_label": RECON_EXPOSURE}
+        if first:
+            before_recon_shown[0] = bool(recon)
+        label = (
+            RECON_REPLAY if settings.recon_replay and not first and before_recon_shown[0] else RECON_EXPOSURE
+        )
+        recon_kw: dict[str, Any] = {} if not recon else {"recon": recon, "recon_label": label}
         if first and settings.harness_search:
             # T52: the harness's own recon search, from the problem statement the attacker already sees.
             from cheatproof.strategies import problem_query  # lazy, as make_network_search
@@ -854,6 +867,7 @@ def _harden_one(
             attack_fn,
             budget=budget,
             recon=settings.recon,
+            **({"recon_replay": True} if settings.recon_replay else {}),
             **settings.timeout_kw,
         )
     except (BudgetExceeded, ExecutorRefused, ExecutorUnavailable) as exc:
@@ -1165,7 +1179,11 @@ def _run_row(instance_id: str, written: _Written) -> dict[str, Any]:
     row = {
         "instance_id": instance_id,
         "strategy": written.strategy,
-        "recon": recon_label(report),
+        "recon": (
+            RECON_REPLAY
+            if report.after and report.after.attack and report.after.attack.get("recon") == RECON_REPLAY
+            else recon_label(report)
+        ),
         "recon_types": recon_kinds(report),
         "certified": bool(report.certified),
         "stop_reasons": [a.get("stop_reason") for a in attacks],
@@ -1423,7 +1441,15 @@ def _batch_lines(batch: Mapping[str, Any]) -> list[str]:
         f"batch: already has a certificate {_cell(batch.get('already_certified'))}; "
         f"not run {len(rows)} ({reason_text})"
     )
-    return [rule, head, tail]
+    lines = [rule, head, tail]
+    runs = batch.get("runs")
+    if isinstance(runs, list) and any(
+        isinstance(row, Mapping) and row.get("recon") == RECON_REPLAY for row in runs
+    ):
+        from cheatproof.recon import RECON_REPLAY_DESCRIPTION
+
+        lines.append(RECON_REPLAY_DESCRIPTION)
+    return lines
 
 
 def _cell(value: Any) -> str:
@@ -1499,6 +1525,10 @@ def render_text(
     if "n_after" in score:
         header += f" (n_after={score['n_after']} with an after round)"
     lines = [header]
+    if confirmation is not None and confirmation.get("replay_ids"):
+        from cheatproof.recon import RECON_REPLAY_DESCRIPTION
+
+        lines.append(RECON_REPLAY_DESCRIPTION + ": " + ", ".join(confirmation["replay_ids"]))
     if confirmation is not None:
         lines += _confirmation_lines(confirmation, replications or {})
     else:
@@ -1601,6 +1631,14 @@ def _confirmation(directory: Path) -> tuple[dict[str, Any], dict[str, dict[str, 
     )
     certs = [load_certificate(path) for path in sorted(directory.glob("*.json")) if path.is_file()]
     summary = confirm.summarize(certs, manifest)
+    replay_ids = []
+    for cert in certs:
+        after = cert["harden"]["after"]
+        attack = after.get("attack") if isinstance(after, Mapping) else None
+        if isinstance(attack, Mapping) and attack.get("recon") == RECON_REPLAY:
+            replay_ids.append(cert["task"]["instance_id"])
+    if replay_ids:
+        summary["replay_ids"] = replay_ids
     replications = confirm.load_replications(directory.parent / confirm.REPLICATIONS_DIR)
     entries: dict[str, dict[str, Any]] = {}
     for task in summary["confirmed_ids"]:
@@ -2063,7 +2101,11 @@ def build_parser() -> argparse.ArgumentParser:
     harden.add_argument("--no-preflight", action="store_true", help="skip the collect-only preflight")
     harden.add_argument("--network-fetch", action="store_true", help=NETWORK_FETCH_HELP)
     harden.add_argument("--no-harness-search", action="store_true", help=NO_HARNESS_SEARCH_HELP)
-    harden.add_argument("--no-recon", action="store_true", help=NO_RECON_HELP)
+    harden_recon = harden.add_mutually_exclusive_group()
+    harden_recon.add_argument("--no-recon", action="store_true", help=NO_RECON_HELP)
+    harden_recon.add_argument(
+        "--recon-replay", action="store_true", help="replay the before exposure scan to the after attacker"
+    )
 
     batch = sub.add_parser(
         "batch", help="harden the cached selection one task at a time; resumable; no fetch"
@@ -2112,7 +2154,11 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--no-preflight", action="store_true", help="skip the collect-only preflight")
     batch.add_argument("--network-fetch", action="store_true", help=NETWORK_FETCH_HELP)
     batch.add_argument("--no-harness-search", action="store_true", help=NO_HARNESS_SEARCH_HELP)
-    batch.add_argument("--no-recon", action="store_true", help=NO_RECON_HELP)
+    batch_recon = batch.add_mutually_exclusive_group()
+    batch_recon.add_argument("--no-recon", action="store_true", help=NO_RECON_HELP)
+    batch_recon.add_argument(
+        "--recon-replay", action="store_true", help="replay the before exposure scan to the after attacker"
+    )
 
     audit_cmd = sub.add_parser(
         "audit-exposure",
@@ -2183,6 +2229,12 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
         args = build_parser().parse_args(argv)
     except SystemExit as exc:  # argparse exits 2 on a usage error and 0 on --help
         return int(exc.code or 0)
+    if getattr(args, "recon_replay", False) and getattr(args, "network_fetch", False):
+        print(
+            "--recon-replay cannot be combined with --network-fetch: attacker network settings differ between rounds",
+            file=sys.stderr,
+        )
+        return 2
     if deps is None:
         dry = args.command in ("batch", "audit-exposure") and args.dry_run
         deps = Deps.for_dry_run() if dry else Deps.default()
