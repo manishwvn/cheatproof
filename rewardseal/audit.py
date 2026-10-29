@@ -15,7 +15,7 @@ model and no attacker: for each task it starts one sandbox session and measures,
            (a shared line may be a common idiom or a one-line overlap). fix_reachable_basis says "k of n gold source
            lines found in future commits". It is a LOWER bound: a fix that was reformatted, renamed or moved, a fix
            that only a merge commit carries (the read passes --no-merges), and a fix that lives only in dangling
-           objects (docs/history-scan.md) are all missed;
+           objects (docs/method.md#detector-and-its-limits) are all missed;
   patch    the strip-future-git patch (patches.apply_patches), on a fresh session;
   gates    the gold gate still passes and the empty gate still fails on the patched session (grader gates);
   after    exposure.scan again on a fresh patched session: future_commits_after must be 0.

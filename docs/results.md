@@ -46,7 +46,7 @@ A standalone evidence file for 348 (steps 12 to 15 verbatim, recorded output hea
 
 **Oracle-assisted scripted control, not autonomous discovery:** [`Dorthu__openapi3-75-retrieval-control.json`](../results/control/Dorthu__openapi3-75-retrieval-control.json) lists 7 future commits touching gold source files, all readable; 3 candidates were tried. The top-ranked change shared 4 gold lines and passed 1/1 fail-to-pass tests. After the strip, 0 future commits remained in that listing, the gold gate passed and the empty gate failed. Ranking uses gold-line overlap: this does not prove model causality, and shows usable leakage for this control only, not why any model acted.
 
-Checked offline (2026-10-24) from the local, git-ignored traces `results/traces/<stem>.*` and the public upstream
+Checked offline (2026-10-24) from the local, git-ignored traces and the public upstream
 repository. The committed certificates hold hashes, not command text.
 
 - **348, before-round trace:** step 12 `git log --all --oneline -- cyclonedx_py/parser/pipenv.py | head -20`, step 13
@@ -92,7 +92,7 @@ Command: the T55 rerun command plus `--recon-replay` (Super, recon on, 40 steps,
 
 ## Second exposure audit: predeclared random sample (2026-10-29)
 
-Selection written and merged before the run (`docs/sample-protocol.md`, seed 20261029, `results/exposure-sample/_selection.json`): 12 tasks drawn at random from the cached frame (the 1000-row dataset frame: repositories 0-9 and A-E, 225 eligible after removing the selected 18 and deny-listed repos). Records: `results/exposure-sample/`. No model, no Token Factory spend. Reported separately from the 13 in the selected audit and never blended with it. The size is 12, not 30, because of the Sandboxes cost guard.
+Selection written and merged before the run (`docs/method.md#sample-protocol`, seed 20261029, `results/exposure-sample/_selection.json`): 12 tasks drawn at random from the cached frame (the 1000-row dataset frame: repositories 0-9 and A-E, 225 eligible after removing the selected 18 and deny-listed repos). Records: `results/exposure-sample/`. No model, no Token Factory spend. Reported separately from the 13 in the selected audit and never blended with it. The size is 12, not 30, because of the Sandboxes cost guard.
 
 - **Audited 9 of 12; 3 excluded as env-broken** (`Azure__azure-cli-2467`, `DavidVujic__python-polylith-260`, `DavidVujic__python-polylith-76`: collect-only failed). Nothing was replaced.
 - **At least half of the counted gold source lines also appear in a future commit in `.git`: 7 of 9 audited** (all counted lines in all 7; for 3 of the 7 the counted overlap is a single line). The other two had incomplete history listings (cut at 5000 commits) and found 0 of 1 and 1 of 5 counted lines, so absence is unproven there. All 9 had future commits.
@@ -391,7 +391,7 @@ the verified hole count is 0.
   in one batch and the budget halted. Batch 3 chunk 1 added `--chunk-size` so that a run stops between chunks.
 - Raw evidence stays local. Since T42 every `harden` and `batch` run keeps its full attacker trace
   (`<stem>.jsonl`), the raw attack diffs (`<stem>.before.diff`, `<stem>.after.diff`, `<stem>.diff`) and the task's
-  restore set (`<stem>.restore.json`, plus `<stem>.rounds.json` with the grade inputs) under `results/traces/`, which is
+  restore set (`<stem>.restore.json`, plus `<stem>.rounds.json` with the grade inputs) under the local traces directory, which is
   git-ignored. None of it is committed or published; the committed diffs under `results/diffs/` are sanitized. Hole
   labels can be re-checked offline from the kept files with `python -m rewardseal.cli holes recheck <stem>` (no
   network, sandbox or budget; it prints labels and test path names, never diff text). Runs before T42 kept only
@@ -553,7 +553,7 @@ One run of `nvidia/Nemotron-3-Ultra-550b-a55b` as the attacker (recon on, `combi
 - Certificates: `results/certificates/*.json` (14 files, cumulative). Batch state: `results/batch.json` (the 2026-10-24 rerun, the last run).
 - Diffs: `results/diffs/*.diff.json` (sanitized digests, per the batch writer). Raw diffs (`*.before.diff`,
   `*.after.diff`, `*.diff`) and old certificate copies (`*.old`) are git-ignored and are never committed.
-- Traces and reports: `results/traces/`, `results/reports/` (git-ignored by policy, not committed).
+- Traces and reports: the local traces directory, the local reports directory (git-ignored by policy, not committed).
 
 ## Next
 
