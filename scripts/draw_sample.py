@@ -1,4 +1,4 @@
-"""Draw the predeclared random sample for the second exposure audit (see docs/sample-protocol.md).
+"""Draw the predeclared random sample for the second exposure audit (see docs/method.md#sample-protocol).
 
     uv run python scripts/draw_sample.py [--seed 20261029] [--n 12]
 

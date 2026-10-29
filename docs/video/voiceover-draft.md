@@ -1,7 +1,7 @@
 # Voice-over draft (about 2 minutes, for the owner)
 
 Draft written by a read-only Codex run over the public repo, checked against `README.md` and `docs/results.md`. It is a
-shorter alternative to the 13-beat table in `script.md` (which `video/rough_cut.py` reads). The owner records the final
+shorter alternative to the 13-beat table in `script.md`. The owner assembles the cut from that table and records the final
 voice and may cut or reorder. Every number below is in `docs/results.md`.
 
 | Timestamp | On-screen | Voice-over |

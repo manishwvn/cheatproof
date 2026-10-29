@@ -6,7 +6,7 @@ Rule-based patches close the hole, and the same attacker attacks again. Each env
 three gates hold: the gold patch passes, an empty patch fails, and the attacker fails.
 
 Entry for the Nebius x NVIDIA Global AI Hackathon, Coding & Agentic Engineering track. Pitch and claims:
-`docs/pitches.md`, `docs/claims.md`. Execution model: `docs/adr/0002-execution-model.md`.
+`docs/claims.md`. Execution model: `docs/method.md`.
 
 ## Rules that never bend
 1. **No card money.** Free credits only: the $1 trial and the hackathon promo credit (about $26.65, "AI Builder Program
@@ -44,4 +44,4 @@ uv run python scripts/smoke.py          # live, needs .env
 ```
 
 ## Session start
-Read `STATUS.md`. Update it at the end of every task.
+Read `README.md` and `docs/README.md`.
