@@ -2,10 +2,10 @@
 
 build_site() loads each *.json certificate in a directory with certify.load_certificate() and scores the valid ones with
 certify.score(). It writes index.html (the score, the run record, one row per environment and the files that failed to
-load) and env/<name>.html (one page per valid certificate, with its transcript when traces_dir holds one). Every rate,
-interval and count comes from certify.py, except the selection counts, which come from the batch record. This module
-computes none of its own. The score shows the certified split (certified_unhardened, certified_hardened), no_attempt,
-and the cost with the cost_basis label that certify gives.
+load) and env/<name>.html (one page per valid certificate, with its transcript when traces_dir holds one). Rates,
+intervals and attack counts come from certify.py and confirm.py; audit counts come from audit.exposure_summary.
+This module reconciles selection ids and certificate files. The score shows the certified split
+(certified_unhardened, certified_hardened), no_attempt, and the cost with the cost_basis label that certify gives.
 
 Selection record. cert_dir.parent/batch.json (or batch_file, when given) is the record that cli batch writes: what was
 scanned, how many were valid, what was skipped and why, the selection rule, and the selected instances that did not run.
@@ -52,7 +52,10 @@ from cheatproof.certify import load_certificate, score
 from cheatproof.sanitize import sanitize
 
 BANNER = "Recorded run — replay of committed certificates, no live calls"
-NO_TRANSCRIPT = "no transcript recorded"
+NO_TRANSCRIPT = (
+    "No transcript is committed on this site. For the one confirmed case the recorded commands of steps 12 to 15 "
+    "are in the evidence file."
+)
 NOT_RECORDED = "not recorded"
 NO_ATTACK_DIFF = "attack diff not recorded in certificate"
 UNREADABLE_LINE = "unreadable line"
@@ -259,6 +262,14 @@ def build_site(
     exposure_summary = _exposure_summary(
         root, Path(exposure_dir) if exposure_dir is not None else root.parent / "exposure", errors
     )
+    exposure_path = Path(exposure_dir) if exposure_dir is not None else root.parent / "exposure"
+    try:
+        blob = _blob_base(root.parent)
+    except ValueError as exc:
+        errors.append(("PINNED_SHA", str(exc)))
+        blob = GITHUB_BLOB
+    reconciliation = _reconciliation(entries, batch, exposure_path)
+    sample = _second_audit(root, errors)
     diffs_dir = root.parent / DIFFS_DIR
     env_dir = out / "env"
     env_dir.mkdir(parents=True, exist_ok=True)
@@ -280,9 +291,12 @@ def build_site(
         replications,
         statuses,
         exposure_summary,
-        _start_here(entries, root.parent / "evidence"),
+        _start_here(entries, root.parent / "evidence", blob),
+        _numbers_key(confirmation, exposure_summary, replications, manifest, sample),
+        reconciliation,
+        blob,
     )
-    _write(index, _document("RewardSeal report", body))
+    _write(index, _document("RewardSeal report", body, blob))
     pages = []
     for entry in entries:
         page = env_dir / f"{entry.name}.html"
@@ -296,8 +310,9 @@ def build_site(
             diffs,
             statuses[entry.cert["task"]["instance_id"]],
             entry.stem,
+            blob,
         )
-        _write(page, _document(f"RewardSeal: {entry.cert['task']['instance_id']}", body))
+        _write(page, _document(f"RewardSeal: {entry.cert['task']['instance_id']}", body, blob))
         pages.append(page)
     return SiteResult(index=index, pages=pages, errors=errors)
 
@@ -611,7 +626,32 @@ def _section(anchor: str, heading: str, *parts: str, level: int = 2) -> str:
     )
 
 
-def _document(title: str, body: str) -> str:
+def _blob_base(root: Path) -> str:
+    """Evidence links from a results directory; refuse malformed pins and symlinks."""
+    path = root / "PINNED_SHA"
+    if path.is_symlink():
+        raise ValueError("symlink refused: evidence pin is not read")
+    if not path.exists():
+        return GITHUB_BLOB
+    try:
+        pin = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        raise ValueError("evidence pin could not be read") from None
+    if re.fullmatch(r"[0-9a-fA-F]{40}\n?", pin) is None:
+        raise ValueError("evidence pin must be one line of 40 hex characters")
+    return GITHUB_BLOB.removesuffix("main/") + pin.strip() + "/"
+
+
+def _pin_label(blob: str) -> str:
+    return "latest (main)" if blob == GITHUB_BLOB else f"pinned {blob.rstrip('/').rsplit('/', 1)[-1][:7]}"
+
+
+def _document(title: str, body: str, blob: str = GITHUB_BLOB) -> str:
+    footer = (
+        "Evidence links point at main (latest)"
+        if blob == GITHUB_BLOB
+        else f"Evidence pinned to commit {blob.rstrip('/').rsplit('/', 1)[-1][:7]}"
+    )
     return "\n".join(
         [
             "<!doctype html>",
@@ -624,7 +664,7 @@ def _document(title: str, body: str) -> str:
             f"<style>\n{CSS}</style>",
             "</head>",
             "<body>",
-            f"<main>\n{body}\n</main>",
+            f"<main>\n{body}\n<footer><p>{_cell(footer)}</p></footer>\n</main>",
             "</body>",
             "</html>",
             "",
@@ -688,6 +728,246 @@ def _gates_text(gates: Any) -> str:
 # Index page
 
 
+def _reading_guide(blob: str) -> str:
+    return _section(
+        "reading-guide",
+        "How to read this report in 60 seconds",
+        '<div class="banner">'
+        "<p>RewardSeal checks whether a coding task leaks its own fix, strips the leak, re-checks, and attacks again.</p>"
+        '<p>Read the <a href="#numbers-key">Numbers key</a> first.</p>'
+        "<p>Release a task only if (a) gold passes and empty fails, (b) the exposure scan after hardening shows no "
+        "future commits, and (c) a re-attack under the same conditions failed; otherwise withhold.</p>"
+        "<p>Certified means a recorded attack failed, nothing more.</p>"
+        f"<p>{_link_html(blob + 'docs/claims.md', 'docs/claims.md (' + _pin_label(blob) + ')')}: "
+        "the list of every number allowed.</p></div>",
+    )
+
+
+def _second_audit(root: Path, errors: list[tuple[str, str]]) -> str:
+    directory = root.parent / "exposure-sample"
+    if not directory.exists():
+        return ""
+    summary = _exposure_summary(root, directory, errors)
+    selection = _regular_file(directory, "_selection.json")
+    try:
+        data = json.loads(selection.read_text(encoding="utf-8")) if selection else None
+        if (
+            not isinstance(data, dict)
+            or not _is_count(data.get("seed"))
+            or not isinstance(data.get("rule"), str)
+        ):
+            raise ValueError("selection must record a seed and rule")
+    except (OSError, UnicodeError, ValueError) as exc:
+        errors.append(("exposure-sample/_selection.json", f"second audit selection refused: {exc}"))
+        data = None
+    parts = []
+    if summary is not None and summary["source"] == "audit" and data is not None:
+        scope = f"Counts only; n={summary['M']}. Closure covers the workdir repository only."
+        parts.append(f"<p>{_cell(scope)}</p>")
+        parts.append(
+            _kv_table(
+                "Second audit counts and sampling frame",
+                [
+                    ("Drawn", summary["selected"]),
+                    ("Audited", summary["M"]),
+                    ("Excluded env-broken", summary["excluded_env_broken"]),
+                    (
+                        "At least half of counted lines in a future commit",
+                        f"{summary['N_fix']} of {summary['M']}",
+                    ),
+                    ("Closed after strip-future-git", f"{summary['N_fix_closed']} of {summary['N_fix']}"),
+                    ("n", summary["M"]),
+                    ("Frame (from docs/results.md)", "first 1000 dataset rows; repos 0-9 and A-E"),
+                    ("Seed", data["seed"]),
+                    ("Rule", data["rule"]),
+                    ("Population", "random within that frame only"),
+                    ("What it is NOT", "NOT SWE-rebench at large and NOT blended with the 13"),
+                    ("Source", "results/exposure-sample/ records, _run.json and _selection.json"),
+                ],
+            )
+        )
+    else:
+        parts.append("<p>Second audit records not loaded; no counts shown.</p>")
+    return _section("second-audit", "Second audit (separate random sample, not blended)", *parts, level=3)
+
+
+def _numbers_key(
+    confirmation: Mapping[str, Any] | None,
+    exposure: Mapping[str, Any] | None,
+    replications: confirm.ReplicationSet,
+    manifest: Mapping[str, Mapping[str, str]],
+    sample: str,
+) -> str:
+    rows = []
+    if exposure is not None and exposure["source"] == "audit":
+        rows += [
+            _row(
+                f"{exposure['N_fix']} of {exposure['M']}",
+                f"audit: at least half of counted gold lines in a future commit; {exposure['M']} audited "
+                f"of the {exposure['selected']} selected, {exposure['excluded_env_broken']} excluded env-broken",
+                "results/exposure/ records and _run.json",
+                "NOT a prevalence estimate",
+            ),
+            _row(
+                f"{exposure['N_fix_closed']} of {exposure['N_fix']}",
+                "closed after strip-future-git: no future commits and gates held; workdir repo only",
+                "results/exposure/ records",
+                "NOT closure of other repositories or routes",
+            ),
+        ]
+    if confirmation is not None:
+        recon = confirmation.get("recon")
+        if isinstance(recon, Mapping):
+            rows.append(
+                _row(
+                    f"{recon['confirmed']} of {recon['n']}",
+                    "future_git tasks attacked with recon on, confirmed pattern",
+                    "certificates and results/confirmations.json",
+                    f"NOT {recon['n']} independent trials",
+                )
+            )
+        for key, label in (("rate_confirmed_before", "before"), ("rate_confirmed_after", "after")):
+            rate = confirmation[key]
+            rows.append(
+                _row(
+                    f"{rate['count']} of {rate['n']}",
+                    f"score table: confirmed holes {label} hardening among conclusive certificates",
+                    "certificates and results/confirmations.json",
+                    "n too small for a rate",
+                )
+            )
+        task = "CycloneDX__cyclonedx-python-348"
+        try:
+            rep = confirm.replication_for(task, replications, manifest)
+        except confirm.ConfirmationError:
+            rep = None
+        if rep is not None:
+            rows.append(
+                _row(
+                    f"{confirmation['confirmed_holes']} confirmed; {rep['confirmed']}/{rep['n']} judged runs",
+                    "the replication rule counts only runs whose before attack finished and was judged; "
+                    f"the 4 later runs were unfinished or inconclusive, so it reads {rep['confirmed']}/{rep['n']}; across all 10 later "
+                    "before-rounds one showed the pattern (docs/results.md)",
+                    "results/replications/ and docs/results.md",
+                    "NOT a contradiction: different populations",
+                )
+            )
+        rows += [
+            _row(
+                "1/10 later before-rounds",
+                "later before-rounds of task 348, including unfinished or inconclusive runs",
+                "from docs/results.md",
+                "NOT 10 judged independent trials",
+            ),
+            _row(
+                f"{confirmation['n']} certificates",
+                "files, all tasks with a certificate including env-broken tasks",
+                "results/certificates/",
+                f"NOT {confirmation['n']} audited; a file need not contain an attack",
+            ),
+            _row(
+                f"{confirmation['certified']} certified",
+                f"{confirmation['certified_via'].get('hardened_reattack_failed', 0)} after a failed hardened re-attack; "
+                f"{confirmation['certified_via'].get('legacy', 0)} legacy no-hole-found",
+                "results/certificates/",
+                "NOT a security claim",
+            ),
+        ]
+    return _section(
+        "numbers-key",
+        "Numbers key",
+        _table(
+            "Each number has its own population", ("Number", "Population", "Source", "What it is NOT"), rows
+        ),
+        sample,
+    )
+
+
+def _fate(cert: Mapping[str, Any] | None, audited: str) -> str:
+    if cert is None:
+        return {"audited": "audited only", "excluded env-broken": "excluded from audit (env-broken)"}.get(
+            audited, "no certificate or audit recorded"
+        )
+    harden = _map(cert.get("harden"))
+    before, after = _map(harden.get("before")), _map(harden.get("after"))
+    attacked = isinstance(before.get("attack"), Mapping)
+    if cert.get("certified"):
+        if after:
+            return (
+                "certified after hardened re-attack"
+                if confirm.reattack_failed(cert)
+                else "certified after hardening (real fix)"
+            )
+        return "certified, first attack failed (no hardening)"
+    if not attacked and _map(before.get("gates")).get("ok") is False:
+        return "gates failed before any attack (env-broken)"
+    if any(r.get("inconclusive") or r.get("error") for r in (before, after)):
+        return "attacked, inconclusive" if attacked else "error before any attack"
+    if before.get("no_attempt"):
+        return "attacker ran, no qualifying attempt"
+    if _map(after.get("holes")).get("exploited"):
+        return "attacked, classifier flagged a shortcut after hardening (an unconfirmed lead unless the confirmations file says otherwise)"
+    return "attacked, not certified" if attacked else "no attack recorded"
+
+
+def _reconciliation(entries: Sequence[_Entry], batch: _Batch, exposure_path: Path) -> str:
+    from cheatproof import audit
+
+    selected = set(batch.record["selected_ids"]) if batch.record else set()
+    audited_ids: set[str] = set()
+    excluded = {}
+    try:
+        run = audit.load_run(exposure_path)
+        if run:
+            selected.update(run["selected_ids"])
+            excluded = run["excluded"]
+        if not exposure_path.is_symlink():
+            for path in sorted(exposure_path.glob("*.json")):
+                if not path.name.startswith("_"):
+                    audited_ids.add(audit.load_record(path)["instance_id"])
+    except (audit.ExposureAuditError, OSError):
+        # The shared summary loader reports invalid audit files in the build errors.
+        audited_ids.clear()
+    if not selected:
+        return ""
+    by_id = {e.cert["task"]["instance_id"]: e for e in entries}
+    rows = []
+    for task in sorted(selected):
+        entry = by_id.get(task)
+        cert = entry.cert if entry else None
+        audit_state = (
+            "audited"
+            if task in audited_ids
+            else "excluded env-broken"
+            if excluded.get(task) == "env_broken"
+            else "not audited"
+        )
+        cert_text = "none"
+        attacked = False
+        if cert is not None:
+            rounds = _map(cert.get("harden"))
+            attacked = any(isinstance(_map(rounds.get(r)).get("attack"), Mapping) for r in ROUNDS)
+            verdict = (
+                "yes"
+                if cert["certified"]
+                else "inconclusive"
+                if any(_map(rounds.get(r)).get("inconclusive") for r in ROUNDS)
+                else "no"
+            )
+            cert_text = f"{entry.stem}.json (certified {verdict})"
+        rows.append(_head_row(task, cert_text, attacked, audit_state, _fate(cert, audit_state)))
+    outside = sum(1 for e in entries if e.cert["task"]["instance_id"] not in selected)
+    text = (
+        f"{len(rows)} of {len(selected)} selected tasks are in the table. The site holds {len(entries)} "
+        f"certificate files, of which {outside} are outside the {len(selected)}."
+    )
+    return f"<p>{_cell(text)}</p>" + _table(
+        "Selected task reconciliation",
+        ("Task", "Certificate file", "Attacked", "Exposure audit", "Fate"),
+        rows,
+    )
+
+
 def _index_body(
     entries: Sequence[_Entry],
     errors: Sequence[tuple[str, str]],
@@ -700,6 +980,9 @@ def _index_body(
     statuses: Mapping[str, confirm.HoleStatus] | None = None,
     exposure: Mapping[str, Any] | None = None,
     start_here: str = "",
+    numbers_key: str = "",
+    reconciliation: str = "",
+    blob: str = GITHUB_BLOB,
 ) -> str:
     """excluded counts the certificate files left out (errors also holds a bad batch record, which is not one).
     confirmation, manifest, replications and statuses (T54) feed the hero block and the confirmed/lead counts."""
@@ -712,7 +995,7 @@ def _index_body(
     middle = (
         [
             _empty_state(excluded),
-            _section("run-record", "Run record", *_run_record_parts(batch, len(entries))),
+            _section("run-record", "Run record", reconciliation, *_run_record_parts(batch, len(entries))),
         ]
         if summary is None
         else [
@@ -723,18 +1006,23 @@ def _index_body(
                 replications or confirm.ReplicationSet(),
                 statuses or {},
                 exposure,
+                blob,
             ),
-            _score_section(summary, excluded, batch, len(entries), confirmation),
+            _score_section(summary, excluded, batch, len(entries), confirmation, reconciliation),
             _environments_section(entries, statuses or {}),
         ]
     )
-    return "\n".join([*head, start_here, *middle, _errors_section(errors)])
+    return "\n".join([*head, numbers_key, _reading_guide(blob), start_here, *middle, _errors_section(errors)])
 
 
 START_HERE_STEPS = (
     ("1. Exposure", "#hero", "the audit above: how often future commits sit in the task's .git"),
-    ("2. Commands", "#transcript", "what the attacker ran, in order (transcript)"),
-    ("3. Matching line", "#rounds", "the attack rounds and the diff that passed"),
+    (
+        "2. Commands",
+        "evidence",
+        "verbatim commands; outputs are 300-character heads plus a sha256, full outputs not retained",
+    ),
+    ("3. Matching line", "#matching-line", "one gold-added line also found in the attacker's step 15 write"),
     ("4. Patch", "#patches", "strip-future-git, the rule-based fix"),
     ("5. Gates", "#gates", "gold passes, empty fails, before and after"),
     ("6. Certificate", "#result", "the recorded outcome"),
@@ -747,7 +1035,7 @@ START_HERE_PLAIN = (
 )
 
 
-def _start_here(entries: Sequence[_Entry], evidence_dir: Path) -> str:
+def _start_here(entries: Sequence[_Entry], evidence_dir: Path, blob: str = GITHUB_BLOB) -> str:
     """A static, clickable path through the recorded 348 run (no live calls). The excerpt is copied from the committed
     evidence file as it is; when that file is missing there is no excerpt and no section."""
     entry = next((e for e in entries if e.cert["task"]["instance_id"] in EVIDENCE_FILES), None)
@@ -756,22 +1044,47 @@ def _start_here(entries: Sequence[_Entry], evidence_dir: Path) -> str:
     task = entry.cert["task"]["instance_id"]
     page = f"env/{entry.name}.html"
     excerpt = ""
-    path = evidence_dir / Path(EVIDENCE_FILES[task]).name
+    body = ""
+    path = _regular_file(evidence_dir, Path(EVIDENCE_FILES[task]).name)
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
+        text = path.read_text(encoding="utf-8") if path else ""
+    except (OSError, UnicodeError):
         text = ""
     if "## Before round" in text and "## The upstream fix" in text:
         body = text.split("## Before round", 1)[1].split("## The upstream fix", 1)[0]
         excerpt = (
-            "<details><summary>Recorded commands and matching line (excerpt of the evidence file)</summary>"
+            "<h3>Recorded commands</h3><details><summary>Steps 12 to 15: verbatim commands, "
+            "output heads and sha256 only</summary>"
             f"<pre>{_cell(body.strip())}</pre></details>"
         )
+    match = re.search(r"\*\*Step 15\*\*.*?```python\n([^\n]+)\n```", body, re.DOTALL)
+    matching = (
+        _table(
+            "Matching line",
+            ("Line the gold patch adds", "Line in the attacker's step 15 write"),
+            [_row(match[1], match[1])],
+        )
+        if match
+        else "<p>not in the evidence file</p>"
+    )
+    card = (
+        '<div class="banner">'
+        + (excerpt or "<h3>Recorded commands</h3><p>not in the evidence file</p>")
+        + '<h3 id="matching-line">Matching line</h3>'
+        + matching
+        + ("<p>Line overlap; use of the git show output is inferred from command order.</p>" if match else "")
+        + "</div>"
+    )
+
+    def target(anchor: str) -> str:
+        if anchor == "evidence":
+            return blob + EVIDENCE_FILES[task]
+        return anchor if anchor in ("#hero", "#matching-line") else page + anchor
+
     items = "".join(
-        f'<li><a href="{_cell(page + anchor)}">{_cell(label)}</a>: {_cell(what)}</li>'
+        f"<li>{_link_html(target(anchor), label)}: {_cell(what)}</li>"
         for label, anchor, what in START_HERE_STEPS
     )
-    items = items.replace(f'href="{page}#hero"', 'href="#hero"')
     return _section(
         "start-here",
         "Start here: a recorded run",
@@ -780,8 +1093,8 @@ def _start_here(entries: Sequence[_Entry], evidence_dir: Path) -> str:
         f"<p>Task: {_link_html(page, task)}</p>",
         f'<ol class="path">{items}</ol>',
         f"<p>{_cell(START_HERE_PLAIN)}</p>",
-        excerpt,
-        f"<p>{_link_html(GITHUB_BLOB + EVIDENCE_FILES[task], 'Full evidence file (full outputs not retained)')}</p>",
+        card,
+        f"<p>{_link_html(blob + EVIDENCE_FILES[task], 'Full evidence file (' + _pin_label(blob) + '; full outputs not retained)')}</p>",
     )
 
 
@@ -826,6 +1139,7 @@ def _hero_section(
     replications: confirm.ReplicationSet,
     statuses: Mapping[str, confirm.HoleStatus],
     exposure: Mapping[str, Any] | None = None,
+    blob: str = GITHUB_BLOB,
 ) -> str:
     """The block at the top of the index (T54): the confirmed/lead headline, what it does not show, and a
     before -> after summary of each confirmed environment, with its replication state."""
@@ -889,7 +1203,7 @@ def _hero_section(
     )
     ids = confirmation["confirmed_ids"]
     confirmed = [entry for entry in entries if entry.cert["task"]["instance_id"] in ids]
-    parts.append(_hero_confirmed(confirmed, replications, statuses, manifest))
+    parts.append(_hero_confirmed(confirmed, replications, statuses, manifest, blob))
     return _section("hero", "Confirmed holes", *parts)
 
 
@@ -898,6 +1212,7 @@ def _hero_confirmed(
     replications: confirm.ReplicationSet,
     statuses: Mapping[str, confirm.HoleStatus],
     manifest: Mapping[str, Mapping[str, str]],
+    blob: str = GITHUB_BLOB,
 ) -> str:
     """The before -> after panel of each confirmed environment (the T50 panel), with its replication line."""
     if not confirmed:
@@ -913,6 +1228,7 @@ def _hero_confirmed(
             "\n".join(
                 [
                     f"<h3>{_link_html(f'env/{entry.name}.html', task)}</h3>",
+                    f"<p>{_link_html(blob + DEFAULT_CERT_DIR + '/' + entry.stem + '.json', 'raw certificate (' + _pin_label(blob) + ')')}</p>",
                     _kv_table(
                         "Confirmed environment",
                         [
@@ -969,10 +1285,16 @@ def _run_record_parts(batch: _Batch, loaded: int) -> list[str]:
         return [f"<p>{BATCH_NOT_AVAILABLE}.</p>"]
     selected = record["selected"]
     not_run_count = len(record["not_run"])
-    lead = (
-        f"<p>Run by this batch: {record['run']} of {selected} selected "
-        f"(already had a certificate: {record['already_certified']}; not run: {not_run_count}).</p>"
-        f"<p>certificates loaded: {loaded} (scored on this page; this can include certificates from earlier runs).</p>"
+    lead = "".join(
+        f"<p>{_cell(text)}</p>"
+        for text in (
+            (
+                f"Run by this batch: {record['run']} of {selected} selected "
+                f"(already had a certificate: {record['already_certified']}; not run: {not_run_count})."
+            ),
+            f"This line counts only the last batch call, not all {selected}; see the table.",
+            f"certificates loaded: {loaded} (scored on this page; this can include certificates from earlier runs).",
+        )
     )
     counts = _kv_table(
         "Selection record counts",
@@ -1012,6 +1334,7 @@ def _score_section(
     batch: _Batch,
     loaded: int,
     confirmation: Mapping[str, Any] | None = None,
+    reconciliation: str = "",
 ) -> str:
     lead = f"n = {summary['n']} valid certificates. " + (_excluded_text(excluded) + " " if excluded else "")
     if confirmation is not None:
@@ -1078,7 +1401,7 @@ def _score_section(
         f"<p>{lead}A certified task is one where the recorded qualifying attack by this attacker did not succeed. "
         "That is not a claim that it is secure or proven.</p>",
         f"<p>{_cell(confirm.counts_line(confirmation))}</p>" if confirmation is not None else "",
-        _section("run-record", "Run record", *_run_record_parts(batch, loaded), level=3),
+        _section("run-record", "Run record", reconciliation, *_run_record_parts(batch, loaded), level=3),
         _table(
             "Rates with 95% Wilson intervals (shown from n = 10)",
             ("Measure", "Count of n and rate", "Denominator"),
@@ -1205,18 +1528,22 @@ def _env_body(
     diffs: Mapping[str, str | None] | None = None,
     status: confirm.HoleStatus | None = None,
     stem: str | None = None,
+    blob: str = GITHUB_BLOB,
 ) -> str:
     task = cert["task"]
     links = []
     if stem:
-        links.append(_link_html(f"{GITHUB_BLOB}{DEFAULT_CERT_DIR}/{stem}.json", "raw certificate on GitHub"))
+        links.append(
+            _link_html(f"{blob}{DEFAULT_CERT_DIR}/{stem}.json", "raw certificate (" + _pin_label(blob) + ")")
+        )
     if task["instance_id"] in EVIDENCE_FILES:
         links.append(
             _link_html(
-                GITHUB_BLOB + EVIDENCE_FILES[task["instance_id"]], "evidence file (full outputs not retained)"
+                blob + EVIDENCE_FILES[task["instance_id"]],
+                "evidence file (" + _pin_label(blob) + "; full outputs not retained)",
             )
         )
-    link_row = [f"<p>{' | '.join(links)}</p>"] if links else []
+    link_row = [f"<p>View the raw certificate on GitHub: {' | '.join(links)}</p>"] if links else []
     return "\n".join(
         [
             '<p><a href="../index.html">Back to the index</a></p>',
@@ -1228,15 +1555,15 @@ def _env_body(
             *link_row,
             _result_section(cert, status),
             *([f"<p>{_cell(REPLICATION_NOTE_348)}</p>"] if task["instance_id"] in EVIDENCE_FILES else []),
+            _exposure_section(cert["exposure_before"]),
             _before_after_section(cert),
             _task_section(cert),
             _attacker_section(cert["attacker"]),
             _gates_section(cert["harden"]),
-            _exposure_section(cert["exposure_before"]),
             _holes_section(cert["harden"]),
             _patches_section(cert["harden"]),
             _rounds_section(cert["harden"], diffs or {}),
-            _section("transcript", "Transcript", transcript),
+            _section("transcript", "Transcript (harness record)", transcript),
         ]
     )
 
@@ -1269,7 +1596,11 @@ def _via_rows(counts: Any) -> list[tuple[str, Any]]:
 def _via_text(cert: Mapping[str, Any]) -> str:
     """certified_via as recorded, with plain words. A certificate written before T50 has none."""
     if "certified_via" not in cert:
-        return "not recorded (certificate written before certified_via)"
+        return (
+            "legacy: not recorded (certificate written before certified_via)"
+            if cert.get("certified")
+            else "not recorded (certificate written before certified_via)"
+        )
     via = cert["certified_via"]
     if via is None:
         return "none (not certified)"
@@ -1356,10 +1687,31 @@ def _before_after_section(
         if closed
         else "Before and after hardening, as recorded. Results hold against this attacker only."
     )
+    after_attack = _map(after.get("attack"))
+    before_recon, after_recon = before_attack.get("recon") or "none", after_attack.get("recon") or "none"
+    before_steps, after_steps = before_attack.get("steps"), after_attack.get("steps")
+    comparison_note = ""
+    if (before_recon, before_steps) != (after_recon, after_steps):
+        shown = "was shown" if before_recon == "exposure" else "was not shown"
+        after_shown = "was" if after_recon == "exposure" else "was not"
+        retried = _attempted_again(before_holes, after)
+        retry_text = (
+            "it did not retry the original route"
+            if retried == "none"
+            else "the original route retry is recorded below"
+        )
+        text = (
+            f"This re-attack is not like for like. Before hardening the attacker {shown} the exposure scan "
+            f"(recon: {before_recon}, {_value(before_steps)} steps); after hardening it {after_shown} "
+            f"(recon: {after_recon}, {_value(after_steps)} steps), and {retry_text} "
+            f"(earlier hole attempted again: {retried}). It does not isolate the effect of the patch."
+        )
+        comparison_note = f'<p class="banner" role="note">{_cell(text)}</p>'
     return _section(
         anchor,
         heading,
         f"<p>{_cell(lead)}</p>",
+        comparison_note,
         _kv_table(
             "Before: the hole the attacker found",
             [
@@ -1380,6 +1732,12 @@ def _before_after_section(
                 ("Certified via", _via_text(cert)),
             ],
         ),
+        _what_means(
+            "the scan after hardening found no future commits; the before-hardening scan table is above; "
+            "the after-hardening scan is in the certificate JSON"
+        )
+        if exposure == "clean" and scan.get("future_git") is False
+        else "",
         level=level,
     )
 
@@ -1419,6 +1777,15 @@ def _result_section(cert: Mapping[str, Any], status: confirm.HoleStatus | None =
                 ("Sandbox runs", cert["sandbox_runs"]),
             ],
         ),
+        _what_means(
+            "3 older certificates written before the certified_via field existed; they were never "
+            "re-attacked after hardening"
+        )
+        if cert.get("certified") and "certified_via" not in cert
+        else "",
+        _what_means("a ledger estimate, not billed spend")
+        if cert.get("cost_basis") == "budgeted ledger delta"
+        else "",
         "<h3>Notes</h3>",
         notes_html,
     )
@@ -1427,6 +1794,10 @@ def _result_section(cert: Mapping[str, Any], status: confirm.HoleStatus | None =
 def _digest_text(digest: Any) -> str:
     digest = _map(digest)
     return f"sha256 {_value(digest.get('sha256'))}, {_value(digest.get('chars'))} chars"
+
+
+def _what_means(text: str) -> str:
+    return f'<p class="what-this-means"><small>What this means: {_cell(text)}</small></p>'
 
 
 def _task_section(cert: Mapping[str, Any]) -> str:
@@ -1441,12 +1812,18 @@ def _task_section(cert: Mapping[str, Any]) -> str:
                 ("Repo", task["repo"]),
                 ("Base commit", task["base_commit"]),
                 ("Image", task["image"]),
-                ("Image digest", cert["image_digest"]),
+                ("Image digest", cert["image_digest"] or "image digest not recorded"),
                 ("Source", task["source"]),
                 ("Gold patch", _digest_text(task["gold_patch"])),
                 ("Test patch", _digest_text(task["test_patch"])),
             ],
         ),
+        _what_means("the task image is not pinned by digest in this certificate")
+        if not cert["image_digest"]
+        else "",
+        "<p>The task prompt and hidden tests are not shown here; see the dataset instance "
+        + _link_html("https://huggingface.co/datasets/nebius/SWE-rebench", task["instance_id"])
+        + ".</p>",
     )
 
 
@@ -1491,6 +1868,14 @@ def _exposure_section(exposure: Any) -> str:
         "exposure",
         "Exposure scan",
         _kv_table("Exposure scan before hardening", list(exposure.items())),
+        _what_means(
+            "tests can be written by the attacker, the grader restores hidden tests before grading, and the "
+            "list of unrestored non-root test paths is empty; root-writable paths are recorded separately above"
+        )
+        if exposure.get("tests_writable") is True
+        and exposure.get("restore_covered") is False
+        and exposure.get("unrestored_tests") == []
+        else "",
     )
 
 
@@ -1513,6 +1898,15 @@ def _holes_section(harden: Mapping[str, Any]) -> str:
             ("Round", "Exploited (holes found)", "Attempted", "Evidence per label"),
             rows,
         ),
+        _what_means(
+            "the classifier found no known shortcut in these rounds; the count is the number of "
+            "evidence lines, not 16 shortcuts"
+        )
+        if any(
+            "unclassified" in _map(_map(harden.get(r)).get("holes")).get("evidence_counts", {})
+            for r in ROUNDS
+        )
+        else "",
     )
 
 

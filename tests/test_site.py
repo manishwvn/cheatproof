@@ -127,7 +127,7 @@ def test_env_page_shows_gates_holes_patches_and_the_recorded_label(tmp_path):
     assert "<td>git-history</td>" in page  # the exploited hole
     assert "<td>strip-future-git</td>" in page  # the accepted patch
     assert "<td>After hardening</td><td>pass</td><td>fail</td><td>yes</td>" in page
-    assert '<th scope="row">Image digest</th><td>not recorded</td>' in page
+    assert '<th scope="row">Image digest</th><td>image digest not recorded</td>' in page
     assert "attack diff not recorded in certificate" in page
     assert '<a href="../index.html">' in page
 
@@ -199,7 +199,7 @@ def test_transcript_renders_each_line_and_flags_the_bad_one(tmp_path):
     out = tmp_path / "site"
     build_site(cert_dir, out, traces_dir=traces)
     page = read(out / "env" / "owner__repo-1.html")
-    assert "no transcript recorded" not in page
+    assert site.NO_TRANSCRIPT not in page
     assert page.count("unreadable line") == 1
     assert '<td colspan="8">unreadable line</td>' in page  # the bad third line
     assert "cat .git/packed-refs" in page
@@ -213,12 +213,12 @@ def test_missing_transcript_says_no_transcript_recorded(tmp_path):
     cert_dir = fixture_dir(tmp_path)
     out = tmp_path / "no_traces"
     build_site(cert_dir, out)
-    assert "no transcript recorded" in read(out / "env" / "owner__repo-1.html")
+    assert site.NO_TRANSCRIPT in read(out / "env" / "owner__repo-1.html")
     empty_traces = tmp_path / "empty_traces"
     empty_traces.mkdir()
     out2 = tmp_path / "empty_traces_site"
     build_site(cert_dir, out2, traces_dir=empty_traces)
-    assert "no transcript recorded" in read(out2 / "env" / "owner__repo-1.html")
+    assert site.NO_TRANSCRIPT in read(out2 / "env" / "owner__repo-1.html")
 
 
 def test_two_builds_give_identical_bytes(tmp_path):
@@ -483,7 +483,7 @@ def test_a_trace_is_found_by_the_certificate_file_stem(tmp_path):
     assert [page.name for page in result.pages] == ["odd_name.html"]
     page = read(result.pages[0])
     assert "cat .git/packed-refs" in page
-    assert "no transcript recorded" not in page
+    assert site.NO_TRANSCRIPT not in page
 
 
 def test_a_trace_falls_back_to_the_page_name(tmp_path):
@@ -715,7 +715,7 @@ def test_a_symlinked_traces_dir_is_refused_and_its_target_is_not_read(tmp_path):
     build_site(cert_dir, out, traces_dir=traces)
     page = read(out / "env" / "owner__repo-1.html")
     assert "cat .git/packed-refs" not in page
-    assert "no transcript recorded" in page
+    assert site.NO_TRANSCRIPT in page
 
 
 def test_a_symlinked_trace_file_is_refused_and_its_target_is_not_read(tmp_path):
@@ -730,7 +730,7 @@ def test_a_symlinked_trace_file_is_refused_and_its_target_is_not_read(tmp_path):
     build_site(cert_dir, out, traces_dir=traces)
     page = read(out / "env" / "owner__repo-1.html")
     assert "cat .git/packed-refs" not in page
-    assert "no transcript recorded" in page
+    assert site.NO_TRANSCRIPT in page
 
 
 def test_a_symlinked_diffs_directory_is_refused_and_its_target_is_not_read(tmp_path):
