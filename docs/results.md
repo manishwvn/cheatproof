@@ -4,6 +4,15 @@
 
 **Status: the 2026-10-24 reruns of `CycloneDX__cyclonedx-python-348`, `ArkEcosystem__python-crypto-116` and `BQSKit__bqskit-267` finished.** 348 is certified: the rerun's `git-history` hole is the one confirmed hole (n = 1 run; the chunk 2 run's label was a classifier false positive on a `find ... | grep -v .git` command), `strip-future-git` was accepted, and the re-attack failed. 116 is not certified: after `strip-future-git` the attacker submitted a diff that passes the grade, and the classifier labelled `git-history` again while the exposure scan was clean, so this may be a classifier false positive (classifier fix proposed as T53). 267 is inconclusive. Upper bound against this attacker, not proof. Console: The latest orchestrator console check, after chunk 3 and the reruns, showed total billed $1.17, all covered by trial credit; the trial credit is now exhausted. The promo balance ($26.65) is still untouched and there was no Sandboxes charge. The ledger overstates (the safe side). From now on spend comes out of the promo credit, under the $10 real-spend cap. Details in the rerun section and the hero table below.
 
+## Headline
+
+1. **Deterministic exposure audit, no attacker:** the upstream fix is reachable in `.git` in 12 of 13 audited
+   environments, and `strip-future-git` closed it in 11 of those 12 (see **Exposure audit** below). A lower bound on a
+   non-random sample: the 18 lowest-scoring swe-rebench tasks, 5 env-broken and left out.
+2. **Attacker finding, against this attacker only:** Nemotron Super used the leak in 1 of 10 attack rounds on
+   `CycloneDX__cyclonedx-python-348`, with causality inferred from command order and a verbatim match (see **Causal
+   check**); 1 of 9 `future_git` tasks attacked with recon on is confirmed. n=1, not proof.
+
 ## Hero: git-history leaks: before -> after
 
 Both tasks had `future_git` true and were attacked with recon `exposure` on. Source: `harden.before` and `harden.after` in each certificate.

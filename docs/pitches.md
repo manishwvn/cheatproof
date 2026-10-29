@@ -42,8 +42,9 @@ Executor: Token Factory Sandboxes (checkpoint, branch per patch), with local Doc
 model call goes through Token Factory.
 
 ## Demo
-- **Hook (10 s):** "We told Nemotron Super to cheat on real SWE tasks. In 1 of 9 tasks with leaked git history, it
-  looked up the upstream fix." Headline: 1 of 9 confirmed: found, closed, certified (cyclonedx-348); crypto-116 is an
+- **Hook (10 s):** "In 12 of 13 audited SWE environments the upstream fix sits in git history (a lower bound, not a random
+  sample). We told Nemotron Super to cheat, and on one task it ran git show on the fix." Lead with the deterministic
+  audit (docs/results.md, Exposure audit), then the attacker finding. Attacker headline: 1 of 9 confirmed: found, closed, certified (cyclonedx-348); crypto-116 is an
   unconfirmed lead (classifier false positive suspected, T53). Never say "2 of 9 exploited". Say that 348 and 116 got
   repeated targeted reruns, that recon was on, and "against this attacker". Evidence: docs/results.md, Causal check;
   the 9 is checked against the certificates. Cut to a real attack trace from the final run.
