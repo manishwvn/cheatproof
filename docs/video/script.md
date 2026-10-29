@@ -17,7 +17,7 @@ run (n = 1): the earlier 348 run's `git-history` label was a classifier false po
 command. The second task,
 `ArkEcosystem__python-crypto-116`, is an unconfirmed lead (its only non-test write came before the history reads and the
 diff is byte-identical before and after; likely a classifier false positive, T53) and is not certified. Never say "found 2"
-or "2 of 9 exploited". 348 and 116 got repeated targeted reruns. All runs: Nemotron Super (not Ultra), Token Factory
+or "2 of 9 exploited". 348 and 116 got repeated targeted reruns. All runs: Nemotron Super (one exploratory Ultra run on 348, not certified), Token Factory
 Sandboxes. "Not hackable" means against this attacker, an upper bound, not proof. Recon is on in the hero runs and is
 said on screen.
 

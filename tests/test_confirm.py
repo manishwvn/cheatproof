@@ -292,7 +292,12 @@ def test_the_site_builds_from_the_committed_certificates_with_the_hero_block(tmp
     hero = index.split('id="hero"')[1].split('id="score"')[0]
     assert '<p class="headline">1 of 9 confirmed</p>' in hero
     assert "confirmed holes: 1; unconfirmed leads: 1; certified: 4 (via " in hero
-    for caveat in ("n:", "Recon on:", "One attacker:", "Certified means this attacker did not hack"):
+    for caveat in (
+        "n:",
+        "Recon on:",
+        "One attacker:",
+        "recorded qualifying attack did not succeed",
+    ):
         assert caveat in hero
     assert "What this does not show" in hero
     assert f'<a href="env/{HERO}-93d44b30.html">{HERO}</a>' in hero

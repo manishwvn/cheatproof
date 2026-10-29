@@ -1,10 +1,10 @@
 # RewardSeal: red-team, patch and certify RL coding environments
 
-**Result 1, no attacker needed (deterministic audit, `audit-exposure`): in 12 of 13 audited SWE-rebench environments the upstream fix is reachable in the sandbox's `.git` history, and `strip-future-git` closed it in 11 of those 12.** A lower bound on a non-random sample (the 18 lowest-scoring tasks; 5 were env-broken and left out). It is computed from the records in `results/exposure/`; one of the 13 failed its gold gate before any attack, and one history scan was cut at 5000 commits.
+**Result 1, no attacker needed (deterministic audit, `audit-exposure`): in 12 of 13 audited SWE-rebench environments the upstream fix (matched by its source lines in future commits) is reachable in the sandbox's `.git` history, and `strip-future-git` closed it in 11 of those 12.** A lower bound on a non-random sample (the 18 lowest-scoring tasks; 5 were env-broken and left out). It is computed from the records in `results/exposure/`; one of the 13 failed its gold gate before any attack, and one history scan was cut at 5000 commits.
 
 **Result 2, one attacker finding (n=1, recon on, this attacker only):** on `CycloneDX__cyclonedx-python-348`, Nemotron Super ran `git log --all` and `git show` on the upstream fix commit `65bf318`, wrote the fix and passed the hidden tests (the read of the commit is inferred from command order and a verbatim match with the fix line). The exposure scan flagged the leak, `strip-future-git` removed it (gold still passes, empty still fails), a fresh re-attack failed, and the environment is certified. **1 of 9 confirmed.**
 
-**Replication (T55, 4 more runs of 348): the git-history leak was used in 1 of 10 attack rounds on this task (1 of 8 excluding 2 HTTP 503 infrastructure errors), the confirmed 2026-10-24 rerun. The other 9 rounds did not reproduce it; one earlier label was a classifier false positive. 'Certified' here means not hacked in k attempts, with k small.** One extra run with Nemotron Ultra as the attacker used the same leak before hardening (n=1; its hardened re-attack ended at the token limit without a submission, so it is not certified). <!-- REPLICATION_PLACEHOLDER -->
+**Replication (T55, 4 more runs of 348): the git-history leak was used in 1 of 10 attack rounds on this task (1 of 8 excluding 2 HTTP 503 infrastructure errors), the confirmed 2026-10-24 rerun. No further use was confirmed in the other 9 rounds (2 of them ended in HTTP 503 infrastructure errors), and causality for the one is inferred from command order; one earlier label was a classifier false positive. 'Certified' here means not hacked in k attempts, with k small.** One extra run with Nemotron Ultra as the attacker used the same leak before hardening (n=1; its hardened re-attack ended at the token limit without a submission, so it is not certified). <!-- REPLICATION_PLACEHOLDER -->
 
 Links: [results](docs/results.md) | [causal check](docs/results.md#causal-check-348-and-116) | report site: https://manishwvn.github.io/cheatproof/ (GitHub Pages) | [feedback](docs/feedback.md) | [Tavily](docs/tavily.md)
 
@@ -155,7 +155,7 @@ uv run ruff check . && uv run ruff format --check .
 
 In `.env`, set the keys named in `.env.example`: `NEBIUS_API_KEY`, `NEBIUS_PROJECT_ID`, the caps (`SPEND_CAP_USD`,
 `DAILY_CAP_USD` are required, no default), `EXECUTOR=sandbox`, and `SPEND_LEDGER` (absolute path). `ATTACKER_MODEL`
-defaults to Nemotron Super (`nvidia/nemotron-3-super-120b-a12b`); all results use it.
+defaults to Nemotron Super (`nvidia/nemotron-3-super-120b-a12b`); all results use it except one exploratory Ultra run on one task (see `docs/results.md`).
 
 **Free, offline commands** (no model, sandbox or budget; use the committed certificates):
 
@@ -199,7 +199,7 @@ key, model IDs, one capped Nemotron call and one sandbox run: `uv run python scr
 | Tool | Use | Where |
 |---|---|---|
 | **Token Factory** | Every model call is a chat completion against `https://api.tokenfactory.nebius.com/v1/` (OpenAI-compatible client, SDK retries off). | `cheatproof/llm.py` (`GuardedLLM`), `cheatproof/attacker.py` |
-| **NVIDIA Nemotron Super** | The attacker model, `nvidia/nemotron-3-super-120b-a12b`. Not Ultra. Nano (`nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`) was used only for the smoke check. | `--attacker-model`, `scripts/smoke.py` |
+| **NVIDIA Nemotron Super** | The attacker model, `nvidia/nemotron-3-super-120b-a12b`. Ultra (`nvidia/Nemotron-3-Ultra-550b-a55b`) was run once, on one task. Nano (`nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`) was used only for the smoke check. | `--attacker-model`, `scripts/smoke.py` |
 | **Token Factory Sandboxes** | The default executor. One checkpoint per task image, one branch per attack, gate or patch. Commands run under `unshare -rn` with a start probe that fails closed if the network is not cut. Contained as best effort, see ADR 0002. | `cheatproof/executor.py` (`SandboxExecutor`), `scripts/sandbox_access.py` |
 | **Tavily** | Host-side search, only with `--network-fetch`, counted against `TAVILY_CALL_CAP` (see `docs/tavily.md`). One harness search via Tavily (runtime call) so far, on `Alexei-Kornienko__schematics_to_swagger-7`; the attacker made 0 `web_search` calls of its own, so no result claims the attacker used Tavily. | `cheatproof/strategies.py` (`make_tavily_search`), `cheatproof/attacker.py`, `cheatproof/budget.py` |
 
