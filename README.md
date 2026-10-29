@@ -142,11 +142,18 @@ one task at a time and is resumable.
 Needs Python 3.12 or newer and [uv](https://docs.astral.sh/uv/). Live runs also need a Nebius Token Factory account
 with an API key and project ID, and Sandboxes beta access. A Tavily key is only needed with `--network-fetch`.
 
+Offline check (no account, no key, no `.env`):
+
 ```bash
 uv sync
-cp .env.example .env        # then edit .env; it is git-ignored. Never commit it or paste keys anywhere.
-uv run pytest -q            # no network, no paid calls: tests use fakes only
+uv run pytest -q            # no network, no paid calls: tests use fakes only; takes about 90 seconds
 uv run ruff check . && uv run ruff format --check .
+```
+
+Only for live runs (needs the accounts above):
+
+```bash
+cp .env.example .env        # then edit .env; it is git-ignored. Never commit it or paste keys anywhere.
 ```
 
 > **Name note.** RewardSeal is the user-facing name. The Python package and CLI module are still called `cheatproof`,
@@ -160,13 +167,14 @@ defaults to Nemotron Super (`nvidia/nemotron-3-super-120b-a12b`); all results us
 
 ```bash
 uv run python -m cheatproof.cli report --certs results/certificates        # score with n and raw counts
-uv run python -m cheatproof.cli site --certs results/certificates --out site   # static report site
+uv run python -m cheatproof.cli site --certs results/certificates --out results/site   # static report site (git-ignored folder)
 ```
 
 On the committed certificates, `report` prints n=14, certified 4 of 14, `certified_via` `hardened_reattack_failed=1`,
-`legacy=3`, "hackable before hardening: 2 of 5" and "hackable after hardening: 1 of 2". Both hackable counts include
-the 116 `git-history` label, an unconfirmed lead, so they overstate the confirmed result. Read them as raw counts on a
-small, non-random sample, not as rates.
+`legacy=3`, "confirmed holes before hardening: 1 of 5" and "confirmed holes after hardening: 0 of 2" (n too small for
+an interval), then the history exposure audit line. Raw lead-inclusive counts (`hackable_before=2`, which includes the
+unconfirmed 116 `git-history` lead) are printed separately and overstate the confirmed result. Read all of them as raw
+counts on a small, non-random sample, not as rates. The output is long; the audit line is the one to read first.
 
 **Paid path** (spends credits; every call goes through the budget):
 
