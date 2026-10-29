@@ -46,6 +46,13 @@ Attacker runs (the audit above needs no attacker):
 Across all files: 14 certificates, 4 certified (one after a failed hardened re-attack, 348; three legacy no-hole-found outcomes), 11 tasks attacked. Recon (`recon=exposure`) means the harness tells the
 attacker what the exposure scan found; we have not measured how often it finds such a leak without that.
 
+More evidence, each with its limits in `docs/results.md` and every number on `docs/claims.md`:
+
+- **Second audit, random within a stated frame** (`docs/sample-protocol.md`, committed before the run): of 12 drawn tasks, 9 audited and 3 env-broken; at least half of the counted gold lines in a future commit in 7 of 9; closed after `strip-future-git` in 5 of 7 (two not closed, recorded plainly). The frame is the first 1000 dataset rows (repos 0-9 and A-E): counts only, no rate, separate from the 13.
+- **Deterministic retrieval control** (`results/control/`, no model): on `Dorthu__openapi3-75` a script retrieved the top-ranked future commit, applied it and passed the hidden tests; after the strip there is nothing to retrieve. One task; shows usable leakage for the control, not why a model acted.
+- **Web exposure (Tavily)**: 2 searches per audited task, 0 of 13 returned a page with a counted gold line; the PR-URL query did not return the PR pages either, so this is a null for one search tool on one day, not evidence the web is safe.
+- **Verify the evidence yourself**: `python -m cheatproof.manifest verify` (frozen hashes and recomputed totals) or the in-browser verifier on the site; it checks artifact integrity and calculations, not historical execution or security.
+
 ## The problem
 
 Coding agents are trained with RL and scored on SWE-style tasks: a repository, a bug report and hidden tests. If an

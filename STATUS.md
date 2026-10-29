@@ -29,10 +29,12 @@ Demo: https://manishwvn.github.io/cheatproof/ (GitHub Pages, built from the comm
 - The balance is hackathon promo credit, not card money; it must never go negative. Check the console between runs.
 
 ## Open
-- Ultra on 4 future-git tasks (348, 367, toil-4805, python-crypto-116), one at a time, inside the caps.
-- Headline rewrite from the audit numbers (README, site hero, `docs/results.md`, video beat 1).
-- Fresh-clone test (T12), mock judge, video script and rough cut. Open minors: T31 items 2 and 4, env-broken tasks
-  (docling-824, BoboTiG-2132), `.env.example` still says run cap 250.
+- Done since Oct 28: wording sweeps, claims sheet (`docs/claims.md`), judge check (`docs/judge-check.md`), site clarity
+  pass and Start-here path, second audit (random sample, 9 audited), retrieval control, Tavily web audit (0 of 13),
+  evidence manifest and in-browser verifier, `--recon-replay` (the 348 replay attempt was not exercised: null).
+- Open at freeze: regenerate `results/manifest.json`, set `results/PINNED_SHA`, rerun the cold-read testers.
+  Open minors: T31 items 2 and 4, env-broken tasks (docling-824, BoboTiG-2132), `.env.example` still says run cap 250.
+- Real spend about $4.25 of the $8.50 stop (Sandboxes counter about $4.7 of the $5 guard).
 - Owner: `gh repo edit manishwvn/cheatproof --homepage https://manishwvn.github.io/cheatproof/`; confirm the $5
   Sandboxes cap; voice-over, video and Devpost submission (T14 is the owner's alone). Nothing goes public without
   the owner.
