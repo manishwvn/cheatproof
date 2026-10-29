@@ -25,6 +25,7 @@ in the repo. Nothing else may be used. If a number changes, change this sheet fi
 | Tests | see `STATUS.md` (CI runs them on every PR) | `.github/workflows/ci.yml` |
 | Second audit: random sample within the A-E frame | 9 audited of 12 drawn (3 env-broken); at least half of counted lines in a future commit in 7 of 9; closed in 5 of those 7 (2 not closed: gold gate failed after strip; strip patch did not apply). Counts only, no rate | `results/exposure-sample/`, `docs/sample-protocol.md`, `docs/results.md` |
 | Web exposure (Tavily), 13 audited | 0 of 13: no result (130) contained a counted gold line; no result was a pull/commit/compare page of the task's repo, even for the oracle PR-URL query; searched 2026-10-29, findability only, dated snapshot, this tool only | `results/web-exposure/`, `docs/results.md` |
+| Same-recon re-attack attempt on 348 | not exercised: the new before round passed without history commands (classified unclassified), so there was no hole, no hardening, no re-attack; cost $0.099; with it, the pattern is in 1 of 11 later before-rounds | `results/replay-attempt/`, `docs/results.md` |
 | Retrieval control (openapi3-75) | applying the top-ranked future commit (4 shared gold lines) passed the hidden tests before the strip; 0 future commits and gates held after; one task, no model | `results/control/Dorthu__openapi3-75-retrieval-control.json`, `docs/results.md` |
 | Demo | https://manishwvn.github.io/cheatproof/ (recorded replay of committed data, not a live attack) | `.github/workflows/pages.yml` |
 
