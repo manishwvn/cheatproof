@@ -1,0 +1,161 @@
+{
+  "instance_id": "DataBiosphere__toil-4805",
+  "n": 1,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "DataBiosphere/toil",
+      "results": [
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://trendshift.io/repositories/153658"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": true,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://github.com/dataBiosphere/toil"
+        },
+        {
+          "chars": 7233,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "cdfff46905c476cb745d4c9c6f1df9ddec03bbf2d2f0a46b1c5d8e04f0ad2509",
+          "trivial": true,
+          "url": "https://github.com/DataBiosphere"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://science.ecosyste.ms/projects/65288"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://workflows.community/systems/toil"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:31.461893+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/DataBiosphere/toil/pull/4805",
+      "results": [
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://rocketreach.co/no-toil-industries-inc-profile_b5a0b34af68390a8"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://www.mapquest.com/us/california/no-toil-industries-427799548"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://www.mapquest.com/us/california/no-toil-industries-403069348"
+        },
+        {
+          "chars": 10871,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "4b49a93645f2f768d6eb65cadd29b3a2c37aa58c8f67c11caa79a523a8f67fbe",
+          "trivial": true,
+          "url": "https://www.mapquest.com/us/california/no-toil-industries-275347677"
+        },
+        {
+          "chars": 8244,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "blob",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "4a204562c53ddb82526cf523484eb3d8726420a01b9fe07f304741ef23a1344b",
+          "trivial": true,
+          "url": "https://github.com/mahtab-nejati/tag-rels-def/blob/master/topics.json"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:32.370030+00:00"
+    }
+  ],
+  "repo": "DataBiosphere/toil",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

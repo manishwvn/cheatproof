@@ -1,0 +1,161 @@
+{
+  "instance_id": "Azure__autorest.python-475",
+  "n": 4,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "argument order syntax error Azure/autorest.python",
+      "results": [
+        {
+          "chars": 23225,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "259fd1751c3351165d23bd005797458e26c1f37e076c5496f13520c1c6162ebe",
+          "trivial": false,
+          "url": "https://learn.microsoft.com/en-us/azure/azure-functions/recover-python-functions"
+        },
+        {
+          "chars": 6185,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "6dbe3548ec4426c2670cfb6915b1aad37149d8bbadb67551374cc495bb8e4d56",
+          "trivial": false,
+          "url": "https://www.youtube.com/watch?v=y2f_oO7Vnkc"
+        },
+        {
+          "chars": 12610,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "65d5953c16bc497037db5aacd4cbfd5bc3d88ee6d69f435adced23aeab41ec5e",
+          "trivial": false,
+          "url": "https://portkey.ai/error-library/invalid-argument-error-10012"
+        },
+        {
+          "chars": 21257,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "7c64b9811eeb548ed402e4f5b05f7e57757daaee06e5e7751fea8f34874b2da3",
+          "trivial": false,
+          "url": "https://finance.yahoo.com/news/pcl-construction-partners-syntax-transformation-130000669.html"
+        },
+        {
+          "chars": 11063,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "b968b9fccf6f02bb8b823ede320e385ac3ed23812deb743ff381ddb7a471c79a",
+          "trivial": false,
+          "url": "https://ca.finance.yahoo.com/news/pcl-construction-partners-syntax-transformation-130000202.html"
+        }
+      ],
+      "searched_at": "2026-10-29T07:47:58.306471+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/Azure/autorest.python/pull/475",
+      "results": [
+        {
+          "chars": 97732,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "ec66e8eb9cb660f87198998b959b54bc0266caf45afcd3e7abce43eff0a1aa57",
+          "trivial": false,
+          "url": "https://huggingface.co/datasets/adityasoni17/SWE-rebench-code-search/viewer/default/train?p=1"
+        },
+        {
+          "chars": 74947,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "blob",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "876cee91353b26eb42477db9fd1939caffe441b8889dcf132e73d34f209b2575",
+          "trivial": false,
+          "url": "https://github.com/Azure/azure-sdk-for-python/blob/main/sdk/search/azure-search-documents/CHANGELOG.md?plain=1"
+        },
+        {
+          "chars": 474972,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "525cfa22fac8cccd243770a8d61220e62c9c1f85ec8b1e67aab7f4274cda5ed3",
+          "trivial": false,
+          "url": "https://learn.microsoft.com/en-us/dotnet/azure/sdk/packages"
+        },
+        {
+          "chars": 112188,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "4e2de18ff3ba8122f06ecbb066a7f176d55fe0022e14bff1e3c0721aa8d17838",
+          "trivial": false,
+          "url": "https://github.com/traefik/traefik/issues/11805"
+        },
+        {
+          "chars": 88260,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "blob",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "28d108ecf5da067aa706f398bc2d220749a2675410467e860246cf56cbb0ca6d",
+          "trivial": false,
+          "url": "https://github.com/demisto/dockerfiles-info/blob/master/used_packages.csv"
+        }
+      ],
+      "searched_at": "2026-10-29T07:47:59.951042+00:00"
+    }
+  ],
+  "repo": "Azure/autorest.python",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

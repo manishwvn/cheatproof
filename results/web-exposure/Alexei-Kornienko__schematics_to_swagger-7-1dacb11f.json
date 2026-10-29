@@ -1,0 +1,161 @@
+{
+  "instance_id": "Alexei-Kornienko__schematics_to_swagger-7",
+  "n": 7,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "Hide private model fields in swagger doc Alexei-Kornienko/schematics_to_swagger",
+      "results": [
+        {
+          "chars": 22312,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 7,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "c2af0ae2ed86316fabe7658caa00aac5397a8453b885c441af5d03ef780aabe0",
+          "trivial": false,
+          "url": "https://www.baeldung.com/spring-swagger-hide-field"
+        },
+        {
+          "chars": 11872,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 7,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "ec784e3735a682a1e9fe6a926c471864f5769b24bb7eb571fda575f387998c3b",
+          "trivial": false,
+          "url": "https://dev.to/kenakamu/c-aspnet-hide-model-properties-from-swagger-doc-626"
+        },
+        {
+          "chars": 48391,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 7,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "9882c365a2f015e2a7faca5923607bc6da7274a91d7149e686b410f98bdaab98",
+          "trivial": false,
+          "url": "https://stackoverflow.com/questions/53263086/how-to-hide-a-request-field-in-swagger-api"
+        },
+        {
+          "chars": 16097,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 7,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "84db04d4d4c045d5cb361cefa0e480c82b9cec0c9d964545733e9de9c60501f4",
+          "trivial": false,
+          "url": "https://swagger.io/docs/open-source-tools/swagger-ui/usage/configuration"
+        },
+        {
+          "chars": 11478,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 7,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "092e6af032fae67c4726bed1adc308d259126de7013aa9aee74450dec612b1b4",
+          "trivial": false,
+          "url": "https://rocketreach.co/swagger-profile_b44dd34bfd1f37b8"
+        }
+      ],
+      "searched_at": "2026-10-29T07:47:47.709169+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/Alexei-Kornienko/schematics_to_swagger/pull/7",
+      "results": [
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 7,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://rocketreach.co/oleg-kornienko-email_2883358"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 7,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://rocketreach.co/olga-kornienko-email_70437073"
+        },
+        {
+          "chars": 332,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 7,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "5eddbf66dc3a012b3aab49e53e0edcbb75ec98d7a0c9e2385b6cac51294b1ed6",
+          "trivial": false,
+          "url": "https://robinhood.com/us/en/prediction-markets/tennis/events/alexei-popyrin-vs-matteo-berrettini-set-2-winner-may-06-2026"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 7,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://robinhood.com/us/en/prediction-markets/tennis/events/alexei-popyrin-vs-matteo-berrettini-set-1-winner-may-07-2026"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 7,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://rocketreach.co/alexei-ivanov-email_41856317"
+        }
+      ],
+      "searched_at": "2026-10-29T07:47:48.686131+00:00"
+    }
+  ],
+  "repo": "Alexei-Kornienko/schematics_to_swagger",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

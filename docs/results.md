@@ -68,6 +68,14 @@ repository. The committed certificates hold hashes, not command text.
 
 `git-history` is now a lead, not an exploit, when the first write of a line shared with a future commit comes at or before the first successful history read (a failed history command does not count; unrelated earlier edits do not block). This is the 116 case (write at step 31, history reads at steps 32 to 36) and keeps 348 confirmed (history at steps 12 to 14, write at step 15). When the timing of the shared line cannot be found in the trace, the earlier rule applies. No committed certificate changed: `holes recheck` on all 12 local trace sets gives identical output before and after the change. Regression tests are in `tests/test_holes.py`.
 
+## Web exposure (Tavily), 13 audited tasks (2026-10-29)
+
+`python -m cheatproof.cli audit-web` (host only: no Token Factory, no Sandbox, no model). Per task, 2 basic Tavily searches with raw page content (26 credits in all): Q1 built only from the public issue title plus owner/repo (the repository name alone if the title looked unsafe), and a labelled "oracle query" on the pull request URL itself. No gold or test text in any query. Records: `results/web-exposure/` (queries, URLs, ranks, page types, sha256 of each page, k of n counted gold lines found, line-digest prefixes; no page text). Searched 2026-10-29.
+
+- **Result: 0 of 13.** No search returned a page containing even one of the counted gold lines (k = 0 in all 130 results). 5 results per query, 130 results, none a pull, commit or compare page of the task's own repository, including for the oracle query on the PR URL (11 results were current-file "blob" pages of other repositories, none matched).
+- **Reading, carefully:** in this snapshot, a basic Tavily search built from the public issue title did not surface the fix for any of the 13. The oracle query also did not return the PR page for any task, so this search tool does not reliably return GitHub PR pages at all: a null here says this tool found nothing, not that the open web holds nothing. Web content and search results change; this is a dated snapshot, findability only, not use by any model, and a lower bound. Git history, not this web search, is the channel with measured overlap in this sample (12 of 13 in the exposure audit).
+- Not run: an attacker-originated web-search run (dropped by decision).
+
 ## Second exposure audit: predeclared random sample (2026-10-29)
 
 Selection written and merged before the run (`docs/sample-protocol.md`, seed 20261029, `results/exposure-sample/_selection.json`): 12 tasks drawn at random from the cached frame (the first 1000 dataset rows: repositories 0-9 and A-E, 225 eligible after removing the first 18 and deny-listed repos). Records: `results/exposure-sample/`. No model, no Token Factory spend. Reported separately from the 13 in the first audit and never blended with it. The size is 12, not 30, because of the Sandboxes cost guard.

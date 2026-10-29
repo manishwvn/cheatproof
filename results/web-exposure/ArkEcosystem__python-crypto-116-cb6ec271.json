@@ -1,0 +1,161 @@
+{
+  "instance_id": "ArkEcosystem__python-crypto-116",
+  "n": 5,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "feat: add amount to HTLC Lock constructor ArkEcosystem/python-crypto",
+      "results": [
+        {
+          "chars": 10541,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "16e52b4ee24a45f801e53d07c48459426c51e2d801b61237f2680efafca0cb64",
+          "trivial": false,
+          "url": "https://docs.lightning.engineering/the-lightning-network/multihop-payments/hash-time-lock-contract-htlc"
+        },
+        {
+          "chars": 31971,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "fbff8b5f44669bf09a237fd6770ed1c90d1e67df32fd4252f15f5abc12c23c2e",
+          "trivial": false,
+          "url": "https://scalus.org/docs/smart-contracts/htlc-tutorial"
+        },
+        {
+          "chars": 34986,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "b65dc123505fd0e04738e197aba5f4e5b5e16e1c0822d4d2f178fa7e510571b3",
+          "trivial": false,
+          "url": "https://lightspark.com/glossary/htlc"
+        },
+        {
+          "chars": 18176,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "blob",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "44f72e9dc3244f391c430a944920c9aa2266b402a0a555c9922b5ecedb3ce9b8",
+          "trivial": false,
+          "url": "https://github.com/fullstack-development/blockchain-wiki-en/blob/main/concepts/hash-time-locked-contracts/README.md"
+        },
+        {
+          "chars": 9703,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "5ee6d52b2c881eb5c37fc23e9596bb1901eb2ff7c1821108e04121e6bab04237",
+          "trivial": false,
+          "url": "https://coinmarketcap.com/academy/glossary/hashed-timelock-contract-htlc"
+        }
+      ],
+      "searched_at": "2026-10-29T07:47:50.337041+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/ArkEcosystem/python-crypto/pull/116",
+      "results": [
+        {
+          "chars": 939186,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "95aaebf4ae1930a61b18eacb2822f89d5155a14014c11eb80072efb30b1d30a4",
+          "trivial": false,
+          "url": "https://download.lenovo.com/storage/Lenovo_TIM_OneCollect_1.9.1_Windows_Open_source_licenses.pdf"
+        },
+        {
+          "chars": 176682,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "45770c2336083f6049f65f8c2eda3fed25af7fbe0b8715b8e33772dec8872754",
+          "trivial": false,
+          "url": "https://github.com/alphaSeclab/awesome-security-collection"
+        },
+        {
+          "chars": 96236,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "d1dd75b05722ae983a2a0cbd59a5f9ec9dacea078cb62728f2e09e3508798a35",
+          "trivial": false,
+          "url": "http://www.cs.umd.edu/~abadi/papers/database-workloads.pdf"
+        },
+        {
+          "chars": 184808,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "blob",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "b77aad39fd7aa0ccafc1381c11ebade66951d04cb86db31156fe1bf1a162c83c",
+          "trivial": false,
+          "url": "https://github.com/alphaSeclab/awesome-security-collection/blob/master/Readme_en.md"
+        },
+        {
+          "chars": 48659,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "00b35d4946f33743474179a8c0381f284038ac473eecddeec5bc6d90d4396b0a",
+          "trivial": false,
+          "url": "https://www.coingecko.com/learn/python-query-coingecko-api"
+        }
+      ],
+      "searched_at": "2026-10-29T07:47:56.203757+00:00"
+    }
+  ],
+  "repo": "ArkEcosystem/python-crypto",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}
