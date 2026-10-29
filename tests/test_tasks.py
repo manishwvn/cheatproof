@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from cheatproof import tasks
-from cheatproof.executor import IMAGE_RE
-from cheatproof.tasks import (
+from rewardseal import tasks
+from rewardseal.executor import IMAGE_RE
+from rewardseal.tasks import (
     PROBLEM_CHARS,
     PROBLEM_CUT,
     SOURCES,

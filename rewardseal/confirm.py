@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from cheatproof.certify import UNSAFE_NAME_CHARS, _judged, _rate, load_certificate, score
+from rewardseal.certify import UNSAFE_NAME_CHARS, _judged, _rate, load_certificate, score
 
 CONFIRMATIONS_FILE = "confirmations.json"
 REPLICATIONS_DIR = "replications"

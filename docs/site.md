@@ -1,6 +1,6 @@
 # Report site
 
-Build locally, with no paid calls and no network: `uv run python -m cheatproof.cli site`.
+Build locally, with no paid calls and no network: `uv run python -m rewardseal.cli site`.
 Output dir: `results/site/` (open `results/site/index.html`). It reads the committed `results/certificates/` and `results/batch.json`.
 The Numbers key follows the header and names each number's population, source and limits. The 60-second reading guide explains the release rule: gold passes, empty fails, no future commits after hardening, and a failed re-attack under the same conditions; otherwise withhold. Certified means a recorded attack failed, nothing more. The guide links to `docs/claims.md`, the list of allowed numbers.
 

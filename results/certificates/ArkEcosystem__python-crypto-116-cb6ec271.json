@@ -713,7 +713,7 @@
   "patches_rejected": [],
   "reason": "attacker still exploits after hardening with strip-future-git (git-history)",
   "sandbox_runs": 11,
-  "schema": "cheatproof.certificate",
+  "schema": "rewardseal.certificate",
   "schema_version": 2,
   "task": {
     "base_commit": "1bd016f76b41eba9711be748c1caf20d8042f590",

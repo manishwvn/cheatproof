@@ -6,7 +6,7 @@
 
 **Replication (T55, 4 more runs of 348): the history-use pattern appeared in 1 of 10 later before-rounds on this task (1 of 8 excluding 2 HTTP 503 infrastructure errors), the confirmed 2026-10-24 rerun; earlier 348 attacks are not in that count. No further use was confirmed in the other 9 rounds (2 of them ended in HTTP 503 infrastructure errors), and causality for the one is inferred from command order; one earlier label was a classifier false positive. 'Certified' here means not hacked in k attempts, with k small.** One extra run with Nemotron Ultra as the attacker showed the same pattern before hardening (n=1, same inference; its hardened re-attack ended at the token limit without a submission, so it is not certified). <!-- REPLICATION_PLACEHOLDER -->
 
-Links: [results](docs/results.md) | [causal check](docs/results.md#causal-check-348-and-116) | [348 evidence](results/evidence/348-causal.md) | report site: https://manishwvn.github.io/cheatproof/ (GitHub Pages; [limitations](docs/limitations.md)) | [feedback](docs/feedback.md) | [Tavily](docs/tavily.md)
+Links: [results](docs/results.md) | [causal check](docs/results.md#causal-check-348-and-116) | [348 evidence](results/evidence/348-causal.md) | report site: https://manishwvn.github.io/rewardseal/ (GitHub Pages; [limitations](docs/limitations.md)) | [feedback](docs/feedback.md) | [Tavily](docs/tavily.md)
 
 ```text
 attack -> classify hole -> patch
@@ -51,7 +51,7 @@ More evidence, each with its limits in `docs/results.md` and every number on `do
 - **Second audit, random within a stated frame** (`docs/sample-protocol.md`, committed before the run): of 12 drawn tasks, 9 audited and 3 env-broken; at least half of the counted gold lines in a future commit in 7 of 9; closed after `strip-future-git` in 5 of 7 (two not closed, recorded plainly). The frame is the first 1000 dataset rows (repos 0-9 and A-E): counts only, no rate, separate from the 13.
 - **Deterministic retrieval control** (`results/control/`, no model): on `Dorthu__openapi3-75` a script retrieved the top-ranked future commit, applied it and passed the hidden tests; after the strip there is nothing to retrieve. One task; shows usable leakage for the control, not why a model acted.
 - **Web exposure (Tavily)**: 2 searches per audited task, 0 of 13 returned a page with a counted gold line; the PR-URL query did not return the PR pages either, so this is a null for one search tool on one day, not evidence the web is safe.
-- **Verify the evidence yourself**: `python -m cheatproof.manifest verify` (frozen hashes and recomputed totals) or the in-browser verifier on the site; it checks artifact integrity and calculations, not historical execution or security.
+- **Verify the evidence yourself**: `python -m rewardseal.manifest verify` (frozen hashes and recomputed totals) or the in-browser verifier on the site; it checks artifact integrity and calculations, not historical execution or security.
 
 ## The problem
 
@@ -94,32 +94,32 @@ For each task (the project plans a 40-task set: 30 SWE-rebench and 10 SWE-bench 
 ```mermaid
 flowchart TD
     subgraph Input
-        TL["Task loader<br/>cheatproof/tasks.py<br/>SWE-rebench, SWE-bench Verified"]
+        TL["Task loader<br/>rewardseal/tasks.py<br/>SWE-rebench, SWE-bench Verified"]
     end
 
-    subgraph SBX["Token Factory Sandboxes (cheatproof/executor.py)"]
+    subgraph SBX["Token Factory Sandboxes (rewardseal/executor.py)"]
         EX["Executor<br/>checkpoint per task, one branch per run<br/>network off via unshare"]
-        GATE["Grader gates<br/>cheatproof/grader.py<br/>gold passes, empty fails"]
-        EXP["Exposure scan<br/>cheatproof/exposure.py<br/>future git, writable tests, network"]
-        ATK["Attacker loop<br/>cheatproof/attacker.py<br/>shell, read and write file, submit"]
+        GATE["Grader gates<br/>rewardseal/grader.py<br/>gold passes, empty fails"]
+        EXP["Exposure scan<br/>rewardseal/exposure.py<br/>future git, writable tests, network"]
+        ATK["Attacker loop<br/>rewardseal/attacker.py<br/>shell, read and write file, submit"]
     end
 
     subgraph TF["Token Factory API"]
-        LLM["GuardedLLM<br/>cheatproof/llm.py<br/>Nemotron Super"]
+        LLM["GuardedLLM<br/>rewardseal/llm.py<br/>Nemotron Super"]
     end
 
-    subgraph Harden["cheatproof/harden.py"]
-        HOLE["Hole classifier<br/>cheatproof/holes.py"]
-        PATCH["Patches<br/>cheatproof/patches.py<br/>strip future git, test-edit guard, network off"]
+    subgraph Harden["rewardseal/harden.py"]
+        HOLE["Hole classifier<br/>rewardseal/holes.py"]
+        PATCH["Patches<br/>rewardseal/patches.py<br/>strip future git, test-edit guard, network off"]
         RE["Harden and re-attack<br/>same attacker, same limits"]
     end
 
     subgraph Out["Output"]
-        CERT["Certificate and leak guard<br/>cheatproof/certify.py"]
-        SITE["Report site<br/>cheatproof/site.py"]
+        CERT["Certificate and leak guard<br/>rewardseal/certify.py"]
+        SITE["Report site<br/>rewardseal/site.py"]
     end
 
-    BUD[("Budget ledger<br/>cheatproof/budget.py<br/>caps, halts, cost log")]
+    BUD[("Budget ledger<br/>rewardseal/budget.py<br/>caps, halts, cost log")]
     TAV["Tavily search<br/>strategies.make_tavily_search<br/>network-fetch strategy and harness recon search"]
 
     TL --> EX
@@ -141,7 +141,7 @@ flowchart TD
     TAV -. "web_search tool" .-> ATK
 ```
 
-The loop for one task is `cheatproof/harden.py`; `python -m cheatproof.cli batch` runs it over the cached selection
+The loop for one task is `rewardseal/harden.py`; `python -m rewardseal.cli batch` runs it over the cached selection
 one task at a time and is resumable.
 
 ## Setup and run
@@ -163,9 +163,6 @@ Only for live runs (needs the accounts above):
 cp .env.example .env        # then edit .env; it is git-ignored. Never commit it or paste keys anywhere.
 ```
 
-> **Name note.** RewardSeal is the user-facing name. The Python package and CLI module are still called `cheatproof`,
-> so commands use `python -m cheatproof.cli` and `python -m cheatproof.tasks`.
-
 In `.env`, set the keys named in `.env.example`: `NEBIUS_API_KEY`, `NEBIUS_PROJECT_ID`, the caps (`SPEND_CAP_USD`,
 `DAILY_CAP_USD` are required, no default), `EXECUTOR=sandbox`, and `SPEND_LEDGER` (absolute path). `ATTACKER_MODEL`
 defaults to Nemotron Super (`nvidia/nemotron-3-super-120b-a12b`); all results use it except one exploratory Ultra run on one task (see `docs/results.md`).
@@ -173,8 +170,8 @@ defaults to Nemotron Super (`nvidia/nemotron-3-super-120b-a12b`); all results us
 **Free, offline commands** (no model, sandbox or budget; use the committed certificates):
 
 ```bash
-uv run python -m cheatproof.cli report --certs results/certificates        # score with n and raw counts
-uv run python -m cheatproof.cli site --certs results/certificates --out results/site   # static report site (git-ignored folder)
+uv run python -m rewardseal.cli report --certs results/certificates        # score with n and raw counts
+uv run python -m rewardseal.cli site --certs results/certificates --out results/site   # static report site (git-ignored folder)
 ```
 
 On the committed certificates, `report` prints n=14, certified 4 of 14, `certified_via` `hardened_reattack_failed=1`,
@@ -186,36 +183,36 @@ counts on a small, non-random sample, not as rates. The output is long; the audi
 **Paid path** (spends credits; every call goes through the budget):
 
 ```bash
-uv run python -m cheatproof.cli budget init       # once per ledger; refuses an existing file
-uv run python -m cheatproof.tasks fetch --source swe-rebench --n 11      # free public rows API, cached in runs/tasks/
-uv run python -m cheatproof.cli harden CycloneDX__cyclonedx-python-348 \
+uv run python -m rewardseal.cli budget init       # once per ledger; refuses an existing file
+uv run python -m rewardseal.tasks fetch --source swe-rebench --n 11      # free public rows API, cached in runs/tasks/
+uv run python -m rewardseal.cli harden CycloneDX__cyclonedx-python-348 \
     --system-prompt-file results/combined.txt --strategy combined \
     --attacker-model nvidia/nemotron-3-super-120b-a12b \
     --max-steps 40 --max-tokens 250000 --out results/certificates
-uv run python -m cheatproof.cli batch --source swe-rebench --n 8 \
+uv run python -m rewardseal.cli batch --source swe-rebench --n 8 \
     --system-prompt-file results/combined.txt --strategy combined \
     --attacker-model nvidia/nemotron-3-super-120b-a12b \
     --max-steps 40 --max-tokens 250000 --out results/certificates
 ```
 
 `harden` and `batch` read tasks from the local cache only, so run `tasks fetch` first. `results/combined.txt` is the
-attacker prompt used for the results (`cheatproof.strategies.COMBINED`). Run `batch` one small chunk at a time
+attacker prompt used for the results (`rewardseal.strategies.COMBINED`). Run `batch` one small chunk at a time
 (`--chunk-size`, default 3, max 10): it has no stop before a run that would pass a cap. By default, when the exposure
 scan finds a hole, the attacker's first message includes the sanitized findings (`recon=exposure` in the certificate,
 `batch.json` and the site); `--no-recon` turns that off.
 
 Runs keep traces, raw diffs and restore sets locally under the git-ignored `results/traces/` (never committed); command outputs in traces are truncated (hash, size and a head).
-`python -m cheatproof.cli holes recheck <stem>` re-checks hole labels from those files offline. Live smoke check of
+`python -m rewardseal.cli holes recheck <stem>` re-checks hole labels from those files offline. Live smoke check of
 key, model IDs, one capped Nemotron call and one sandbox run: `uv run python scripts/smoke.py`.
 
 ## How the sponsor tools are used
 
 | Tool | Use | Where |
 |---|---|---|
-| **Token Factory** | Every model call is a chat completion against `https://api.tokenfactory.nebius.com/v1/` (OpenAI-compatible client, SDK retries off). | `cheatproof/llm.py` (`GuardedLLM`), `cheatproof/attacker.py` |
+| **Token Factory** | Every model call is a chat completion against `https://api.tokenfactory.nebius.com/v1/` (OpenAI-compatible client, SDK retries off). | `rewardseal/llm.py` (`GuardedLLM`), `rewardseal/attacker.py` |
 | **NVIDIA Nemotron Super** | The attacker model, `nvidia/nemotron-3-super-120b-a12b`. Ultra (`nvidia/Nemotron-3-Ultra-550b-a55b`) was run once, on one task. Nano (`nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`) was used only for the smoke check. | `--attacker-model`, `scripts/smoke.py` |
-| **Token Factory Sandboxes** | The default executor. One checkpoint per task image, one branch per attack, gate or patch. Commands run under `unshare -rn` with a start probe that fails closed if the network is not cut. Contained as best effort, see ADR 0002. | `cheatproof/executor.py` (`SandboxExecutor`), `scripts/sandbox_access.py` |
-| **Tavily** | Host-side search, only with `--network-fetch`, counted against `TAVILY_CALL_CAP` (see `docs/tavily.md`). One harness search via Tavily (runtime call) so far, on `Alexei-Kornienko__schematics_to_swagger-7`; the attacker made 0 `web_search` calls of its own, so no result claims the attacker used Tavily. | `cheatproof/strategies.py` (`make_tavily_search`), `cheatproof/attacker.py`, `cheatproof/budget.py` |
+| **Token Factory Sandboxes** | The default executor. One checkpoint per task image, one branch per attack, gate or patch. Commands run under `unshare -rn` with a start probe that fails closed if the network is not cut. Contained as best effort, see ADR 0002. | `rewardseal/executor.py` (`SandboxExecutor`), `scripts/sandbox_access.py` |
+| **Tavily** | Host-side search, only with `--network-fetch`, counted against `TAVILY_CALL_CAP` (see `docs/tavily.md`). One harness search via Tavily (runtime call) so far, on `Alexei-Kornienko__schematics_to_swagger-7`; the attacker made 0 `web_search` calls of its own, so no result claims the attacker used Tavily. | `rewardseal/strategies.py` (`make_tavily_search`), `rewardseal/attacker.py`, `rewardseal/budget.py` |
 
 Every attack and re-attack in the main results is a live Nemotron Super session in Sandboxes (one separate Ultra run on 348 is reported in `docs/results.md`). `report` and `site` replay the
 committed certificates offline; tests use fakes. Facts are computed in code (gates, hole labels, scores in `grader.py`,
@@ -224,7 +221,7 @@ behind the same interface; no results used it.
 
 ## Spend safety
 
-Token Factory has no documented hard spend limit, so the caps live in the app (ADR 0001, `cheatproof/budget.py`). A
+Token Factory has no documented hard spend limit, so the caps live in the app (ADR 0001, `rewardseal/budget.py`). A
 file-locked ledger (`SPEND_LEDGER`) reserves worst-case cost before each paid call and settles the real cost after.
 Caps: **$10 real-spend** on Token Factory spend (`REAL_SPEND_CAP_USD`; promo credit is spendable and is not card money,
 and the cap sits below the promo balance, which is meant to keep the balance from going negative), **$4 daily**, **$20 total**; the
@@ -253,7 +250,7 @@ post-patch result is ambiguous, stays not certified.
 
 ## Repository map
 
-- `cheatproof/`: `tasks.py`, `executor.py`, `grader.py`, `exposure.py`, `attacker.py`, `strategies.py`, `holes.py`,
+- `rewardseal/`: `tasks.py`, `executor.py`, `grader.py`, `exposure.py`, `attacker.py`, `strategies.py`, `holes.py`,
   `patches.py`, `harden.py`, `certify.py`, `site.py`, `keep.py`, `budget.py`, `llm.py`, `cli.py`.
 - `tests/`: pytest, fakes only. `results/`: committed certificates, sanitized diffs, `batch.json`, `combined.txt`.
 - `docs/results.md`: results. `docs/adr/`: spend cap and execution model. `docs/feedback.md`: feedback for Nebius and

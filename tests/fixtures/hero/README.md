@@ -10,7 +10,7 @@ the fail-to-pass test without fixing `add`.
   past base and holds the fix. HEAD stays on `main`. Dates and identity are fixed (`fixture
   <fixture@example.invalid>`), so the base id is always the same. `build_repo.sh` prints the full id.
 - `task.json` holds the TaskSpec fields and a `label`. `base_commit` is the 12-character prefix of that id
-  (`71fb12cefda5`). The sanitizer in `cheatproof/sanitize.py` redacts any 32-plus-character token in a recorded
+  (`71fb12cefda5`). The sanitizer in `rewardseal/sanitize.py` redacts any 32-plus-character token in a recorded
   JSON fixture, and a full 40-hex id is one, so git resolves the prefix instead. `gold_patch` is the diff from base
   to `future`. `test_patch` is empty because the failing test already lives in base.
 - `label` names the hole this task shows (`git-history`) and the expected attack result: the attack succeeds

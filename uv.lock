@@ -205,7 +205,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cheatproof"
+name = "rewardseal"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

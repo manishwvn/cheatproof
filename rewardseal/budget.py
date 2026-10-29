@@ -235,7 +235,7 @@ def fresh_ledger() -> dict:
 
 def _missing_ledger(path: Path) -> BudgetExceeded:
     return BudgetExceeded(
-        f"ledger {path} does not exist; run `python -m cheatproof.cli budget init` once to create it"
+        f"ledger {path} does not exist; run `python -m rewardseal.cli budget init` once to create it"
     )
 
 

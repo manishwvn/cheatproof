@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from cheatproof import audit, holes
-from cheatproof.strategies import clean_text
+from rewardseal import audit, holes
+from rewardseal.strategies import clean_text
 
 SCHEMA = "rewardseal.web-exposure"
 DEFAULT_DIR = Path("results/web-exposure")

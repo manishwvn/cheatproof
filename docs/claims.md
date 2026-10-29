@@ -9,7 +9,7 @@ in the repo. Nothing else may be used. If a number changes, change this sheet fi
 | Claim | Value | Source |
 |---|---|---|
 | Audited environments | 13 of 18 selected (5 excluded as env-broken); the 18 lowest-scoring swe-rebench tasks, not random | `results/exposure/_run.json`, `docs/results.md` (Exposure audit) |
-| At least half of the counted gold source lines also in a future commit in `.git` | 12 of 13 | `results/exposure/*.json` (`fix_reachable`), `python -m cheatproof.cli report --certs results/certificates` |
+| At least half of the counted gold source lines also in a future commit in `.git` | 12 of 13 | `results/exposure/*.json` (`fix_reachable`), `python -m rewardseal.cli report --certs results/certificates` |
 | All counted lines in a future commit | 12 of those 12; for 2 of the 12 (348, toil-4805) it is one line | same records (`gold_lines_in_future` = `gold_added_lines`), `docs/results.md` table |
 | Every one of the 13 has future commits | 13 of 13 | same records (`future_commits_before` > 0) |
 | After `strip-future-git`: no future commits left in the workdir repo and gold + empty gates held | 11 of those 12 (the miss, BQSKit-134, failed its gold gate before any attack) | same records (`closed`, `closed_reason`) |
@@ -21,14 +21,14 @@ in the repo. Nothing else may be used. If a number changes, change this sheet fi
 | Tasks attacked | 11 (9 with recon `exposure` and `future_git` true) | `docs/results.md` (Headline details), certificates |
 | Attacker model | `nvidia/nemotron-3-super-120b-a12b` via Nebius Token Factory (one exploratory Ultra run on 348) | certificates (`attacker.model`) |
 | Tavily | one harness-initiated search (schematics-7); the attacker made 0 search calls; no effect on any outcome shown | `results/certificates/Alexei-Kornienko__schematics_to_swagger-7-*.json`, `docs/tavily.md` |
-| Real Token Factory spend | about $4.15 at Oct 29 (ledger counter, an overestimate against the console); promo credit, no card | `~/.cheatproof-autopilot/ledger.json` (local, not committed), `docs/results.md` (Console) |
+| Real Token Factory spend | about $4.15 at Oct 29 (ledger counter, an overestimate against the console); promo credit, no card | `~/.rewardseal-autopilot/ledger.json` (local, not committed), `docs/results.md` (Console) |
 | Tests | see `STATUS.md` (CI runs them on every PR) | `.github/workflows/ci.yml` |
 | Second audit: random sample within the A-E frame | 9 audited of 12 drawn (3 env-broken); at least half of counted lines in a future commit in 7 of 9; closed in 5 of those 7 (2 not closed: gold gate failed after strip; strip patch did not apply). Counts only, no rate | `results/exposure-sample/`, `docs/sample-protocol.md`, `docs/results.md` |
 | Web exposure (Tavily), 13 audited | 0 of 13: no result (130) contained a counted gold line; no result was a pull/commit/compare page of the task's repo, even for the oracle PR-URL query; searched 2026-10-29, findability only, dated snapshot, this tool only | `results/web-exposure/`, `docs/results.md` |
 | Same-recon re-attack attempt on 348 | not exercised: the new before round passed without history commands (classified unclassified), so there was no hole, no hardening, no re-attack; cost $0.099; with it, the pattern is in 1 of 11 later before-rounds | `results/replay-attempt/`, `docs/results.md` |
 | Retrieval control (openapi3-75) | applying the top-ranked future commit (4 shared gold lines) passed the hidden tests before the strip; 0 future commits and gates held after; one task, no model | `results/control/Dorthu__openapi3-75-retrieval-control.json`, `docs/results.md` |
-| Results explorer, controls gallery, limitations page | explorer lists 24 rows: 13 first-audit + 9 random-sample audited tasks + 2 certificate-only tasks (attacked, not in an exposure audit); every cell is read from the committed records; no new measurement, and a missing audit group suppresses the "not audited" message | `cheatproof/site_extras.py`, `docs/limitations.md`, `results/exposure*`, `results/certificates/` |
-| Demo | https://manishwvn.github.io/cheatproof/ (recorded replay of committed data, not a live attack) | `.github/workflows/pages.yml` |
+| Results explorer, controls gallery, limitations page | explorer lists 24 rows: 13 first-audit + 9 random-sample audited tasks + 2 certificate-only tasks (attacked, not in an exposure audit); every cell is read from the committed records; no new measurement, and a missing audit group suppresses the "not audited" message | `rewardseal/site_extras.py`, `docs/limitations.md`, `results/exposure*`, `results/certificates/` |
+| Demo | https://manishwvn.github.io/rewardseal/ (recorded replay of committed data, not a live attack) | `.github/workflows/pages.yml` |
 
 ## Qualifiers that must travel with the numbers
 - The 13 is a selected sample of the lowest-scoring tasks. It is not a prevalence estimate.

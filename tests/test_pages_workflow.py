@@ -1,13 +1,13 @@
 """Guards for .github/workflows/pages.yml and the site it builds from committed data (queue T39).
 
-The workflow is read as text (no YAML library is a dependency). The build test runs cheatproof.site on the committed
+The workflow is read as text (no YAML library is a dependency). The build test runs rewardseal.site on the committed
 certificates into tmp_path; no model, network or paid call.
 """
 
 import re
 from pathlib import Path
 
-from cheatproof.site import NO_TRANSCRIPT, build_site
+from rewardseal.site import NO_TRANSCRIPT, build_site
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "pages.yml"
@@ -95,7 +95,7 @@ def test_deploy_needs_a_successful_build_on_a_public_main_push_or_dispatch():
 
 def test_a_failed_site_build_is_never_tolerated():
     build = _job_block("build")
-    assert "uv run python -m cheatproof.cli site --certs results/certificates --out results/site" in build
+    assert "uv run python -m rewardseal.cli site --certs results/certificates --out results/site" in build
     for tolerance in ("set +e", "|| true", "continue-on-error", "exit 1"):
         assert tolerance not in build
     assert "continue-on-error" not in WORKFLOW.read_text(encoding="utf-8")

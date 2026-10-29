@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from cheatproof import certify, plan
-from cheatproof.tasks import TaskSpec
+from rewardseal import certify, plan
+from rewardseal.tasks import TaskSpec
 
 SPEC = TaskSpec("x__y-1", "x/y", "a" * 40, "img", ("t::a",), (), "", "", "swe-rebench")
 

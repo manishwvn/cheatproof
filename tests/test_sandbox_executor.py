@@ -23,8 +23,8 @@ from contree_sdk.sdk.exceptions import (
 )
 from contree_sdk.sdk.exceptions.api import RequestInfo, ResponseInfo
 
-from cheatproof.budget import Budget, BudgetExceeded, create_ledger
-from cheatproof.executor import (
+from rewardseal.budget import Budget, BudgetExceeded, create_ledger
+from rewardseal.executor import (
     _BASELINE_SCRIPT,
     _DIFF_SCRIPT,
     _NETCUT_PROBE,
@@ -272,7 +272,7 @@ def test_exec_runs_in_workdir_with_in_sandbox_timeout_and_host_backstop():
     assert call.cwd == "/testbed"
     assert call.disposable is False  # file changes must reach the next call
     assert call.timeout == 8 + EXEC_GRACE_S
-    assert call.argv[-2:] == ["cheatproof", "echo hi"]
+    assert call.argv[-2:] == ["rewardseal", "echo hi"]
     assert "timeout -s KILL 8" in call.argv[-3]
 
 
@@ -806,7 +806,7 @@ def test_untrusted_network_prints_no_warning(capsys):
 
 def test_sandboxes_backend_never_runs_the_colima_disk_check(monkeypatch):
     # colima df belongs to the local Docker backend (its image store). The Sandboxes backend has no local images.
-    monkeypatch.setattr("cheatproof.executor._colima_installed", lambda: True)
+    monkeypatch.setattr("rewardseal.executor._colima_installed", lambda: True)
 
     def colima_df(self):
         raise AssertionError("colima df must not run for the Sandboxes backend")
@@ -960,7 +960,7 @@ def test_make_executor_defaults_to_sandbox(monkeypatch):
 def test_executor_module_imports_without_contree_sdk():
     code = (
         "import sys; sys.modules['contree_sdk'] = None\n"
-        "import cheatproof.executor as e\n"
+        "import rewardseal.executor as e\n"
         "assert e.SandboxExecutor(client_factory=lambda: None) is not None\n"
         "try:\n"
         "    e.SandboxExecutor().start(e.EnvSpec(image='x'), object())\n"
@@ -1095,13 +1095,13 @@ class _BothShapesError(Exception):
     ],
 )
 def test_http_status_reads_status_code_then_response_status_code(exc, status):
-    from cheatproof.executor import _http_status
+    from rewardseal.executor import _http_status
 
     assert _http_status(exc) == status
 
 
 def test_describe_error_names_a_response_shaped_status_and_no_text():
-    from cheatproof.executor import _describe_error
+    from rewardseal.executor import _describe_error
 
     text = _describe_error(_ResponseShapedError(503))
     assert text == "_ResponseShapedError (HTTP 503)"
@@ -1109,7 +1109,7 @@ def test_describe_error_names_a_response_shaped_status_and_no_text():
 
 
 def test_halt_for_payment_halts_on_a_response_shaped_402(tmp_path):
-    from cheatproof.executor import _halt_for_payment
+    from rewardseal.executor import _halt_for_payment
 
     budget = real_budget(tmp_path)
     err = _halt_for_payment(_ResponseShapedError(402), budget)

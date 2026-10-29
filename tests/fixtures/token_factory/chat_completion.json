@@ -9,7 +9,7 @@
         "audio": null,
         "content": null,
         "function_call": null,
-        "reasoning": "The user says: \"Reply with exactly: cheatproof ok\". They want the assistant to reply with exactly the string \"cheatproof ok\". According to policy, we must obey user request unless it violates anything. The request is just to output exactly \"cheatproof ok\". That's fine. Must not",
+        "reasoning": "The user says: \"Reply with exactly: rewardseal ok\". They want the assistant to reply with exactly the string \"rewardseal ok\". According to policy, we must obey user request unless it violates anything. The request is just to output exactly \"rewardseal ok\". That's fine. Must not",
         "refusal": null,
         "role": "assistant",
         "tool_calls": []

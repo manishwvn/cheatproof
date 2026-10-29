@@ -31,11 +31,11 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from cheatproof.executor import Result, Session
-from cheatproof.sanitize import REDACTED, _always_secret, sanitize
+from rewardseal.executor import Result, Session
+from rewardseal.sanitize import REDACTED, _always_secret, sanitize
 
 if TYPE_CHECKING:
-    from cheatproof.tasks import TaskSpec
+    from rewardseal.tasks import TaskSpec
 
 DEFAULT_WORKDIR = "/testbed"
 LOG_TAIL_CHARS = 4000
@@ -84,7 +84,7 @@ GIT_PREFIX = (
 # git apply runs with no repository: GIT_DIR names a path that does not exist, so no repo config, attributes or
 # filter driver is read from the sandbox's .git.
 APPLY_PREFIX = (
-    "GIT_DIR=/cheatproof-no-repo GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null "
+    "GIT_DIR=/rewardseal-no-repo GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null "
     "git -c core.hooksPath=/dev/null "
 )
 OUTCOME_WORDS = frozenset({"PASSED", "FAILED", "ERROR", "SKIPPED", "XFAIL", "XPASS"})
@@ -992,7 +992,7 @@ def grade(
 
     deadline = time.monotonic() + timeout
     scratch = (
-        f"/tmp/cheatproof-{uuid.uuid4().hex}"  # host-chosen and unguessable; never taken from the sandbox
+        f"/tmp/rewardseal-{uuid.uuid4().hex}"  # host-chosen and unguessable; never taken from the sandbox
     )
     logs: list[str] = []
     applied = False
@@ -1084,7 +1084,7 @@ def collect_gate(
     except ValueError as exc:
         return CollectResult(False, f"test files refused: {exc}")
     deadline = time.monotonic() + timeout
-    scratch = f"/tmp/cheatproof-{uuid.uuid4().hex}"
+    scratch = f"/tmp/rewardseal-{uuid.uuid4().hex}"
     logs: list[str] = []
     error: str | None = None
     try:

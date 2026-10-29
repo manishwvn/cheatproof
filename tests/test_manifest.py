@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from cheatproof import audit, certify, manifest
+from rewardseal import audit, certify, manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 STAMP = "2026-10-29T00:00:00+00:00"
@@ -286,7 +286,7 @@ def run_browser(evidence, data, expected_failure=None):
         "https://example.test/manifest.json": base64.b64encode((evidence / MANIFEST).read_bytes()).decode()
     }
     for entry in data["files"]:
-        responses["https://raw.githubusercontent.com/manishwvn/cheatproof/main/" + entry["path"]] = (
+        responses["https://raw.githubusercontent.com/manishwvn/rewardseal/main/" + entry["path"]] = (
             base64.b64encode((evidence / entry["path"]).read_bytes()).decode()
         )
     result = subprocess.run(
@@ -364,7 +364,7 @@ def action_steps():
 
 
 def test_action_validation_and_report_with_defaults(evidence, monkeypatch, capsys):
-    from cheatproof import cli
+    from rewardseal import cli
 
     steps = action_steps()
     script = next(step["run"] for step in steps if step.get("name") == "Validate every exposure record")
@@ -373,7 +373,7 @@ def test_action_validation_and_report_with_defaults(evidence, monkeypatch, capsy
     monkeypatch.setenv("RECORDS_DIR", "results/exposure")
     exec(compile(python, "action-record-validation", "exec"), {})  # noqa: S102 - reviewed local action
     assert "Validated 1" in capsys.readouterr().out
-    monkeypatch.setattr("cheatproof.envfile.load_env", lambda: False)  # never read a real .env
+    monkeypatch.setattr("rewardseal.envfile.load_env", lambda: False)  # never read a real .env
     assert cli.main(["report", "--certs", "results/certificates"]) == 0
     assert capsys.readouterr().out.strip()
     freeze(evidence)

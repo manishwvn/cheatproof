@@ -36,12 +36,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from cheatproof import holes
-from cheatproof.grader import restore_paths
-from cheatproof.harden import _visible_passed
+from rewardseal import holes
+from rewardseal.grader import restore_paths
+from rewardseal.harden import _visible_passed
 
 if TYPE_CHECKING:
-    from cheatproof.tasks import TaskSpec
+    from rewardseal.tasks import TaskSpec
 
 ROUND_NAMES = ("before", "after")
 SCHEMA = 1

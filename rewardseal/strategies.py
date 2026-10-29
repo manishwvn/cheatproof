@@ -10,8 +10,8 @@ import os
 from collections.abc import Callable
 from typing import Any
 
-from cheatproof.budget import Budget
-from cheatproof.sanitize import MAX_QUERY_CHARS, clean_text
+from rewardseal.budget import Budget
+from rewardseal.sanitize import MAX_QUERY_CHARS, clean_text
 
 RESULT_CONTENT_CHARS = 2000
 

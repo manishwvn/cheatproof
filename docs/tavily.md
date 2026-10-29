@@ -1,6 +1,6 @@
 # Tavily runtime path (`--network-fetch`)
 
-What is called: one host-side `web_search` tool for the attacker, backed by Tavily (`cheatproof/strategies.py`,
+What is called: one host-side `web_search` tool for the attacker, backed by Tavily (`rewardseal/strategies.py`,
 `make_network_search`). It is the "network fetch" attack: the attacker searches for the upstream fix of the bug.
 
 Where: only with `--network-fetch` on `harden` or `batch`. Off by default. The search runs on the host, so the sandbox
@@ -69,7 +69,7 @@ How to verify (the live run is the lead's; these are checks, not calls):
 
 Run one task (not before the owner clears it):
 
-    python -m cheatproof.cli batch --instance-ids <ID> --network-fetch --system-prompt-file results/combined.txt \
+    python -m rewardseal.cli batch --instance-ids <ID> --network-fetch --system-prompt-file results/combined.txt \
       --attacker-model nvidia/nemotron-3-super-120b-a12b --max-steps 40 --max-tokens 250000 --out results/certificates
 
 `harden <ID> --network-fetch ...` does the same for one task. Add `--dry-run` to `batch` to see the plan first.

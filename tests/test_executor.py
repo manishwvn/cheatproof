@@ -8,8 +8,8 @@ import time
 
 import pytest
 
-from cheatproof.budget import Budget, BudgetExceeded
-from cheatproof.executor import (
+from rewardseal.budget import Budget, BudgetExceeded
+from rewardseal.executor import (
     _BASELINE_SCRIPT,
     _DIFF_SCRIPT,
     _LEAKED,
@@ -41,12 +41,12 @@ from cheatproof.executor import (
     start,
     subprocess_runner,
 )
-from cheatproof.tasks import ALLOWED_IMAGE_PREFIXES
+from rewardseal.tasks import ALLOWED_IMAGE_PREFIXES
 
 IMAGE = "python:3.12-slim"
 ENV = EnvSpec(image=IMAGE)
 CID = "abc123"
-NAME_RE = re.compile(r"cheatproof-[0-9a-f]{32}")
+NAME_RE = re.compile(r"rewardseal-[0-9a-f]{32}")
 RUN_CAP = MAX_OUTPUT_BYTES + OUTPUT_MARGIN_BYTES
 
 
@@ -251,7 +251,7 @@ def test_container_has_no_network_no_mounts_and_limits(tmp_path):
     )
     assert argv[-3:] == [IMAGE, "sleep", "infinity"]
     (run_argv,) = fake.argvs(["docker", "exec", CID, "sh", "-lc"])
-    assert run_argv[-2:] == ["cheatproof", "echo ok"]
+    assert run_argv[-2:] == ["rewardseal", "echo ok"]
 
 
 def test_container_hardening_flags(tmp_path):
@@ -313,7 +313,7 @@ def test_container_is_named_and_labelled(tmp_path):
         pass
     (argv,) = fake.runs()
     assert NAME_RE.fullmatch(argv[argv.index("--name") + 1])
-    assert argv[argv.index("--label") + 1] == "cheatproof=1"
+    assert argv[argv.index("--label") + 1] == "rewardseal=1"
 
 
 def test_container_records_the_pid_of_the_process_that_started_it(tmp_path):
@@ -322,7 +322,7 @@ def test_container_records_the_pid_of_the_process_that_started_it(tmp_path):
         pass
     (argv,) = fake.runs()
     labels = [argv[i + 1] for i, arg in enumerate(argv) if arg == "--label"]
-    assert labels == ["cheatproof=1", "cheatproof.owner=4242"]
+    assert labels == ["rewardseal=1", "rewardseal.owner=4242"]
 
 
 def test_network_true_uses_bridge(tmp_path):
@@ -635,16 +635,16 @@ def test_reset_that_cannot_remove_the_old_container_starts_nothing(tmp_path):
     assert fake.names_removed() == [run_name(fake), run_name(fake)]
 
 
-# --- sweep: leftover cheatproof=1 containers at CLI start --------------------------------------------
+# --- sweep: leftover rewardseal=1 containers at CLI start --------------------------------------------
 
 SWEEP_ARGV = [
     "docker",
     "ps",
     "-a",
     "--filter",
-    "label=cheatproof=1",
+    "label=rewardseal=1",
     "--format",
-    '{{.ID}} {{.Label "cheatproof.owner"}}',
+    '{{.ID}} {{.Label "rewardseal.owner"}}',
 ]
 DEAD_PID = 2_147_483_646  # no process has this pid on macOS or Linux, so os.kill reports it gone
 
@@ -788,7 +788,7 @@ def test_run_wraps_command_in_container_timeout_with_host_backstop(tmp_path):
     script = argv[5]
     assert "command -v timeout" in script
     assert "exec timeout -s KILL 5 sh -lc" in script  # 4.2 s rounds up to 5 s, inside the host backstop
-    assert argv[-2:] == ["cheatproof", "pytest -q"]
+    assert argv[-2:] == ["rewardseal", "pytest -q"]
     assert host_timeout == pytest.approx(4.2 + EXEC_GRACE_S)
 
 
@@ -877,7 +877,7 @@ def test_default_runner_passes_argv_without_shell_and_reports_exit():
 
 def test_default_runner_reports_missing_binary_as_unavailable():
     with pytest.raises(ExecutorUnavailable, match="not found"):
-        subprocess_runner(["cheatproof-no-such-binary"], 5)
+        subprocess_runner(["rewardseal-no-such-binary"], 5)
 
 
 # --- file transfer -----------------------------------------------------------------------------------
@@ -1173,7 +1173,7 @@ def test_start_uses_the_executor_it_is_given(tmp_path):
 
 @pytest.mark.docker
 def test_live_docker_echo():
-    """Runs the real docker CLI with python:3.12-slim. Skipped unless CHEATPROOF_DOCKER_TESTS=1 is set
+    """Runs the real docker CLI with python:3.12-slim. Skipped unless REWARDSEAL_DOCKER_TESTS=1 is set
     (see tests/conftest.py). Default test runs never call docker."""
     with start(EnvSpec(image=IMAGE), executor=DockerExecutor()) as s:
         res = s.run("echo ok", timeout=120)
@@ -1270,12 +1270,12 @@ COLIMA_DF = (
 @pytest.fixture(autouse=True)
 def colima_absent(monkeypatch):
     """colima is looked up on this machine's PATH. Tests answer for it: absent, unless a test asks for it present."""
-    monkeypatch.setattr("cheatproof.executor._colima_installed", lambda: False)
+    monkeypatch.setattr("rewardseal.executor._colima_installed", lambda: False)
 
 
 @pytest.fixture
 def colima_present(monkeypatch):
-    monkeypatch.setattr("cheatproof.executor._colima_installed", lambda: True)
+    monkeypatch.setattr("rewardseal.executor._colima_installed", lambda: True)
 
 
 def test_colima_store_free_reads_the_var_lib_docker_row(colima_present):

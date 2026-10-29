@@ -11,18 +11,18 @@ import pytest
 import test_certify as tcert
 import test_harden as th
 
-from cheatproof import certify, site
-from cheatproof.certify import (
+from rewardseal import certify, site
+from rewardseal.certify import (
     build_certificate,
     load_certificate,
     score,
     validate_certificate,
     write_certificate,
 )
-from cheatproof.cli import render_text
-from cheatproof.harden import CERTIFIED_VIA, legit_fix_blocker
-from cheatproof.holes import UNCLASSIFIED, HoleReport
-from cheatproof.site import build_site
+from rewardseal.cli import render_text
+from rewardseal.harden import CERTIFIED_VIA, legit_fix_blocker
+from rewardseal.holes import UNCLASSIFIED, HoleReport
+from rewardseal.site import build_site
 
 ROOT = Path(__file__).resolve().parents[1]
 FIX_SRC = "src/answer.py"

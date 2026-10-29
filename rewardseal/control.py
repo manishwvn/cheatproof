@@ -23,9 +23,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from cheatproof import audit, grader, holes, patches
-from cheatproof.budget import BudgetExceeded
-from cheatproof.tasks import TaskSpec
+from rewardseal import audit, grader, holes, patches
+from rewardseal.budget import BudgetExceeded
+from rewardseal.tasks import TaskSpec
 
 SCHEMA = "rewardseal.retrieval-control"
 SCHEMA_VERSION = 1

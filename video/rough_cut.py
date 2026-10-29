@@ -311,8 +311,8 @@ def default_out_dir(dry_run: bool) -> Path:
         raise ScriptError(f"default output under {base} is inside the repo; pass --out to choose a folder")
     check_out_path(base)
     if dry_run:
-        return base / "cheatproof-rough-cut"
-    return Path(tempfile.mkdtemp(prefix="cheatproof-rough-cut-", dir=base))
+        return base / "rewardseal-rough-cut"
+    return Path(tempfile.mkdtemp(prefix="rewardseal-rough-cut-", dir=base))
 
 
 def make_rough_cut(

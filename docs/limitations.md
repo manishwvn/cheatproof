@@ -23,6 +23,6 @@ This report replays committed records. It does not run a live attack or establis
 
 This tool is for authorized evaluation environments. Do not use findings to cheat on benchmarks or leaderboards.
 
-Report problems via GitHub issues on manishwvn/cheatproof (https://github.com/manishwvn/cheatproof/issues).
+Report problems via GitHub issues on manishwvn/rewardseal (https://github.com/manishwvn/rewardseal/issues).
 
 Do not include unpublished fixes, secrets or private data in reports.

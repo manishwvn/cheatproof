@@ -6,10 +6,10 @@ import pytest
 import test_attacker as ta
 import test_cli as tc
 
-from cheatproof import cli
-from cheatproof.attacker import AttackConfig
-from cheatproof.budget import Budget, BudgetExceeded
-from cheatproof.strategies import (
+from rewardseal import cli
+from rewardseal.attacker import AttackConfig
+from rewardseal.budget import Budget, BudgetExceeded
+from rewardseal.strategies import (
     COMBINED,
     MAX_QUERY_CHARS,
     STRATEGIES,
@@ -319,7 +319,7 @@ def test_no_key_value_reaches_the_batch_state(tmp_path, monkeypatch):
 
 
 def test_clean_text_redacts_whole_string_credential_patterns():
-    from cheatproof.sanitize import clean_text
+    from rewardseal.sanitize import clean_text
 
     assert clean_text("fix Bearer abc123token now", 100) == "fix REDACTED now"
     assert clean_text("setup password=hunter2 here", 100) == "setup REDACTED here"
@@ -331,7 +331,7 @@ def test_clean_text_redacts_whole_string_credential_patterns():
 
 
 def test_clean_text_replaces_the_configured_key_verbatim_even_when_it_looks_ordinary(monkeypatch):
-    from cheatproof.sanitize import clean_text
+    from rewardseal.sanitize import clean_text
 
     plain = "plainsecretvalue99"  # no key-like shape: only the verbatim match can catch it
     monkeypatch.setenv("TAVILY_API_KEY", plain)
@@ -342,7 +342,7 @@ def test_clean_text_replaces_the_configured_key_verbatim_even_when_it_looks_ordi
 
 
 def test_clean_text_caps_words_after_the_whole_string_pass():
-    from cheatproof.sanitize import clean_text
+    from rewardseal.sanitize import clean_text
 
     assert len(clean_text("word " * 1000, 50)) <= 50
     assert clean_text("a b c", 0) == ""
@@ -494,7 +494,7 @@ def test_the_total_cap_is_kept_in_batch_json_across_invocations(tmp_path, monkey
 
 
 def test_clean_text_keeps_ordinary_words_that_contain_a_credential_word():
-    from cheatproof.sanitize import clean_text
+    from rewardseal.sanitize import clean_text
 
     for text in (
         "KeyError: x",
@@ -510,7 +510,7 @@ def test_clean_text_keeps_ordinary_words_that_contain_a_credential_word():
 def test_clean_text_is_linear_on_hostile_input():
     import time
 
-    from cheatproof.sanitize import clean_text
+    from rewardseal.sanitize import clean_text
 
     hostile = (
         "a" * 64_000,

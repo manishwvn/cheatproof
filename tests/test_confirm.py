@@ -1,4 +1,4 @@
-"""Tests for cheatproof/confirm.py and its use in `report` and the site (queue T54).
+"""Tests for rewardseal/confirm.py and its use in `report` and the site (queue T54).
 
 Confirmed holes versus unconfirmed leads, the manifest, the Wilson rule (no interval below n = 10) and replications.
 Reports are built by hand with the fixtures of test_certify.py; the committed certificates are read, never written.
@@ -23,10 +23,10 @@ from test_certify import (
     with_before,
 )
 
-from cheatproof import cli, confirm
-from cheatproof.certify import load_certificate, score, score_directory, write_certificate
-from cheatproof.confirm import ConfirmationError
-from cheatproof.site import build_site
+from rewardseal import cli, confirm
+from rewardseal.certify import load_certificate, score, score_directory, write_certificate
+from rewardseal.confirm import ConfirmationError
+from rewardseal.site import build_site
 
 REPO = Path(__file__).resolve().parent.parent
 COMMITTED = REPO / "results" / "certificates"
@@ -511,7 +511,7 @@ def test_the_manifest_is_never_applied_to_a_replication_run(tmp_path):
     ("name", "content", "message"),
     [
         ("owner__repo-1-run1.json", "{not json", "not a valid certificate"),
-        ("owner__repo-1-run1.json", '{"schema": "cheatproof.certificate"}', "missing"),
+        ("owner__repo-1-run1.json", '{"schema": "rewardseal.certificate"}', "missing"),
         ("run1.json", None, "name must be"),
         ("owner__repo-2-run1.json", None, "name must be"),  # the file holds owner__repo-1
         ("owner__repo-1-final.json", None, "name must be"),
@@ -599,7 +599,7 @@ def test_the_manifest_decides_old_certificates_and_the_field_decides_new_ones():
 
 @pytest.mark.parametrize("value", [-1, True, "2", 1.5, None])
 def test_a_bad_shared_future_lines_is_refused_and_an_absent_one_is_fine(value):
-    from cheatproof.certify import validate_certificate
+    from rewardseal.certify import validate_certificate
 
     cert = cert_for(with_t53(fixed_report("owner__repo-1")))
     validate_certificate(cert)
@@ -623,8 +623,8 @@ def test_a_hole_report_writes_the_count_only_when_it_has_one():
 def test_harden_records_shared_future_lines_from_the_scan_digests():
     import test_harden as th
 
-    from cheatproof.certify import validate_certificate
-    from cheatproof.holes import future_line_digest
+    from rewardseal.certify import validate_certificate
+    from rewardseal.holes import future_line_digest
 
     line = "    total_amount = compute_total_value(order_items)"
     diff = (

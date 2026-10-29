@@ -30,10 +30,10 @@ The site replays committed records. Nothing here calls a model or the network. O
 script for optional filtering; every other page has no JavaScript. A
 certificate, trace or diff is untrusted attacker or model text, so every value reaches a page through _cell(), which
 escapes with html.escape(quote=True) and shows control and bidi characters as [U+XXXX]. Trace values pass through
-cheatproof.sanitize first. Output is deterministic: the same input gives the same bytes, and no current time or
+rewardseal.sanitize first. Output is deterministic: the same input gives the same bytes, and no current time or
 absolute path is written.
 
-out_dir gets a .cheatproof-site marker and an empty .nojekyll. A non-empty out_dir without the marker is refused. With
+out_dir gets a .rewardseal-site marker and an empty .nojekyll. A non-empty out_dir without the marker is refused. With
 the marker, the env/*.html pages of an earlier build are removed before the new pages are written.
 """
 
@@ -48,9 +48,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from cheatproof import confirm
-from cheatproof.certify import load_certificate, score
-from cheatproof.sanitize import sanitize
+from rewardseal import confirm
+from rewardseal.certify import load_certificate, score
+from rewardseal.sanitize import sanitize
 
 BANNER = "Recorded run — replay of committed certificates, no live calls"
 NO_TRANSCRIPT = (
@@ -60,9 +60,9 @@ NO_TRANSCRIPT = (
 NOT_RECORDED = "not recorded"
 NO_ATTACK_DIFF = "attack diff not recorded in certificate"
 UNREADABLE_LINE = "unreadable line"
-RUN_COMMAND = "python -m cheatproof.cli harden <instance id> ..."
+RUN_COMMAND = "python -m rewardseal.cli harden <instance id> ..."
 DEFAULT_CERT_DIR = "results/certificates"
-GITHUB_BLOB = "https://github.com/manishwvn/cheatproof/blob/main/"
+GITHUB_BLOB = "https://github.com/manishwvn/rewardseal/blob/main/"
 # Evidence files committed beside the certificates: task id -> path in the repo.
 EVIDENCE_FILES = {"CycloneDX__cyclonedx-python-348": "results/evidence/348-causal.md"}
 NOT_RELEASE_APPROVED = "Certified is not release-approved; same-recon re-attack not exercised."
@@ -115,8 +115,8 @@ SEE_ERRORS = '(see <a href="#errors">errors</a>).'
 UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
 # C0 controls except tab and newline, DEL, C1 controls and bidi controls. _cell shows each one as [U+XXXX].
 CONTROL_OR_BIDI = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]")
-MARKER = ".cheatproof-site"  # build_site writes it; only a directory that holds it may hold an earlier site
-MARKER_TEXT = "RewardSeal site, written by cheatproof.site.build_site\n"
+MARKER = ".rewardseal-site"  # build_site writes it; only a directory that holds it may hold an earlier site
+MARKER_TEXT = "RewardSeal site, written by rewardseal.site.build_site\n"
 NOJEKYLL = ".nojekyll"  # empty: GitHub Pages serves the files as they are, without Jekyll
 TRANSCRIPT_NOTE = (
     "Tool results are shown as digests only. This transcript is matched to the certificate by file name "
@@ -286,7 +286,7 @@ def build_site(
     confirmation = confirm.summarize(certs, manifest) if entries else None
     statuses = {c["task"]["instance_id"]: confirm.hole_status(c, manifest) for c in certs}
     index = out / "index.html"
-    from cheatproof import site_extras
+    from rewardseal import site_extras
 
     site_extras.write_pages(root.parent, out, entries, errors, blob, exposure_path, manifest)
     body = _index_body(
@@ -318,7 +318,7 @@ def build_site(
             '<p><a href="index.html">Back to the index</a></p><h1>Evidence verifier</h1>'
             "<p>The browser verifier is added by the Pages workflow, next to manifest.json. In a local build this is a "
             "placeholder: open docs/verify/index.html from the repository, or run "
-            "<code>python -m cheatproof.manifest verify</code>.</p>"
+            "<code>python -m rewardseal.manifest verify</code>.</p>"
             f'<p><a href="{_cell(blob)}docs/verify/index.html">docs/verify/index.html on GitHub</a></p>',
             blob,
         ),
@@ -349,7 +349,7 @@ def build_site(
 def _exposure_summary(certs: Path, records: Path, errors: list[tuple[str, str]]) -> Mapping[str, Any] | None:
     """T57: the exposure-audit summary for the hero block, or None. A malformed record adds an error row and no number
     is drawn (the page is still built)."""
-    from cheatproof import audit  # lazy: keeps the grader and patches out of the site module's import
+    from rewardseal import audit  # lazy: keeps the grader and patches out of the site module's import
 
     try:
         return audit.exposure_summary(records, certs)
@@ -359,7 +359,7 @@ def _exposure_summary(certs: Path, records: Path, errors: list[tuple[str, str]])
 
 
 def _web_exposure_section(directory: Path, exposure_dir: Path, errors: list[tuple[str, str]]) -> str:
-    from cheatproof import audit, webaudit
+    from rewardseal import audit, webaudit
 
     try:
         webaudit.check_path(directory, directory=True)
@@ -1019,7 +1019,7 @@ def _fate(cert: Mapping[str, Any] | None, audited: str) -> str:
 
 
 def _reconciliation(entries: Sequence[_Entry], batch: _Batch, exposure_path: Path) -> str:
-    from cheatproof import audit
+    from rewardseal import audit
 
     selected = set(batch.record["selected_ids"]) if batch.record else set()
     audited_ids: set[str] = set()
@@ -1317,7 +1317,7 @@ def _hero_section(
     if (
         exposure is not None
     ):  # T57: one paragraph; a real audit leads, the labelled fallback follows the counts
-        from cheatproof.audit import summary_line
+        from rewardseal.audit import summary_line
 
         css = "exposure-audit lead" if audit_first else "exposure-audit"
         exposure_html = f'<p class="{css}">{_cell(summary_line(exposure))}</p>'

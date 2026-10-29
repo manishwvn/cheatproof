@@ -417,7 +417,7 @@ def repo(tmp_path):
 def push(repo, *lines):
     stdin = "".join(line + "\n" for line in lines)
     return subprocess.run(
-        [str(PRE_PUSH), "origin", "https://example.invalid/cheatproof.git"],
+        [str(PRE_PUSH), "origin", "https://example.invalid/rewardseal.git"],
         check=False,
         input=stdin,
         capture_output=True,
@@ -653,7 +653,7 @@ def test_last_line_without_a_newline_is_still_checked(repo):
     base = git(repo, "rev-parse", "HEAD")
     new = commit(repo, {"src.py": "x = 4\n"}, "bad")
     r = subprocess.run(
-        [str(PRE_PUSH), "origin", "https://example.invalid/cheatproof.git"],
+        [str(PRE_PUSH), "origin", "https://example.invalid/rewardseal.git"],
         check=False,
         input=f"refs/heads/main {new} refs/heads/main {base}",
         capture_output=True,

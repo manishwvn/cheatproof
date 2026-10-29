@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from cheatproof import control
-from cheatproof.executor import Result
-from cheatproof.tasks import TaskSpec
+from rewardseal import control
+from rewardseal.executor import Result
+from rewardseal.tasks import TaskSpec
 
 BASE = "a" * 40
 C1, C2 = "1" * 40, "2" * 40

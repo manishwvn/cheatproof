@@ -1,5 +1,5 @@
 #!/bin/sh
-# Cheatproof pre-push hook. Install from the repo root (works in a worktree too):
+# RewardSeal pre-push hook. Install from the repo root (works in a worktree too):
 #   cp docs/autopilot/pre-push "$(git rev-parse --git-path hooks)/pre-push"
 # Git runs it with stdin lines "<local ref> <local sha> <remote ref> <remote sha>" and every line is checked.
 # A push to refs/heads/main may change only docs/autopilot/QUEUE.md, docs/autopilot/LOG.md and STATUS.md.

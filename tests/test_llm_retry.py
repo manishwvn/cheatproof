@@ -7,9 +7,9 @@ import httpx
 import openai
 import pytest
 
-from cheatproof import llm as llm_module
-from cheatproof.budget import Budget, BudgetExceeded, Price, create_ledger
-from cheatproof.llm import MAX_RETRIES, GuardedLLM
+from rewardseal import llm as llm_module
+from rewardseal.budget import Budget, BudgetExceeded, Price, create_ledger
+from rewardseal.llm import MAX_RETRIES, GuardedLLM
 
 pytestmark = pytest.mark.usefixtures("init_ledger")
 
@@ -257,8 +257,8 @@ def test_jitter_is_bounded(tmp_path):
 
 
 def test_the_attack_summary_carries_llm_retries():
-    from cheatproof.attacker import AttackResult
-    from cheatproof.harden import _attack_summary
+    from rewardseal.attacker import AttackResult
+    from rewardseal.harden import _attack_summary
 
     def result(**kwargs):
         return AttackResult(True, "submit", [], 0, 0, "", **kwargs)

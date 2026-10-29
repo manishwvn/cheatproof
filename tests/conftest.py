@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from cheatproof.budget import create_ledger
+from rewardseal.budget import create_ledger
 
 # The repo's own run output. No test may add a file here: the CLI's defaults point at these folders.
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -37,13 +37,13 @@ def init_ledger(tmp_path):
 
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "docker: runs the real docker CLI; needs CHEATPROOF_DOCKER_TESTS=1")
+    config.addinivalue_line("markers", "docker: runs the real docker CLI; needs REWARDSEAL_DOCKER_TESTS=1")
 
 
 def pytest_collection_modifyitems(config, items):
-    if os.environ.get("CHEATPROOF_DOCKER_TESTS") == "1":
+    if os.environ.get("REWARDSEAL_DOCKER_TESTS") == "1":
         return
-    skip = pytest.mark.skip(reason="live Docker test: set CHEATPROOF_DOCKER_TESTS=1")
+    skip = pytest.mark.skip(reason="live Docker test: set REWARDSEAL_DOCKER_TESTS=1")
     for item in items:
         if item.get_closest_marker("docker"):
             item.add_marker(skip)

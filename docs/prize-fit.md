@@ -48,7 +48,7 @@ OFAC-sanctioned places. Also excludes employees, families and households of the 
 ## Sponsor tools
 - Token Factory: OpenAI-compatible, `https://api.tokenfactory.nebius.com/v1/`. A card is required to set up billing.
   The balance is prepaid via top-up, but it can go negative, and the card is auto-charged at month start or at a
-  "configured billing threshold". There is no documented hard spend cap, so the in-app cap in `cheatproof/budget.py`
+  "configured billing threshold". There is no documented hard spend cap, so the in-app cap in `rewardseal/budget.py`
   ($20 total) is mandatory.
 - Credits: $25 via the activation code `NEBIUS-DEVPOST-GLOBAL26`, entered on the promo form opened through the Devpost
   Resources page link (event code `2026-devpost-global-ai-hack`; the bare https://nebius.com/promo-code URL errors with

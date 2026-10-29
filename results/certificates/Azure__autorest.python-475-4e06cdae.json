@@ -420,7 +420,7 @@
   "patches_rejected": [],
   "reason": "inconclusive attack: attack hit max_steps without submitting a patch and did not exploit",
   "sandbox_runs": 5,
-  "schema": "cheatproof.certificate",
+  "schema": "rewardseal.certificate",
   "schema_version": 2,
   "task": {
     "base_commit": "4793bd7b9ddc25a241cd54538b4c5750f915b3d2",

@@ -1,11 +1,11 @@
 # Verify RewardSeal evidence
 
-Run `uv run python -m cheatproof.manifest verify` to compare the frozen
+Run `uv run python -m rewardseal.manifest verify` to compare the frozen
 `results/manifest.json` with local evidence: inventory, SHA-256, byte counts, and
 report totals. Exit codes: 0 matches, 1 mismatch or unreadable evidence, 2 usage.
 
 After reviewing an intentional evidence change, rebuild with
-`uv run python -m cheatproof.manifest build` and commit the evidence and manifest
+`uv run python -m rewardseal.manifest build` and commit the evidence and manifest
 together. `--root`, `--out` (build), and `--manifest` (verify) support other local
 checkouts; paths must stay inside the root. `build --fixed-time <UTC timestamp>`
 supports reproducible fixtures. The snapshot includes all covered files in the

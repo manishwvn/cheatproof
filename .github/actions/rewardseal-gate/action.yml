@@ -26,7 +26,7 @@ runs:
         import os
         import sys
         from pathlib import Path
-        from cheatproof.audit import load_record, load_run
+        from rewardseal.audit import load_record, load_run
 
         directory = Path(os.environ["RECORDS_DIR"])
         if not directory.is_dir() or directory.is_symlink():
@@ -56,12 +56,12 @@ runs:
         CERTS_DIR: ${{ inputs.certs-dir }}
       run: |
         mkdir -p "$RUNNER_TEMP/rewardseal-gate"
-        uv run python -m cheatproof.cli report --certs "$CERTS_DIR" > "$RUNNER_TEMP/rewardseal-gate/report.txt"
+        uv run python -m rewardseal.cli report --certs "$CERTS_DIR" > "$RUNNER_TEMP/rewardseal-gate/report.txt"
     - name: Verify frozen evidence when present
       shell: bash
       run: |
         if [ -e results/manifest.json ] || [ -L results/manifest.json ]; then
-          uv run python -m cheatproof.manifest verify
+          uv run python -m rewardseal.manifest verify
         fi
     # pin to a commit SHA before production use
     - uses: actions/upload-artifact@v4

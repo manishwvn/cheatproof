@@ -66,7 +66,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from cheatproof.harden import (
+from rewardseal.harden import (
     ATTACKS_PER_ROUND,
     CERTIFIED_VIA,
     EXPOSURE_OF_LABEL,
@@ -76,16 +76,16 @@ from cheatproof.harden import (
     VIA_REATTACK_FAILED,
     VISIBLE_PASSED_BASIS,
 )
-from cheatproof.holes import HARD_CODE, LEGIT_FIX, UNCLASSIFIED
-from cheatproof.recon import RECON_EXPOSURE, RECON_REPLAY
-from cheatproof.sanitize import _always_secret  # private on purpose: sanitize() would redact valid SHAs
+from rewardseal.holes import HARD_CODE, LEGIT_FIX, UNCLASSIFIED
+from rewardseal.recon import RECON_EXPOSURE, RECON_REPLAY
+from rewardseal.sanitize import _always_secret  # private on purpose: sanitize() would redact valid SHAs
 
 if TYPE_CHECKING:
-    from cheatproof.harden import HardenReport
-    from cheatproof.tasks import TaskSpec
+    from rewardseal.harden import HardenReport
+    from rewardseal.tasks import TaskSpec
 
 SCHEMA_VERSION = 2
-SCHEMA = "cheatproof.certificate"
+SCHEMA = "rewardseal.certificate"
 SCORE_SCHEMA_VERSION = 3
 Z_95 = 1.959963984540054  # the 97.5th percentile of the standard normal distribution
 SHOWN_CHARS = 60  # longest repr of a bad value in an error message

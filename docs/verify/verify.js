@@ -1,5 +1,5 @@
 "use strict";
-const rawBase = "https://raw.githubusercontent.com/manishwvn/cheatproof/main/";
+const rawBase = "https://raw.githubusercontent.com/manishwvn/rewardseal/main/";
 const elements = Object.fromEntries(["verify", "tamper", "status", "totals", "files"].map(id => [id, document.getElementById(id)]));
 let manifest = null;
 let fetched = [];

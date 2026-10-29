@@ -10,8 +10,8 @@ import test_certify as tcert
 import test_cli as tc
 import test_network_fetch as tnf
 
-from cheatproof import cli
-from cheatproof.attacker import (
+from rewardseal import cli
+from rewardseal.attacker import (
     HARNESS_SEARCH_BEGIN,
     HARNESS_SEARCH_END,
     HARNESS_SEARCH_HEADING,
@@ -20,11 +20,11 @@ from cheatproof.attacker import (
     AttackConfig,
     attack,
 )
-from cheatproof.budget import BudgetExceeded
-from cheatproof.certify import validate_certificate, write_certificate
-from cheatproof.sanitize import MAX_QUERY_CHARS
-from cheatproof.site import build_site
-from cheatproof.strategies import NETWORK_ADDENDUM, make_network_search, problem_query
+from rewardseal.budget import BudgetExceeded
+from rewardseal.certify import validate_certificate, write_certificate
+from rewardseal.sanitize import MAX_QUERY_CHARS
+from rewardseal.site import build_site
+from rewardseal.strategies import NETWORK_ADDENDUM, make_network_search, problem_query
 
 pytestmark = pytest.mark.usefixtures("init_ledger")
 
@@ -420,7 +420,7 @@ def test_the_site_accepts_batch_rows_with_and_without_the_field(tmp_path):
 
 
 def test_the_holes_loader_does_not_count_the_harness_record_as_skipped(tmp_path):
-    from cheatproof import holes
+    from rewardseal import holes
 
     records = [
         {"type": "header"},

@@ -32,7 +32,7 @@ T08 waits on U21 and U22. T25 next (executor.py, after #30).
   bug) with the pinned gitleaks 8.18.4 CLI.
 
 ## 2026-10-18 (interactive planner)
-- Project decided: Cheatproof. Renamed the package `twindiff` → `cheatproof` and every leftover `twin-diff` name.
+- Project decided: RewardSeal. Renamed the package `twindiff` → `rewardseal` and every leftover `twin-diff` name.
 - Rewrote CLAUDE.md, STATUS.md, PLAN.md, docs/pitches.md and QUEUE.md (T01–T14, U1–U7); added ADR 0002 (Sandboxes
   primary, local Docker fallback behind one executor interface).
 - Audit fixes: `reserve_sandbox_run` now checks the halt flag, run cap and money caps and books under one lock (a
@@ -41,12 +41,12 @@ T08 waits on U21 and U22. T25 next (executor.py, after #30).
   2026-10-16.
 - Machine facts: arm64 Mac, Docker daemon stopped, 16 GB free disk, so the Docker fallback covers a subset until U7.
 - Lesson: routine sessions take the working folder and model of the session that created them; create from the repo.
-- Routine `cheatproof-autopilot` created (cron `22 * * * *`, dispatch about :23, notifications off). Skip test
+- Routine `rewardseal-autopilot` created (cron `22 * * * *`, dispatch about :23, notifications off). Skip test
   passed at 06:24Z (gate exit 3, "skip: not due"). The run started in the parent folder in auto mode on Opus, because
   the task was created from a turn another session started: owner item U8.
 - Independent routine review: verdict fix first, no critical. Prompt fixes applied the same hour (lock before pull,
   absolute release command, LOST handling, alert body from a file); connector guard now fails closed. Repo-side
-  findings queued as T15; full list in `~/.cheatproof-autopilot/review-2026-10-18.md`.
+  findings queued as T15; full list in `~/.rewardseal-autopilot/review-2026-10-18.md`.
 
 ## 2026-10-18 routine (cycle 2026-10-18T05:42:00-05:00)
 progress 8% (1/15 tasks done, 10 days to submit)
@@ -136,7 +136,7 @@ progress 62% (6/16 tasks done, 10 days to submit)
 
 ## 2026-10-18 routine (cycle 2026-10-18T14:24:26-05:00)
 progress 66% (6/16 tasks done, 10 days to submit)
-- T09 report site built as draft PR #12 (`cheatproof/site.py`, `site` CLI subcommand), 1052 tests green, ruff clean.
+- T09 report site built as draft PR #12 (`rewardseal/site.py`, `site` CLI subcommand), 1052 tests green, ruff clean.
 - Not merged: the run reached F 83 (cap 85) after the build wave, before the Sonnet review. Next run reviews #12.
 - Spend: $0 (no model, sandbox or Tavily calls).
 
@@ -190,8 +190,8 @@ progress 73% (12/22 tasks done, 10 days to submit)
 - No runnable task left: T08 waits on T01 (U3) and the planner (T16, T22); T11 opens 2026-10-21.
 - Spend: $0 (no model, sandbox or Tavily calls).
 
-- Task T21 (#16): one Haiku builder; Sonnet review "fix first" (medium: the sweep removed every `cheatproof=1`
-  container, so a concurrent harden would lose its live one). One Haiku fix round: `cheatproof.owner=<pid>` label,
+- Task T21 (#16): one Haiku builder; Sonnet review "fix first" (medium: the sweep removed every `rewardseal=1`
+  container, so a concurrent harden would lose its live one). One Haiku fix round: `rewardseal.owner=<pid>` label,
   sweep only dead or missing owners, `DOCKER_TMPFS_MB` clamped at 4096, ADR 0002 guard text updated. Opus: merge.
 - Task T18 (#17): two parallel Haiku builders on disjoint files (cli; site) against a fixed `batch.json` schema 1
   contract. Haiku audit plus Sonnet review in parallel, "fix first" (high: a failed cost check, including a NaN ledger
@@ -215,7 +215,7 @@ progress 77% (15/22 tasks done, 9 days to submit)
 - No other task is runnable: T10 needs T08, T11 opens 2026-10-21, T12 opens 2026-10-27.
 - Spend: $0 (no model, sandbox or Tavily calls).
 
-- Refused tool call (auto mode): one Bash call that removed the clean, unused worktree `../cheatproof-wt/t08-eval`
+- Refused tool call (auto mode): one Bash call that removed the clean, unused worktree `../rewardseal-wt/t08-eval`
   (branch `t08-eval`, no commits) and stopped colima. Not retried. The worktree and the running colima VM remain;
   the next run or the planner can remove the worktree, and the owner can `colima stop`.
 - Verified Docker 29.5.2 under colima. 8 of the 10 Verified picks are sphinx; expect a sphinx-heavy Verified slice.
@@ -346,7 +346,7 @@ progress 81% (21/30 tasks done, 6 days to submit)
 
 ## 2026-10-22 routine (cycle 2026-10-22T06:23:53-05:00)
 progress 82% (21/30 tasks done, 6 days to submit)
-- Task: T30 (#39) merged: `_reported_not_found` in `cheatproof/grader.py` also accepts pytest's `found no collectors for <node>`, so DRMacIver__shrinkray-7's exit 4 gets its collection cause. 4 fakes-only tests, 1946 pass.
+- Task: T30 (#39) merged: `_reported_not_found` in `rewardseal/grader.py` also accepts pytest's `found no collectors for <node>`, so DRMacIver__shrinkray-7's exit 4 gets its collection cause. 4 fakes-only tests, 1946 pass.
 - Haiku build, Sonnet review APPROVE (low only: ANSI-wrapped and multi-node lines untested), Opus final approve. Cost $0, no live run (U25).
 - Learning notes for #39 added.
 - No other runnable task: T08 waits on U25, T24/T27/T10 need T08, T12 after 2026-10-27. Hand-back condition not met (T12 is date-gated, not owner-blocked).
@@ -359,10 +359,10 @@ progress 82% (21/30 tasks done, 6 days to submit)
 - Decision: batch 3 runs in chunks of at most 3 tasks, then the routine halts the budget itself and asks for U26. Reason: the owner wants a console re-check before each further batch.
 - Decision: Nemotron Super stays the attacker (Ultra is dearer); Haiku builds, Sonnet reviews, Opus only orchestrates.
 - Queued from chat-only items: T31 (PR #30 minors), T32 (certificate lost to the leak guard), T27 item for the PR #36 follow-ups. PR #32 minors were already T27 items 1-9.
-- Live ledger `halted` cleared (backup `~/.cheatproof-autopilot/ledger.pre-u25.bak`).
+- Live ledger `halted` cleared (backup `~/.rewardseal-autopilot/ledger.pre-u25.bak`).
 
 ## 2026-10-23 planner (promo credit)
 - Authority, owner relayed by the orchestrator session, verbatim: "yea lets set $10 for now. pass the same to planner. like you told me, I will not be prompting there". Owner earlier, verbatim: "we already have account balance that was give through this hackathon's promo code".
 - Fact verified by the orchestrator in Token Factory > Transactions: the $26.65 balance is "Adjustment: AI Builder Program Credits" (+$26.65, Oct 18), hackathon promo credit, not card money. The $0.71 trial is used first, then the promo.
 - New rule: promo spend is allowed. TOTAL real spend (trial + promo, i.e. Token Factory spend) is capped at $10 for now; the $4 daily cap stays; the account balance must NEVER go negative (a negative balance charges the card).
-- T43: `REAL_SPEND_CAP_USD` (default and hard ceiling $10) replaces the trial-only 0.74 cap in `cheatproof/budget.py`; `trial_spend_usd` ledger field kept and still counting.
+- T43: `REAL_SPEND_CAP_USD` (default and hard ceiling $10) replaces the trial-only 0.74 cap in `rewardseal/budget.py`; `trial_spend_usd` ledger field kept and still counting.

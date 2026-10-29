@@ -1,9 +1,9 @@
 # Handoff to the new planner session (2026-10-18)
 
-The previous session did research and setup. **The project is decided: RewardSeal (formerly Cheatproof).** Start here.
+The previous session did research and setup. **The project is decided: RewardSeal.** Start here.
 
 ## The project
-**RewardSeal** (product name; formerly Cheatproof, see U5), in the Coding & Agentic Engineering
+**RewardSeal** (product name), in the Coding & Agentic Engineering
 track. It is an automatic attack → patch → re-attack loop that hardens AI coding (RL/eval) environments against
 reward hacking, and certifies each environment.
 - A dishonest Nemotron agent (Nemotron Super as the attacker) tries to pass SWE tasks **without solving them**.
@@ -25,23 +25,23 @@ reward hacking, and certifies each environment.
   SWE-bench Verified sample), ImpossibleBench, RHB (ICML 2026), Cursor (Jun 2026), Poolside, Vals.ai MiMo (Oct 2026).
 
 Full research is in `/Users/manish/Documents/Nebius_X_Nvidia/research/` (outside the repo; owner-private):
-`ideas/pitch-cheatproof.md`, `ideas/judging/opus-cheatproof-review.md` (read this one),
+`ideas/pitch-rewardseal.md`, `ideas/judging/opus-rewardseal-review.md` (read this one),
 `ideas/discord-signals.md`, `HACKATHON_BRIEF.md`.
 
 ## Constraints
 - **Money:** free credits only (the $1 trial, then the $26.65 hackathon promo credit; never card money). In-app caps `SPEND_CAP_USD=20`, `DAILY_CAP_USD=4`, `REAL_SPEND_CAP_USD=10` (total real spend, T43); the balance must never go negative. Every paid
-  call goes through `twindiff/budget.py`; rename the package to `cheatproof/`.
+  call goes through `twindiff/budget.py`; rename the package to `rewardseal/`.
 - Text Nemotron models only; no vision. Model IDs and prices: VERIFY with `scripts/smoke.py`.
 - Claude usage: weekly windows reset Oct 20 6:59 PM CT and Oct 27 6:59 PM CT. Playbook caps: W 80, F 80. Unused
   budget in a window is wasted, so keep the routine busy.
 
 ## First tasks for the new session (in order)
 
-**All six done 2026-10-18** (PR `chore/setup-cheatproof`; see STATUS.md and LOG.md). Kept below as history.
-1. ~~Rename~~ done 2026-10-18: GitHub repo `manishwvn/cheatproof`, local folder `/Users/manish/Documents/Nebius_X_Nvidia/cheatproof`, state folder `~/.cheatproof-autopilot`, guard allow file updated. Still to do: replace `twin-diff`/`twindiff` names inside files.
+**All six done 2026-10-18** (PR `chore/setup-rewardseal`; see STATUS.md and LOG.md). Kept below as history.
+1. ~~Rename~~ done 2026-10-18: GitHub repo `manishwvn/rewardseal`, local folder `/Users/manish/Documents/Nebius_X_Nvidia/rewardseal`, state folder `~/.rewardseal-autopilot`, guard allow file updated. Still to do: replace `twin-diff`/`twindiff` names inside files.
 2. Rewrite CLAUDE.md, STATUS.md, PLAN.md, docs/prize-fit.md (kept), docs/pitches.md (replace with the RewardSeal
    pitch) and QUEUE.md (new tasks below), plus ADR 0002 (sandbox or Docker execution model).
-3. Rename the Python package `twindiff` → `cheatproof`; keep the budget tests green.
+3. Rename the Python package `twindiff` → `rewardseal`; keep the budget tests green.
 4. Apply audit fixes still open from STATUS.md: single-lock sandbox reservation; one cap number everywhere.
 5. Create the routine per the playbook (6.10, Appendix C), have an independent agent review it (6.11), then do the
    first-run check.

@@ -2213,7 +2213,7 @@
   "patches_rejected": [],
   "reason": "attacker made no attempt before hardening (the final diff is empty); not certified",
   "sandbox_runs": 4,
-  "schema": "cheatproof.certificate",
+  "schema": "rewardseal.certificate",
   "schema_version": 2,
   "task": {
     "base_commit": "6558c7f97fb37c6ef6f469c7ae614109050322f4",

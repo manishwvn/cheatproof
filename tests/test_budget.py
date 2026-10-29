@@ -10,7 +10,7 @@ import httpx
 import openai
 import pytest
 
-from cheatproof.budget import (
+from rewardseal.budget import (
     MAX_REAL_SPEND_CAP_USD,
     MAX_TOTAL_CAP_USD,
     Budget,
@@ -20,7 +20,7 @@ from cheatproof.budget import (
     create_ledger,
     init_ledger_from_env,
 )
-from cheatproof.llm import GuardedLLM
+from rewardseal.llm import GuardedLLM
 
 FAKE_LLM_SECRET = "FAKE-LLM-SECRET-402-do-not-print"
 
@@ -184,7 +184,7 @@ def test_server_error_keeps_worst_case_reservation(tmp_path):
 
 
 def test_tools_count_toward_input_estimate():
-    from cheatproof.llm import estimate_tokens
+    from rewardseal.llm import estimate_tokens
 
     tools = [{"type": "function", "function": {"name": "read_file", "description": "x" * 300}}]
     assert estimate_tokens([], tools) > estimate_tokens([]) + 90

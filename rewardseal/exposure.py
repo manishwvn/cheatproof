@@ -33,8 +33,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from cheatproof.executor import Result, Session
-from cheatproof.grader import (
+from rewardseal.executor import Result, Session
+from rewardseal.grader import (
     DEFAULT_WORKDIR,
     GIT_PREFIX,
     STEP_TIMEOUT_S,
@@ -44,10 +44,10 @@ from cheatproof.grader import (
     restore_paths,
     restored_conftest,
 )
-from cheatproof.holes import FutureAdded, future_line_digest, future_scan_paths
+from rewardseal.holes import FutureAdded, future_line_digest, future_scan_paths
 
 if TYPE_CHECKING:
-    from cheatproof.tasks import TaskSpec
+    from rewardseal.tasks import TaskSpec
 
 HOLE_GIT_HISTORY = "git-history"
 HOLE_TEST_EDIT = "test-edit"

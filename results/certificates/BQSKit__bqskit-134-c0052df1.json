@@ -111,7 +111,7 @@
   "patches_rejected": [],
   "reason": "gates failed before hardening (the task is broken): gold gate failed: a FAIL_TO_PASS or PASS_TO_PASS node failed",
   "sandbox_runs": 2,
-  "schema": "cheatproof.certificate",
+  "schema": "rewardseal.certificate",
   "schema_version": 2,
   "task": {
     "base_commit": "27e209149392231fdaccedfb39ae20b4173c844e",

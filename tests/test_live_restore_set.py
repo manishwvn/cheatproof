@@ -17,8 +17,8 @@ import pytest
 import test_harden as thd
 import test_holes as th
 
-from cheatproof import holes
-from cheatproof.executor import EnvSpec
+from rewardseal import holes
+from rewardseal.executor import EnvSpec
 
 TEST_FILE = "tests/test_parser_pipenv.py"
 NODE = f"{TEST_FILE}::TestPipEnvParser::test_simple"

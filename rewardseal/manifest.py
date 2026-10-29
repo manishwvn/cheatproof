@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from cheatproof import audit, certify
+from rewardseal import audit, certify
 
 SCHEMA = "rewardseal.evidence-manifest"
 PATTERNS = (

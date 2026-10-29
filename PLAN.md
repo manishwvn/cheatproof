@@ -3,7 +3,7 @@
 | Date | Gate |
 |---|---|
 | Oct 16–17 | Rules read, prize fit, research, repo, CI, spend cap, guards |
-| **Oct 18 (Sat)** | Project decided: Cheatproof. Rename, docs, queue, ADR 0002, routine created and reviewed. Owner: U1, U3, U4 |
+| **Oct 18 (Sat)** | Project decided: RewardSeal. Rename, docs, queue, ADR 0002, routine created and reviewed. Owner: U1, U3, U4 |
 | Oct 18–20 | T02 executor (Docker backend first), T03 task loader with gold/empty gates, T04 attacker on fakes |
 | Oct 20 (Mon) 6:59 PM CT | Weekly usage reset |
 | **Oct 21 (Tue)** | **Go/no-go:** the attacker passes at least 5 of 40 unhardened tasks without solving them. Executor decided (Sandboxes or Docker). Video script |

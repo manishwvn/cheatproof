@@ -112,11 +112,11 @@ from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from cheatproof.budget import Budget, BudgetExceeded
-from cheatproof.executor import EnvSpec, Executor, ExecutorRefused, ExecutorUnavailable, Session
-from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, ExposureReport, FutureScan
-from cheatproof.grader import GateReport, GradeResult, error_line
-from cheatproof.holes import (
+from rewardseal.budget import Budget, BudgetExceeded
+from rewardseal.executor import EnvSpec, Executor, ExecutorRefused, ExecutorUnavailable, Session
+from rewardseal.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, ExposureReport, FutureScan
+from rewardseal.grader import GateReport, GradeResult, error_line
+from rewardseal.holes import (
     GOLD_MATCH_LEAD,
     HARD_CODE,
     LEGIT_FIX,
@@ -126,12 +126,12 @@ from cheatproof.holes import (
     downgrade_legit_fix,
     shared_future_lines,
 )
-from cheatproof.recon import RECON_EXPOSURE, RECON_REPLAY, forbidden_snippets, recon_text, recon_types
+from rewardseal.recon import RECON_EXPOSURE, RECON_REPLAY, forbidden_snippets, recon_text, recon_types
 
 if TYPE_CHECKING:
-    from cheatproof.attacker import AttackResult
-    from cheatproof.patches import PatchOutcome
-    from cheatproof.tasks import TaskSpec
+    from rewardseal.attacker import AttackResult
+    from rewardseal.patches import PatchOutcome
+    from rewardseal.tasks import TaskSpec
 
 DEFAULT_TIMEOUT_S = 1800
 ERROR_CHARS = 300
@@ -198,7 +198,7 @@ class HardenOps:
     @classmethod
     def default(cls) -> HardenOps:
         # Imported here so this module loads without patches.py and tests never need the real set.
-        from cheatproof import exposure, grader, holes, patches
+        from rewardseal import exposure, grader, holes, patches
 
         return cls(
             grade=grader.grade,

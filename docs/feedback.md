@@ -22,7 +22,7 @@ says so.
 - **What happened.** Token Factory needs a card, the prepaid balance can go negative, and the card is charged at month
   start or at a billing threshold. We found no per-key or per-project hard limit. The remaining trial or promo credit
   was visible only in the console. We checked it by hand before each paid batch.
-- **Impact.** We wrote a full spend layer (`cheatproof/budget.py`: reserve worst case before a call, settle from
+- **Impact.** We wrote a full spend layer (`rewardseal/budget.py`: reserve worst case before a call, settle from
   `usage`, a file-locked ledger, daily, total and trial caps, halt on 402). Our counter can only estimate, so it
   drifted from the console and errs high: it counted about $0.38 of Token Factory spend while the console showed $0.71
   of the $1 trial left (about $0.29 used). Any user who lets an agent loop on a card-backed account needs the same thing.
@@ -119,7 +119,7 @@ says so.
   runs an untrusted attacker model needs the network off. We built it in the guest: every command runs under
   `unshare -rn` after a start probe that checks only `lo` is present and that a connect fails, and we hash the loader,
   libc and `unshare` against values pinned from the base image before each call.
-- **Impact.** A large block of guard code in `cheatproof/executor.py`, and residual risk we documented in ADR 0002: a
+- **Impact.** A large block of guard code in `rewardseal/executor.py`, and residual risk we documented in ADR 0002: a
   platform path outside the guest's network namespace would not be caught.
 - **Suggested fix.** A per-session or per-branch `network=False` that the platform enforces, plus a way to allow a
   list of hosts for experiments.

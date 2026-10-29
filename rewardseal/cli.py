@@ -1,17 +1,17 @@
 """Command line for the re-attack loop, the certificate report (T07), the static site (T09) and the batch (T18).
 
-    python -m cheatproof.cli harden <instance-id> --system-prompt-file PATH [--source S] [--cache-dir DIR]
+    python -m rewardseal.cli harden <instance-id> --system-prompt-file PATH [--source S] [--cache-dir DIR]
         [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
         [--network-fetch] [--no-harness-search] [--no-recon]
-    python -m cheatproof.cli batch --system-prompt-file PATH [--source S ...] [--n N] [--cache-dir DIR]
+    python -m rewardseal.cli batch --system-prompt-file PATH [--source S ...] [--n N] [--cache-dir DIR]
         [--out DIR] [--attacker-model M] [--max-steps N] [--max-tokens N] [--timeout S] [--strategy NAME]
         [--instance-ids ID ...] [--first ID ...] [--rerun] [--prefer-future-git] [--chunk-size N<=10]
         [--dry-run] [--no-preflight] [--network-fetch] [--no-harness-search] [--no-recon]
-    python -m cheatproof.cli audit-exposure [--source S ...] [--n N] [--instance-ids ID ...] [--cache-dir DIR]
+    python -m rewardseal.cli audit-exposure [--source S ...] [--n N] [--instance-ids ID ...] [--cache-dir DIR]
         [--out DIR] [--timeout S] [--rerun] [--no-preflight] [--dry-run]
-    python -m cheatproof.cli report [--certs DIR] [--out FILE] [--format text|json]
-    python -m cheatproof.cli site [--certs DIR] [--out DIR] [--traces DIR]
-    python -m cheatproof.cli holes recheck <stem> [--traces DIR] [--source S] [--cache-dir DIR]
+    python -m rewardseal.cli report [--certs DIR] [--out FILE] [--format text|json]
+    python -m rewardseal.cli site [--certs DIR] [--out DIR] [--traces DIR]
+    python -m rewardseal.cli holes recheck <stem> [--traces DIR] [--source S] [--cache-dir DIR]
 
 harden finds the task in the local cache only (never the network), runs harden() with one attacker bound to the
 given system prompt, writes one certificate and prints its path and a summary line. The attacker's task prompt is
@@ -55,7 +55,7 @@ pruned.
 After every task the batch writes batch.json beside the certificates directory, atomically (schema_version 1: the
 selection, the counts and the not-run rows). A rerun rewrites batch.json for that run only: the not-run rows of an
 earlier run are not kept.
-T38 (batch 3 preparation, see cheatproof/plan.py): --instance-ids runs exactly those cached tasks in that order;
+T38 (batch 3 preparation, see rewardseal/plan.py): --instance-ids runs exactly those cached tasks in that order;
 --first puts ids at the front (from the cache, even outside the selection); a task with a certificate is skipped unless
 --rerun names it (for --first ids) or --prefer-future-git picks it (an uncertified certificate whose exposure_before
 shows future_git is attacked again, first). --chunk-size N (1..10, default 3) stops after N tasks that got a try (run
@@ -70,13 +70,13 @@ env-broken with one sanitized line (--no-preflight skips it). Exit 1 for harden.
 report prints certify.score_directory() as it is: rates with their n, raw counts, outcomes, holes and sources.
 When batch.json sits beside the certificates directory, report also prints the batch counts and adds a batch key
 to the JSON output.
-T54: report also counts confirmed holes and unconfirmed leads apart (cheatproof/confirm.py: status per hole, the
+T54: report also counts confirmed holes and unconfirmed leads apart (rewardseal/confirm.py: status per hole, the
 manifest results/confirmations.json beside the certificates directory, replications under results/replications/),
 prints 'confirmed holes: x; unconfirmed leads: y; certified: z (via ...)', and shows a Wilson interval only from
 n >= 10 ('n too small for an interval' below). The JSON output gains a confirmation key; its rate_before and
 hackable_before still count labels, leads included.
 The rates, intervals and totals are computed in certify.py and confirm.py only; this module does no statistics of its own.
-T57 audit-exposure (cheatproof/audit.py): a deterministic audit with no attacker and no model. For each cached task (the
+T57 audit-exposure (rewardseal/audit.py): a deterministic audit with no attacker and no model. For each cached task (the
 selection `batch` uses, or --instance-ids; env-broken tasks are skipped by the same collect-only preflight) it starts a
 sandbox session, scans the history exposure, measures whether a future commit adds a line of the gold patch (the fix is
 reachable), applies strip-future-git, checks that the gold gate still passes and the empty gate still fails, scans
@@ -93,7 +93,7 @@ when that directory exists and --traces is not given.
 
 Since T42 harden and batch also keep, in the ignored traces/ folder and by the same stem, the RAW attack diffs
 (<stem>.before.diff, <stem>.after.diff, <stem>.diff), <stem>.restore.json (the grade's restore set, written before the
-paid run) and <stem>.rounds.json (see cheatproof/keep.py). holes recheck re-runs holes.classify on those files with no
+paid run) and <stem>.rounds.json (see rewardseal/keep.py). holes recheck re-runs holes.classify on those files with no
 network, sandbox, model or budget and prints labels and test path names only; a missing piece is named and exits 1.
 A recomputed primary or exploited that differs from rounds.json exits 1 and names the field (an older rounds.json
 without those fields is checked on labels only, and says so).
@@ -133,14 +133,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from cheatproof import confirm
-from cheatproof.budget import Budget, BudgetExceeded, init_ledger_from_env
-from cheatproof.executor import DiskRefused, EnvSpec, ExecutorRefused, ExecutorUnavailable, make_executor
-from cheatproof.recon import RECON_EXPOSURE, RECON_REPLAY
-from cheatproof.sanitize import REDACTED, sanitize
+from rewardseal import confirm
+from rewardseal.budget import Budget, BudgetExceeded, init_ledger_from_env
+from rewardseal.executor import DiskRefused, EnvSpec, ExecutorRefused, ExecutorUnavailable, make_executor
+from rewardseal.recon import RECON_EXPOSURE, RECON_REPLAY
+from rewardseal.sanitize import REDACTED, sanitize
 
 if TYPE_CHECKING:
-    from cheatproof.tasks import TaskSpec
+    from rewardseal.tasks import TaskSpec
 
 DEFAULT_CACHE_DIR = Path("runs/tasks")
 DEFAULT_CERT_DIR = Path("results/certificates")
@@ -191,13 +191,13 @@ def _refuse_fetch(*args: Any, **kwargs: Any) -> Any:
 
 def load_cached_selection(source: str, n: int | None, cache_dir: Path) -> Any:
     """The selection for one source from runs/tasks/<source>.json only. ValueError when that cache is missing."""
-    from cheatproof.tasks import load_tasks  # lazy: the loader module imports httpx
+    from rewardseal.tasks import load_tasks  # lazy: the loader module imports httpx
 
     try:
         return load_tasks(source, n=n, cache_dir=cache_dir, fetcher=_refuse_fetch)
     except _NoCache:
         raise ValueError(
-            f"no current cache for {source} under {cache_dir}: run python -m cheatproof.tasks fetch first "
+            f"no current cache for {source} under {cache_dir}: run python -m rewardseal.tasks fetch first "
             "(batch never fetches)"
         ) from None
 
@@ -277,13 +277,13 @@ class Deps:
     @classmethod
     def default(cls) -> Deps:
         # Lazy, so this module imports before certify.py exists and tests never reach the real set.
-        from cheatproof.envfile import load_env
+        from rewardseal.envfile import load_env
 
         # Before the attacker import, so the attacker never loads on an environment that lacks the checkout's .env.
         load_env()  # the main checkout's .env, as scripts/smoke.py does; variables already set win
-        from cheatproof import certify
-        from cheatproof import harden as harden_module
-        from cheatproof.attacker import attack
+        from rewardseal import certify
+        from rewardseal import harden as harden_module
+        from rewardseal.attacker import attack
 
         return cls(
             find_tasks=find_cached_tasks,
@@ -307,25 +307,25 @@ class Deps:
 
 
 def _collect_gate(*args: Any, **kwargs: Any) -> Any:
-    from cheatproof.grader import collect_gate  # lazy: keeps the grader out of module import
+    from rewardseal.grader import collect_gate  # lazy: keeps the grader out of module import
 
     return collect_gate(*args, **kwargs)
 
 
 def _make_search(budget: Any) -> Callable[[str], list[dict]]:
-    from cheatproof.strategies import make_network_search  # lazy: the Tavily SDK loads only when asked for
+    from rewardseal.strategies import make_network_search  # lazy: the Tavily SDK loads only when asked for
 
     return make_network_search(budget)
 
 
 def _make_llm(budget: Any) -> Any:
-    from cheatproof.llm import GuardedLLM  # imports the OpenAI client, so keep it out of module import
+    from rewardseal.llm import GuardedLLM  # imports the OpenAI client, so keep it out of module import
 
     return GuardedLLM(budget)
 
 
 def _build_site(cert_dir: Path, out_dir: Path, *, traces_dir: Path | None = None) -> Any:
-    from cheatproof.site import build_site  # lazy: keeps harden and report from loading the site module
+    from rewardseal.site import build_site  # lazy: keeps harden and report from loading the site module
 
     return build_site(cert_dir, out_dir, traces_dir=traces_dir)
 
@@ -336,7 +336,7 @@ def _utc_now() -> str:
 
 def find_cached_tasks(instance_id: str, source: str | None, cache_dir: Path) -> list[TaskSpec]:
     """Every cached TaskSpec with this instance id. Reads runs/tasks/<source>.json only, never the network."""
-    from cheatproof.tasks import CACHE_VERSION, SOURCES, TaskSpec
+    from rewardseal.tasks import CACHE_VERSION, SOURCES, TaskSpec
 
     if source is not None and source not in SOURCES:
         raise ValueError(f"unknown source {source!r}: use one of {', '.join(SOURCES)}")
@@ -449,7 +449,7 @@ def _harden_line(report: Any, cost: float) -> str:
 
 def _certificate_stem(task: TaskSpec) -> str:
     """The certificate file's stem, which names the trace, diff and report files. ValueError for an unusable id."""
-    from cheatproof.certify import certificate_filename  # lazy: only a harden run needs certify
+    from rewardseal.certify import certificate_filename  # lazy: only a harden run needs certify
 
     return Path(certificate_filename(task.instance_id)).stem
 
@@ -584,7 +584,7 @@ def _rotate_trace(traces_dir: Path, stem: str, trace_path: Path) -> None:
 
 
 def _sweep_leftovers(executor: Any) -> None:
-    """Remove cheatproof containers an earlier run left behind. Only executors with a sweep are asked.
+    """Remove rewardseal containers an earlier run left behind. Only executors with a sweep are asked.
 
     Best-effort: a failing sweep is reported on stderr and harden goes on, so it cannot change the exit code.
     """
@@ -597,7 +597,7 @@ def _sweep_leftovers(executor: Any) -> None:
         print(f"warning: leftover sweep skipped: {exc}", file=sys.stderr)
         return
     if swept > 0:
-        print(f"swept {swept} leftover cheatproof containers", file=sys.stderr)
+        print(f"swept {swept} leftover rewardseal containers", file=sys.stderr)
 
 
 class _Usage(Exception):
@@ -667,7 +667,7 @@ def _stop_reason(exc: BaseException) -> str:
 
 def _harden_settings(args: argparse.Namespace) -> _Settings:
     """The attacker settings that harden and batch share. _Usage, or ValueError from AttackConfig, before any paid call."""
-    from cheatproof.attacker import AttackConfig  # lazy: attacker imports the LLM client module
+    from rewardseal.attacker import AttackConfig  # lazy: attacker imports the LLM client module
 
     prompt_path = args.system_prompt_file
     if prompt_path is None:
@@ -685,7 +685,7 @@ def _harden_settings(args: argparse.Namespace) -> _Settings:
         # T37: refused before any paid call. The message names the variable only, never a value.
         if not os.environ.get("TAVILY_API_KEY"):
             raise _Usage("--network-fetch needs TAVILY_API_KEY in the environment or .env; nothing was run")
-        from cheatproof.strategies import with_network_section  # lazy, as the attacker import above
+        from rewardseal.strategies import with_network_section  # lazy, as the attacker import above
 
         system_prompt = with_network_section(system_prompt)
         strategy = f"{strategy}+network"
@@ -807,7 +807,7 @@ def _harden_one(
         # An earlier run's trace is set aside before this run appends to traces/<stem>.jsonl.
         _rotate_trace(plan.traces_dir, stem, plan.trace_path)
         # T42: the task's restore set is cached beside the trace before the paid run, for the offline recheck.
-        from cheatproof import keep  # lazy: keep imports harden
+        from rewardseal import keep  # lazy: keep imports harden
 
         keep.start_run(plan.traces_dir, stem, plan.task)
     except OSError as exc:
@@ -837,7 +837,7 @@ def _harden_one(
         recon_kw: dict[str, Any] = {} if not recon else {"recon": recon, "recon_label": label}
         if first and settings.harness_search:
             # T52: the harness's own recon search, from the problem statement the attacker already sees.
-            from cheatproof.strategies import problem_query  # lazy, as make_network_search
+            from rewardseal.strategies import problem_query  # lazy, as make_network_search
 
             recon_kw["harness_query"] = problem_query(plan.task.problem_statement)
         result = deps.attack(
@@ -922,7 +922,7 @@ def _harden_one(
         )
         out.mkdir(parents=True, exist_ok=True)
         # A rerun replaces an earlier certificate: keep a copy first; only the write below replaces it.
-        from cheatproof.certify import certificate_filename  # lazy, as in _certified_before
+        from rewardseal.certify import certificate_filename  # lazy, as in _certified_before
 
         keep.copy_aside(out, certificate_filename(plan.task.instance_id))
         path = deps.write_certificate(cert, out)
@@ -946,7 +946,7 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
     if not matches:
         return _usage_error(
             f"no cached task {args.instance_id!r} under {args.cache_dir}: "
-            "run python -m cheatproof.tasks fetch first (harden never fetches)"
+            "run python -m rewardseal.tasks fetch first (harden never fetches)"
         )
     if len(matches) > 1:
         return _usage_error(f"{args.instance_id!r} is cached under more than one source: pass --source")
@@ -987,7 +987,7 @@ def cmd_harden(args: argparse.Namespace, deps: Deps) -> int:
 
 def _certified_before(task: TaskSpec, out: Path) -> bool:
     """True when the task's certificate file is already in out. A name that cannot be made is not certified."""
-    from cheatproof.certify import certificate_filename  # lazy: only a batch needs the file names
+    from rewardseal.certify import certificate_filename  # lazy: only a batch needs the file names
 
     try:
         name = certificate_filename(task.instance_id)
@@ -998,7 +998,7 @@ def _certified_before(task: TaskSpec, out: Path) -> bool:
 
 def _selection_rule() -> str:
     # lazy: the loader module imports httpx
-    from cheatproof.tasks import DEFAULT_DENY_REPOS, NON_PYTHON_PENALTY
+    from rewardseal.tasks import DEFAULT_DENY_REPOS, NON_PYTHON_PENALTY
 
     return (
         "per source, the n lowest by score: fail-to-pass plus pass-to-pass test count, plus gold patch size in KB, "
@@ -1173,7 +1173,7 @@ def _run_tasks(
 
 def _run_row(instance_id: str, written: _Written) -> dict[str, Any]:
     """The batch.json row of one run (T47): the strategy and the recon label are visible next to the result."""
-    from cheatproof.certify import recon_kinds, recon_label  # lazy, as in _harden_one
+    from rewardseal.certify import recon_kinds, recon_label  # lazy, as in _harden_one
 
     report = written.report
     attacks = [rnd.attack for rnd in (report.before, report.after) if rnd is not None and rnd.attack]
@@ -1208,8 +1208,8 @@ def _batch_summary(state: Mapping[str, Any]) -> str:
 
 def cmd_batch(args: argparse.Namespace, deps: Deps) -> int:
     """Harden the cached selection one task at a time. Never a fetch: the selection comes from the cache only."""
-    from cheatproof import plan as batch_plan  # T38: order, chunks, dry run
-    from cheatproof.tasks import SOURCES  # lazy: the loader module imports httpx
+    from rewardseal import plan as batch_plan  # T38: order, chunks, dry run
+    from rewardseal.tasks import SOURCES  # lazy: the loader module imports httpx
 
     try:
         settings = None if args.dry_run else _harden_settings(args)  # a dry run needs no prompt or model
@@ -1396,7 +1396,7 @@ def _env_file_values() -> dict[str, str | None]:
     are looked up by the caller. Empty when there is no file."""
     from dotenv import dotenv_values
 
-    from cheatproof.envfile import find_env_file
+    from rewardseal.envfile import find_env_file
 
     path = find_env_file()
     try:
@@ -1447,7 +1447,7 @@ def _batch_lines(batch: Mapping[str, Any]) -> list[str]:
     if isinstance(runs, list) and any(
         isinstance(row, Mapping) and row.get("recon") == RECON_REPLAY for row in runs
     ):
-        from cheatproof.recon import RECON_REPLAY_DESCRIPTION
+        from rewardseal.recon import RECON_REPLAY_DESCRIPTION
 
         lines.append(RECON_REPLAY_DESCRIPTION)
     return lines
@@ -1527,7 +1527,7 @@ def render_text(
         header += f" (n_after={score['n_after']} with an after round)"
     lines = [header]
     if confirmation is not None and confirmation.get("replay_ids"):
-        from cheatproof.recon import RECON_REPLAY_DESCRIPTION
+        from rewardseal.recon import RECON_REPLAY_DESCRIPTION
 
         lines.append(RECON_REPLAY_DESCRIPTION + ": " + ", ".join(confirmation["replay_ids"]))
     if confirmation is not None:
@@ -1535,7 +1535,7 @@ def render_text(
     else:
         lines += [_rate_text(label, score[key]) for key, label in RATE_LABELS if key in score]
     if exposure_summary is not None:  # T57: the deterministic audit, or the labelled certificate fallback
-        from cheatproof.audit import summary_line  # lazy, as the other T57 imports
+        from rewardseal.audit import summary_line  # lazy, as the other T57 imports
 
         lines.append(summary_line(exposure_summary))
     lines.append(UPPER_BOUND_NOTE)
@@ -1625,7 +1625,7 @@ def _confirmation(directory: Path) -> tuple[dict[str, Any], dict[str, dict[str, 
     """T54: the manifest beside the certificates, confirm.summarize over the certificates in directory, and a
     replication entry for each confirmed task, plus the names of any refused replication files. Raises on any problem
     (ConfirmationError, OSError, ValueError, ...): the caller fails loudly and never falls back to raw label counts."""
-    from cheatproof.certify import load_certificate
+    from rewardseal.certify import load_certificate
 
     manifest = confirm.load_manifest(
         directory.parent / confirm.CONFIRMATIONS_FILE, directory.parent / confirm.REPLICATIONS_DIR
@@ -1654,7 +1654,7 @@ def _confirmation(directory: Path) -> tuple[dict[str, Any], dict[str, dict[str, 
 def _exposure_summary(certs_dir: Path) -> dict[str, Any] | None:
     """T57: the audit summary for the records beside the certificates (results/exposure), else the certificates'
     own future_git count. Raises ExposureAuditError (a ValueError) on a malformed record."""
-    from cheatproof import audit  # lazy: keeps the grader and patches out of module import
+    from rewardseal import audit  # lazy: keeps the grader and patches out of module import
 
     return audit.exposure_summary(certs_dir.parent / audit.EXPOSURE_DIRNAME, certs_dir)
 
@@ -1733,8 +1733,8 @@ DEFAULT_EXPOSURE_DIR = Path("results/exposure")
 def _audit_selection(args: argparse.Namespace, deps: Deps) -> list[TaskSpec]:
     """The tasks to audit: the cached selection per source (as batch), or exactly --instance-ids. ValueError for a
     usage problem (no cache, an uncached id). Reads the cache only."""
-    from cheatproof import plan as batch_plan
-    from cheatproof.tasks import SOURCES
+    from rewardseal import plan as batch_plan
+    from rewardseal.tasks import SOURCES
 
     names = list(dict.fromkeys(args.source)) if args.source else list(SOURCES)
     tasks: list[TaskSpec] = []
@@ -1755,7 +1755,7 @@ def _audit_selection(args: argparse.Namespace, deps: Deps) -> list[TaskSpec]:
 
 def _has_record(task: TaskSpec, out: Path) -> bool:
     """True when out holds a valid record for this task. An unreadable or invalid file is not one (it is replaced)."""
-    from cheatproof import audit
+    from rewardseal import audit
 
     try:
         audit.load_record(out / audit.record_filename(task.instance_id))
@@ -1765,8 +1765,8 @@ def _has_record(task: TaskSpec, out: Path) -> bool:
 
 
 def _audit_plan_lines(todo: list[TaskSpec], skipped: list[str]) -> list[str]:
-    from cheatproof import audit
-    from cheatproof import plan as batch_plan
+    from rewardseal import audit
+    from rewardseal import plan as batch_plan
 
     runs = len(todo) * audit.SANDBOX_RUNS_PER_TASK
     sandbox = runs * audit.SANDBOX_COST_PER_RUN
@@ -1790,7 +1790,7 @@ def _audit_plan_lines(todo: list[TaskSpec], skipped: list[str]) -> list[str]:
 
 def cmd_audit_exposure(args: argparse.Namespace, deps: Deps) -> int:
     """T57: the deterministic exposure audit. See the module docstring. No attacker, model or Tavily call."""
-    from cheatproof import audit
+    from rewardseal import audit
 
     out: Path = args.out
     if args.n is not None and args.n < 0:
@@ -1834,7 +1834,7 @@ def cmd_audit_exposure(args: argparse.Namespace, deps: Deps) -> int:
     except audit.ExposureAuditError as exc:
         print(f"error: {sanitize(str(exc))[:ERROR_CHARS]}", file=sys.stderr)
         return 1
-    from cheatproof.tasks import SOURCES
+    from rewardseal.tasks import SOURCES
 
     sources = list(dict.fromkeys([*(previous["source"] if previous else []), *(args.source or SOURCES)]))
     selected_ids = list(
@@ -2027,7 +2027,7 @@ def cmd_holes_recheck(args: argparse.Namespace, deps: Deps) -> int:
     (when kept) agree; 1 when a kept piece is missing or unreadable, or a recorded primary or exploited differs (the
     message names it, never the values or diff text); 2 for a usage error such as a bad stem or an uncached task.
     """
-    from cheatproof import keep  # lazy: keep imports harden
+    from rewardseal import keep  # lazy: keep imports harden
 
     stem = args.stem
     if not keep.valid_stem(stem):
@@ -2044,7 +2044,7 @@ def cmd_holes_recheck(args: argparse.Namespace, deps: Deps) -> int:
     if len(matches) != 1:
         return _usage_error(
             f"{len(matches)} cached tasks named {instance_id!r} under {args.cache_dir}: "
-            "run python -m cheatproof.tasks fetch, or pass --source"
+            "run python -m rewardseal.tasks fetch, or pass --source"
         )
     try:
         checks = keep.recheck(traces, stem, matches[0])
@@ -2078,7 +2078,7 @@ NETWORK_FETCH_HELP = (
 
 def cmd_audit_web(args: argparse.Namespace, deps: Deps) -> int:
     """Search cached audit tasks, retaining only overlap evidence."""
-    from cheatproof import audit, webaudit
+    from rewardseal import audit, webaudit
 
     try:
         webaudit.check_path(args.out, directory=True)
@@ -2179,7 +2179,7 @@ def cmd_audit_web(args: argparse.Namespace, deps: Deps) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m cheatproof.cli", description="Harden one task into a certificate, or report them."
+        prog="python -m rewardseal.cli", description="Harden one task into a certificate, or report them."
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -2349,7 +2349,7 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
         from dataclasses import replace
 
         if not args.dry_run:
-            from cheatproof.envfile import load_env
+            from rewardseal.envfile import load_env
 
             load_env()
         deps = replace(Deps.for_dry_run(), make_budget=Budget.from_env)

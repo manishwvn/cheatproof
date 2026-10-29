@@ -1,6 +1,6 @@
-# Cheatproof (working name)
+# RewardSeal
 
-Cheatproof hardens AI coding environments (the SWE tasks used to train and evaluate coding agents with RL) against
+RewardSeal hardens AI coding environments (the SWE tasks used to train and evaluate coding agents with RL) against
 reward hacking. A dishonest Nemotron agent tries to pass each task **without solving it**. Every success names a hole.
 Rule-based patches close the hole, and the same attacker attacks again. Each environment gets a certificate only if
 three gates hold: the gold patch passes, an empty patch fails, and the attacker fails.
@@ -20,7 +20,7 @@ Most Valuable Feedback: $100 (10 winners).
 
 ## Rules that never bend
 1. **No card money.** Free credits only: the $1 trial and the hackathon promo credit (about $26.65, "AI Builder Program
-   Credits"). Every paid call (LLM tokens, sandbox runs, Tavily) goes through `cheatproof/budget.py`. The total cap is
+   Credits"). Every paid call (LLM tokens, sandbox runs, Tavily) goes through `rewardseal/budget.py`. The total cap is
    **$20** (`SPEND_CAP_USD`), the daily cap $4, and total real Token Factory spend (trial + promo) is capped at **$10**
    for now (`REAL_SPEND_CAP_USD`, hard ceiling in code). The balance must never go negative (that charges the card).
    Only the owner changes caps. HTTP 402 halts everything.
@@ -40,7 +40,7 @@ Most Valuable Feedback: $100 (10 winners).
     Keep the owner's personal details out of the repo.
 
 ## Layout
-- `cheatproof/`: package. `budget.py` (spend cap) and `llm.py` (capped Token Factory client) exist; executor,
+- `rewardseal/`: package. `budget.py` (spend cap) and `llm.py` (capped Token Factory client) exist; executor,
   task loader, attacker, holes, patches and certificates follow the queue.
 - `tests/`: pytest, no network.
 - `scripts/smoke.py`: live check of key, model IDs and one sandbox run (costs cents, goes through the budget).

@@ -55,17 +55,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from cheatproof import exposure, grader, holes, patches
-from cheatproof.budget import BudgetExceeded
-from cheatproof.executor import ExecutorRefused, ExecutorUnavailable, Result
-from cheatproof.sanitize import (  # private on purpose: sanitize() would redact valid SHAs
+from rewardseal import exposure, grader, holes, patches
+from rewardseal.budget import BudgetExceeded
+from rewardseal.executor import ExecutorRefused, ExecutorUnavailable, Result
+from rewardseal.sanitize import (  # private on purpose: sanitize() would redact valid SHAs
     _always_secret,
     sanitize,
 )
 
 if TYPE_CHECKING:
-    from cheatproof.executor import Session
-    from cheatproof.tasks import TaskSpec
+    from rewardseal.executor import Session
+    from rewardseal.tasks import TaskSpec
 
 SCHEMA = "rewardseal.exposure-audit"
 SCHEMA_VERSION = 1
@@ -653,7 +653,7 @@ def validate_record(data: Any) -> None:
 
 
 def record_filename(instance_id: str) -> str:
-    from cheatproof.certify import certificate_filename  # the same safe, case-folding-proof names
+    from rewardseal.certify import certificate_filename  # the same safe, case-folding-proof names
 
     return certificate_filename(instance_id)
 

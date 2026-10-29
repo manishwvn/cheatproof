@@ -5,16 +5,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from cheatproof import holes
-from cheatproof.attacker import AttackConfig, AttackResult
-from cheatproof.attacker import attack as run_attack
-from cheatproof.budget import BudgetExceeded
-from cheatproof.executor import DiskRefused, EnvSpec, ExecutorRefused, ExecutorUnavailable, Result, Session
-from cheatproof.exposure import ExposureReport
-from cheatproof.grader import GateReport, GradeResult, error_tail
-from cheatproof.harden import HardenOps, HardenReport, _grade_dict, harden
-from cheatproof.holes import HoleReport
-from cheatproof.tasks import TaskSpec
+from rewardseal import holes
+from rewardseal.attacker import AttackConfig, AttackResult
+from rewardseal.attacker import attack as run_attack
+from rewardseal.budget import BudgetExceeded
+from rewardseal.executor import DiskRefused, EnvSpec, ExecutorRefused, ExecutorUnavailable, Result, Session
+from rewardseal.exposure import ExposureReport
+from rewardseal.grader import GateReport, GradeResult, error_tail
+from rewardseal.harden import HardenOps, HardenReport, _grade_dict, harden
+from rewardseal.holes import HoleReport
+from rewardseal.tasks import TaskSpec
 
 STRIP = "strip-future-git"
 GUARD = "test-edit-guard"
@@ -1228,6 +1228,6 @@ def test_bad_timeout_raises_before_any_session(timeout):
 
 
 def test_default_ops_names_the_real_collaborators():
-    pytest.importorskip("cheatproof.patches")  # written in parallel (T06); skipped until it exists
+    pytest.importorskip("rewardseal.patches")  # written in parallel (T06); skipped until it exists
     ops = HardenOps.default()
     assert all(callable(getattr(ops, name)) for name in HardenOps.__dataclass_fields__)
