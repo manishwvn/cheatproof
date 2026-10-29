@@ -854,6 +854,29 @@ def test_the_348_pages_link_the_evidence_file_and_explain_the_replication_count(
     assert "reads 0/3" in page and "1 of 10" in page
 
 
+def test_the_index_has_a_start_here_path_with_the_recorded_label_and_the_excerpt(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    certs = tmp_path / "results" / "certificates"
+    certs.mkdir(parents=True)
+    name = "CycloneDX__cyclonedx-python-348-93d44b30.json"
+    shutil.copy(root / "results" / "certificates" / name, certs / name)
+    (tmp_path / "results" / "evidence").mkdir()
+    shutil.copy(
+        root / "results" / "evidence" / "348-causal.md", tmp_path / "results" / "evidence" / "348-causal.md"
+    )
+    out = tmp_path / "site"
+    site.build_site(certs, out)
+    html = (out / "index.html").read_text(encoding="utf-8")
+    assert 'id="start-here"' in html and "not a live attack" in html and "Start here" in html
+    assert html.count("<li><a href=") >= 6 and "git show 65bf318" in html
+    assert "inferred" in html and "we infer" in html.lower()
+    # no evidence file: the path is still there, with no excerpt
+    shutil.rmtree(tmp_path / "results" / "evidence")
+    site.build_site(certs, out)
+    html = (out / "index.html").read_text(encoding="utf-8")
+    assert 'id="start-here"' in html and "git show 65bf318" not in html
+
+
 def test_the_site_lists_a_malformed_record_and_shows_no_number(tmp_path):
     certs_src = Path(__file__).resolve().parents[1] / "results" / "certificates"
     certs = tmp_path / "results" / "certificates"

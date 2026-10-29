@@ -153,9 +153,12 @@ a { color: var(--link); overflow-wrap: anywhere; }
 .banner, .empty { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
 .banner { border-left: 4px solid var(--link); }
 .headline { font-size: 2rem; font-weight: 700; line-height: 1.2; margin: 0.25rem 0; }
-.exposure-audit.lead { font-size: 1.25rem; font-weight: 600; line-height: 1.35; margin: 0.25rem 0 1rem; }
+.exposure-audit.lead { font-size: 1.05rem; font-weight: 500; line-height: 1.45; margin: 0.25rem 0 1rem; }
 .finding-label { margin: 1rem 0 0; font-weight: 600; }
 .label { border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; color: var(--muted); font-size: 0.875rem; }
+.path { padding-left: 1.2rem; }
+.path li { margin: 0.35rem 0; }
+details pre { max-height: 24rem; overflow: auto; }
 .table-wrap { max-width: 100%; overflow-x: auto; margin: 0.5rem 0 1rem; }
 table { width: 100%; border-collapse: collapse; }
 caption { caption-side: top; text-align: left; color: var(--muted); padding: 0.25rem 0; }
@@ -277,6 +280,7 @@ def build_site(
         replications,
         statuses,
         exposure_summary,
+        _start_here(entries, root.parent / "evidence"),
     )
     _write(index, _document("RewardSeal report", body))
     pages = []
@@ -695,6 +699,7 @@ def _index_body(
     replications: confirm.ReplicationSet | None = None,
     statuses: Mapping[str, confirm.HoleStatus] | None = None,
     exposure: Mapping[str, Any] | None = None,
+    start_here: str = "",
 ) -> str:
     """excluded counts the certificate files left out (errors also holds a bad batch record, which is not one).
     confirmation, manifest, replications and statuses (T54) feed the hero block and the confirmed/lead counts."""
@@ -723,7 +728,61 @@ def _index_body(
             _environments_section(entries, statuses or {}),
         ]
     )
-    return "\n".join([*head, *middle, _errors_section(errors)])
+    return "\n".join([*head, start_here, *middle, _errors_section(errors)])
+
+
+START_HERE_STEPS = (
+    ("1. Exposure", "#hero", "the audit above: how often future commits sit in the task's .git"),
+    ("2. Commands", "#transcript", "what the attacker ran, in order (transcript)"),
+    ("3. Matching line", "#rounds", "the attack rounds and the diff that passed"),
+    ("4. Patch", "#patches", "strip-future-git, the rule-based fix"),
+    ("5. Gates", "#gates", "gold passes, empty fails, before and after"),
+    ("6. Certificate", "#result", "the recorded outcome"),
+)
+START_HERE_PLAIN = (
+    "In plain words: this environment's git history held a future commit with the fix. In one recorded run the model "
+    "looked at that commit, then wrote a matching line, and its diff passed the hidden tests. We infer, but did not "
+    "observe, that it used what it read. The patch removed the future commits, the gold patch still passed, the empty "
+    "patch still failed, and a new attack failed. That is one run on one task and one attacker."
+)
+
+
+def _start_here(entries: Sequence[_Entry], evidence_dir: Path) -> str:
+    """A static, clickable path through the recorded 348 run (no live calls). The excerpt is copied from the committed
+    evidence file as it is; when that file is missing there is no excerpt and no section."""
+    entry = next((e for e in entries if e.cert["task"]["instance_id"] in EVIDENCE_FILES), None)
+    if entry is None:
+        return ""
+    task = entry.cert["task"]["instance_id"]
+    page = f"env/{entry.name}.html"
+    excerpt = ""
+    path = evidence_dir / Path(EVIDENCE_FILES[task]).name
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    if "## Before round" in text and "## The upstream fix" in text:
+        body = text.split("## Before round", 1)[1].split("## The upstream fix", 1)[0]
+        excerpt = (
+            "<details><summary>Recorded commands and matching line (excerpt of the evidence file)</summary>"
+            f"<pre>{_cell(body.strip())}</pre></details>"
+        )
+    items = "".join(
+        f'<li><a href="{_cell(page + anchor)}">{_cell(label)}</a>: {_cell(what)}</li>'
+        for label, anchor, what in START_HERE_STEPS
+    )
+    items = items.replace(f'href="{page}#hero"', 'href="#hero"')
+    return _section(
+        "start-here",
+        "Start here: a recorded run",
+        '<p><span class="label">recorded</span> This is a replay of a recorded run, not a live attack. No calls are '
+        "made when you open it.</p>",
+        f"<p>Task: {_link_html(page, task)}</p>",
+        f'<ol class="path">{items}</ol>',
+        f"<p>{_cell(START_HERE_PLAIN)}</p>",
+        excerpt,
+        f"<p>{_link_html(GITHUB_BLOB + EVIDENCE_FILES[task], 'Full evidence file (full outputs not retained)')}</p>",
+    )
 
 
 def _caveats(confirmation: Mapping[str, Any]) -> list[str]:
