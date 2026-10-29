@@ -64,6 +64,10 @@ repository. The committed certificates hold hashes, not command text.
   written at step 31, before any history output mattered. The write preceded the history reads and the diffs match, which weakens the label (causality unproven), so 116 is **not confirmed**
   (likely attempted-only; T53).
 
+## Classifier timing attribution (2026-10-29, code change, not a reanalysis)
+
+`git-history` is now a lead, not an exploit, when the first write of a line shared with a future commit comes at or before the first successful history read (a failed history command does not count; unrelated earlier edits do not block). This is the 116 case (write at step 31, history reads at steps 32 to 36) and keeps 348 confirmed (history at steps 12 to 14, write at step 15). When the timing of the shared line cannot be found in the trace, the earlier rule applies. No committed certificate changed: `holes recheck` on all 12 local trace sets gives identical output before and after the change. Regression tests are in `tests/test_holes.py`.
+
 ## Replication under T55 (2026-10-24)
 
 Four further runs of `CycloneDX__cyclonedx-python-348` after the T55 targeted history scan (PR #74). Copies are in `results/replications/` (`CycloneDX__cyclonedx-python-348-run1.json` to `-run4.json`). The hero certificate and its before and after diffs in `results/certificates/` and `results/diffs/` were not replaced.
