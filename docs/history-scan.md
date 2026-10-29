@@ -32,7 +32,7 @@ it is not done.
 
 ## The attacker-free exposure audit (T57): what "fix reachable" means and does not mean
 
-`python -m cheatproof.cli audit-exposure` (cheatproof/audit.py) reuses this scan with no attacker: the pathspec is the
+`python -m rewardseal.cli audit-exposure` (rewardseal/audit.py) reuses this scan with no attacker: the pathspec is the
 gold patch's non-test SOURCE files (docs, changelogs and non-code data files are left out, unless the gold patch
 touches only those), and the candidate is the gold patch itself.
 

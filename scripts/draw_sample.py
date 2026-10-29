@@ -14,8 +14,8 @@ import json
 import random
 from pathlib import Path
 
-from cheatproof import tasks
-from cheatproof.tasks import DEFAULT_DENY_REPOS, TaskSpec
+from rewardseal import tasks
+from rewardseal.tasks import DEFAULT_DENY_REPOS, TaskSpec
 
 SEED = 20261029
 N = 12

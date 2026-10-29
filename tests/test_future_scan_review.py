@@ -13,9 +13,9 @@ import test_git_history_evidence as tg
 import test_holes as th
 from test_future_scan import SHELLS, _need, make_repo, pre_scan, task_for
 
-from cheatproof import exposure, holes
-from cheatproof.exposure import future_scan
-from cheatproof.holes import FutureAdded, classify, future_line_digest
+from rewardseal import exposure, holes
+from rewardseal.exposure import future_scan
+from rewardseal.holes import FutureAdded, classify, future_line_digest
 
 FUTURE_LINE = tg.FUTURE_LINE
 

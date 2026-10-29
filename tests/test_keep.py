@@ -12,11 +12,11 @@ import pytest
 import test_harden as th
 import test_recon_nudge as trn
 
-from cheatproof import cli, holes, keep
-from cheatproof.attacker import AttackResult
-from cheatproof.grader import GradeResult
-from cheatproof.harden import HardenReport, RoundReport
-from cheatproof.tasks import TaskSpec
+from rewardseal import cli, holes, keep
+from rewardseal.attacker import AttackResult
+from rewardseal.grader import GradeResult
+from rewardseal.harden import HardenReport, RoundReport
+from rewardseal.tasks import TaskSpec
 
 BASE = hashlib.sha1(b"base").hexdigest()
 F2P = "tests/test_core.py::test_new"
@@ -424,7 +424,7 @@ def test_keep_raw_never_raises_even_on_a_broken_report():
 
 def test_batch_keeps_the_same_files(tmp_path, capsys):
     task = make_task()
-    from cheatproof.tasks import Loaded
+    from rewardseal.tasks import Loaded
 
     selection = Loaded(source="swe-rebench", scanned=1, valid=1, skipped={}, selected=(task,))
     deps = dataclasses.replace(
@@ -461,7 +461,7 @@ def test_kept_files_are_private(tmp_path):
 
 
 def test_a_harden_stop_keeps_the_raw_diffs_of_the_attacks_that_returned(tmp_path, capsys):
-    from cheatproof.budget import BudgetExceeded
+    from rewardseal.budget import BudgetExceeded
 
     task = make_task()
     deps = _deps(task, [(UNRESTORED_EDIT, "tests/helpers/test_util.py")])

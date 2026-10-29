@@ -2,7 +2,7 @@
 
     EXECUTOR=sandbox uv run python scripts/retrieval_control.py --instance-id Dorthu__openapi3-75 [--out results/control]
 
-Writes results/control/<instance id>-retrieval-control.json. See cheatproof/control.py: the record says what a scripted
+Writes results/control/<instance id>-retrieval-control.json. See rewardseal/control.py: the record says what a scripted
 retrieval of the future commit did before and after strip-future-git; it does not prove model causality.
 """
 
@@ -12,9 +12,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from cheatproof import cli, control
-from cheatproof.budget import BudgetExceeded
-from cheatproof.executor import EnvSpec
+from rewardseal import cli, control
+from rewardseal.budget import BudgetExceeded
+from rewardseal.executor import EnvSpec
 
 
 def main(argv: list[str] | None = None) -> int:

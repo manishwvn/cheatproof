@@ -11,16 +11,16 @@ from pathlib import Path
 
 ENV_LOADED = False
 if __name__ == "__main__":
-    # Load .env before the cheatproof imports below: llm.py reads MAX_OUTPUT_TOKENS when it is imported.
+    # Load .env before the rewardseal imports below: llm.py reads MAX_OUTPUT_TOKENS when it is imported.
     # Only when run as a script, so importing this module (the tests do) never reads .env.
-    from cheatproof.envfile import load_env
+    from rewardseal.envfile import load_env
 
     ENV_LOADED = load_env()
 
-from cheatproof.budget import Budget, BudgetExceeded
-from cheatproof.executor import SandboxExecutor, _halt_for_payment
-from cheatproof.llm import GuardedLLM
-from cheatproof.sanitize import assert_clean, sanitize
+from rewardseal.budget import Budget, BudgetExceeded
+from rewardseal.executor import SandboxExecutor, _halt_for_payment
+from rewardseal.llm import GuardedLLM
+from rewardseal.sanitize import assert_clean, sanitize
 
 SMOKE_IMAGE = "alpine:3.19"
 SMOKE_CMD = "echo sandbox ok && uname -a"
@@ -38,7 +38,7 @@ def list_nvidia_models(llm: GuardedLLM) -> dict:
 
 def call_cheap_model(llm: GuardedLLM):
     model = os.environ.get("CLASSIFIER_MODEL", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B")
-    resp = llm.chat(model, [{"role": "user", "content": "Reply with exactly: cheatproof ok"}], max_tokens=64)
+    resp = llm.chat(model, [{"role": "user", "content": "Reply with exactly: rewardseal ok"}], max_tokens=64)
     print(f"{model}: {resp.choices[0].message.content!r} usage={resp.usage}")
     return resp
 

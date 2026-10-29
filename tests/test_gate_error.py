@@ -6,9 +6,9 @@ Helper-level tests and a certificate round trip. No sandbox, model or network.
 import pytest
 from test_certify import cert_for, gate_failed_report, grade, with_before
 
-from cheatproof.certify import load_certificate, write_certificate
-from cheatproof.executor import Result
-from cheatproof.grader import ERROR_LINE_CHARS, ERROR_TAIL_CHARS, GateReport, error_line, error_tail
+from rewardseal.certify import load_certificate, write_certificate
+from rewardseal.executor import Result
+from rewardseal.grader import ERROR_LINE_CHARS, ERROR_TAIL_CHARS, GateReport, error_line, error_tail
 
 USAGE_STDERR = (
     "ERROR: usage: pytest [options] [file_or_dir] [file_or_dir] [...]\n"

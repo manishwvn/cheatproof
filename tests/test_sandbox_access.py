@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from contree_sdk.sdk.exceptions import ApiStatusCodeError, ForbiddenError
 
-from cheatproof.budget import Budget, BudgetExceeded, create_ledger
+from rewardseal.budget import Budget, BudgetExceeded, create_ledger
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "sandbox_access.py"
 spec = importlib.util.spec_from_file_location("sandbox_access", SCRIPT)

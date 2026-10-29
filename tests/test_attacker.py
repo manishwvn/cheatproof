@@ -9,11 +9,11 @@ import httpx
 import openai
 import pytest
 
-from cheatproof import attacker
-from cheatproof.attacker import CAP_RESET_NOTE, NUDGE, AttackConfig, attack, build_tools
-from cheatproof.budget import Budget, BudgetExceeded, create_ledger
-from cheatproof.executor import DiskRefused, ExecutorRefused, ExecutorUnavailable, Result, Session
-from cheatproof.llm import MAX_OUTPUT_TOKENS, GuardedLLM, estimate_tokens
+from rewardseal import attacker
+from rewardseal.attacker import CAP_RESET_NOTE, NUDGE, AttackConfig, attack, build_tools
+from rewardseal.budget import Budget, BudgetExceeded, create_ledger
+from rewardseal.executor import DiskRefused, ExecutorRefused, ExecutorUnavailable, Result, Session
+from rewardseal.llm import MAX_OUTPUT_TOKENS, GuardedLLM, estimate_tokens
 
 SYSTEM = "SYSTEM-PROMPT-FROM-CALLER"
 TASK = "TASK-PROMPT-FROM-CALLER"

@@ -13,15 +13,15 @@ from pathlib import Path
 import httpx
 import pytest
 
-import cheatproof
-from cheatproof import certify, cli, confirm
-from cheatproof.attacker import AttackConfig, AttackResult
-from cheatproof.budget import BudgetExceeded
-from cheatproof.executor import DiskRefused, ExecutorRefused, ExecutorUnavailable
-from cheatproof.grader import GateReport, GradeResult
-from cheatproof.harden import HardenReport, RoundReport
-from cheatproof.holes import HoleReport
-from cheatproof.tasks import CACHE_VERSION, Loaded, TaskSpec
+import rewardseal
+from rewardseal import certify, cli, confirm
+from rewardseal.attacker import AttackConfig, AttackResult
+from rewardseal.budget import BudgetExceeded
+from rewardseal.executor import DiskRefused, ExecutorRefused, ExecutorUnavailable
+from rewardseal.grader import GateReport, GradeResult
+from rewardseal.harden import HardenReport, RoundReport
+from rewardseal.holes import HoleReport
+from rewardseal.tasks import CACHE_VERSION, Loaded, TaskSpec
 
 INSTANCE = "astropy__astropy-7671"
 IMAGE = "swebench/sweb.eval.x86_64.astropy_1776_astropy-7671:latest"
@@ -890,7 +890,7 @@ def test_harden_sweeps_leftovers_once_and_reports_the_count(tmp_path, capsys):
     captured = capsys.readouterr()
     assert rc == 0
     assert executor.sweeps == 1
-    assert "swept 2 leftover cheatproof containers" in captured.err
+    assert "swept 2 leftover rewardseal containers" in captured.err
 
 
 def test_harden_prints_no_sweep_line_when_nothing_was_swept(tmp_path, capsys):
@@ -1109,7 +1109,7 @@ def test_site_write_error_exits_1_without_traceback(tmp_path, capsys):
 
 
 def test_site_value_error_from_build_is_a_usage_error_exits_2(tmp_path, capsys):
-    message = "refusing to build into a non-empty directory that is not a cheatproof site"
+    message = "refusing to build into a non-empty directory that is not a rewardseal site"
 
     def not_a_site(cert_dir, out_dir, *, traces_dir=None):
         raise ValueError(message)
@@ -1142,9 +1142,9 @@ def test_site_never_builds_a_budget_llm_or_executor(tmp_path):
     assert len(spy.site_calls) == 1
 
 
-def test_default_build_site_resolves_cheatproof_site_at_call_time(tmp_path, monkeypatch):
+def test_default_build_site_resolves_rewardseal_site_at_call_time(tmp_path, monkeypatch):
     calls = []
-    fake_module = types.ModuleType("cheatproof.site")
+    fake_module = types.ModuleType("rewardseal.site")
 
     def build_site(cert_dir, out_dir, *, traces_dir=None):
         calls.append((cert_dir, out_dir, traces_dir))
@@ -1152,7 +1152,7 @@ def test_default_build_site_resolves_cheatproof_site_at_call_time(tmp_path, monk
 
     fake_module.build_site = build_site
     monkeypatch.setitem(
-        sys.modules, "cheatproof.site", fake_module
+        sys.modules, "rewardseal.site", fake_module
     )  # stands in for site.py, never the real file
     assert cli._build_site(tmp_path, tmp_path / "site", traces_dir=tmp_path) == "site-result"
     assert calls == [(tmp_path, tmp_path / "site", tmp_path)]
@@ -1160,7 +1160,7 @@ def test_default_build_site_resolves_cheatproof_site_at_call_time(tmp_path, monk
 
 def test_site_end_to_end_with_default_deps_writes_the_index(tmp_path, monkeypatch, capsys):
     # Deps.default() calls load_env(), which reads the checkout's .env. Stub it so no env file is opened.
-    monkeypatch.setattr("cheatproof.envfile.load_env", lambda *args, **kwargs: False)
+    monkeypatch.setattr("rewardseal.envfile.load_env", lambda *args, **kwargs: False)
     certs = tmp_path / "certs"
     certs.mkdir()
     cert = certify.build_certificate(
@@ -1482,18 +1482,18 @@ def test_load_env_runs_before_the_attacker_is_imported(monkeypatch):
     seen = []
 
     def recording_load_env(*args, **kwargs):
-        seen.append("cheatproof.attacker" in sys.modules)
+        seen.append("rewardseal.attacker" in sys.modules)
         return False
 
     # Forget the attacker module for this test, so Deps.default() imports it again and the order is observable.
-    monkeypatch.delitem(sys.modules, "cheatproof.attacker", raising=False)
-    monkeypatch.delattr(cheatproof, "attacker", raising=False)
-    monkeypatch.setattr("cheatproof.envfile.load_env", recording_load_env)
+    monkeypatch.delitem(sys.modules, "rewardseal.attacker", raising=False)
+    monkeypatch.delattr(rewardseal, "attacker", raising=False)
+    monkeypatch.setattr("rewardseal.envfile.load_env", recording_load_env)
 
     deps = cli.Deps.default()
     assert seen == [False]  # load_env ran while the attacker was not yet imported
-    assert "cheatproof.attacker" in sys.modules
-    assert deps.attack is sys.modules["cheatproof.attacker"].attack
+    assert "rewardseal.attacker" in sys.modules
+    assert deps.attack is sys.modules["rewardseal.attacker"].attack
 
 
 # batch (T18) and the harden keywords. Fakes only: no fetch, model, Docker or paid call.
@@ -2021,7 +2021,7 @@ def test_a_low_disk_still_runs_the_leftover_sweep_before_the_task_is_refused(tmp
     deps = batch_deps(spy, batch_tasks(ID_A), disk_free_gb=lambda path: 5.0, make_executor=lambda: executor)
     assert cli.main(batch_argv(tmp_path, out), deps=deps) == 0
     assert executor.sweeps == 1  # the sweep ran for the task the disk check then refused
-    assert "swept 2 leftover cheatproof containers" in capsys.readouterr().err
+    assert "swept 2 leftover rewardseal containers" in capsys.readouterr().err
     state = read_batch(out)
     assert [row["reason"] for row in state["not_run"]] == ["disk"]
     assert spy.harden_calls == []
@@ -2228,7 +2228,7 @@ def test_budget_init_force_fresh_is_a_flag_and_never_read_from_env(tmp_path, mon
     (tmp_path / "ledger.json.bak").write_text("old spend")
     monkeypatch.setenv("SPEND_LEDGER", str(ledger))
     monkeypatch.setenv("FORCE_FRESH", "1")
-    monkeypatch.setenv("CHEATPROOF_FORCE_FRESH", "1")
+    monkeypatch.setenv("REWARDSEAL_FORCE_FRESH", "1")
     assert cli.build_parser().parse_args(["budget", "init"]).force_fresh is False
     assert cli.build_parser().parse_args(["budget", "init", "--force-fresh"]).force_fresh is True
     refused = argparse.Namespace(budget_command="init", force_fresh=False)
@@ -2484,7 +2484,7 @@ def test_no_preflight_flag_skips_it_and_a_plain_deps_has_none(tmp_path):
 
 
 def test_default_deps_wire_the_real_collect_gate(monkeypatch):
-    monkeypatch.setattr("cheatproof.envfile.load_env", lambda *a, **k: None)
+    monkeypatch.setattr("rewardseal.envfile.load_env", lambda *a, **k: None)
     assert cli.Deps.default().preflight is cli._collect_gate
 
 
@@ -2533,7 +2533,7 @@ def test_a_failed_rerun_write_leaves_the_original_certificate(tmp_path):
 
 
 def test_keep_copy_aside_names_copies_apart_and_refuses_a_link(tmp_path):
-    from cheatproof import keep
+    from rewardseal import keep
 
     assert keep.copy_aside(tmp_path, "a.json") is None
     (tmp_path / "a.json").write_text("one")
@@ -2663,9 +2663,9 @@ def test_dry_run_follows_a_pending_batch_file(tmp_path, capsys, monkeypatch):
 def test_dry_run_builds_no_real_deps_and_imports_no_sdk(tmp_path):
     import subprocess
 
-    from cheatproof.tasks import SOURCES
+    from rewardseal.tasks import SOURCES
 
-    root = Path(cheatproof.__file__).resolve().parent.parent
+    root = Path(rewardseal.__file__).resolve().parent.parent
     cache = tmp_path / "cache"
     cache.mkdir()
     name = "swe-bench-verified"
@@ -2683,10 +2683,10 @@ def test_dry_run_builds_no_real_deps_and_imports_no_sdk(tmp_path):
         "import os, sys\n"
         f"sys.path.insert(0, {str(root)!r})\n"
         "before = dict(os.environ)\n"
-        "from cheatproof import cli\n"
+        "from rewardseal import cli\n"
         f"rc = cli.main(['batch', '--dry-run', '--source', {name!r}, '--cache-dir', {str(cache)!r},"
         f" '--out', {str(tmp_path / 'results' / 'certificates')!r}])\n"
-        "bad = [m for m in ('openai', 'contree_sdk', 'tavily', 'cheatproof.llm', 'cheatproof.attacker') if m in sys.modules]\n"
+        "bad = [m for m in ('openai', 'contree_sdk', 'tavily', 'rewardseal.llm', 'rewardseal.attacker') if m in sys.modules]\n"
         "print('RESULT', rc, bad, dict(os.environ) == before)\n"
     )
     env = {k: v for k, v in os.environ.items() if k not in ("SPEND_LEDGER",)}

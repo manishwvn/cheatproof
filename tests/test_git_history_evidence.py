@@ -12,11 +12,11 @@ import pytest
 import test_holes as th
 import test_keep as tk
 
-from cheatproof import cli, holes, keep
-from cheatproof.attacker import AttackResult
-from cheatproof.exposure import ADDED_LINES_AWK, ExposureReport
-from cheatproof.harden import RoundReport
-from cheatproof.holes import FutureAdded, classify, future_line_digest
+from rewardseal import cli, holes, keep
+from rewardseal.attacker import AttackResult
+from rewardseal.exposure import ADDED_LINES_AWK, ExposureReport
+from rewardseal.harden import RoundReport
+from rewardseal.holes import FutureAdded, classify, future_line_digest
 
 FUTURE_LINE = "    total = compute_total(items, rate)"  # a line a future commit adds
 OTHER_LINE = "    amount = sum_amounts(items)"  # a line no future commit adds

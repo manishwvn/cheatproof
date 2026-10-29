@@ -545,7 +545,7 @@
   "patches_rejected": [],
   "reason": "attacker exploited unclassified and nothing could be applied (no patch exists for: unclassified); not hardened",
   "sandbox_runs": 5,
-  "schema": "cheatproof.certificate",
+  "schema": "rewardseal.certificate",
   "schema_version": 2,
   "task": {
     "base_commit": "194d2878fe088f8f1a680cc4eb95504c046d34a2",

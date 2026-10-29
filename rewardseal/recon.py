@@ -15,9 +15,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, ExposureReport
-from cheatproof.grader import redact_text
-from cheatproof.sanitize import clean_text
+from rewardseal.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, ExposureReport
+from rewardseal.grader import redact_text
+from rewardseal.sanitize import clean_text
 
 RECON_REPLAY = "exposure-replay"
 RECON_REPLAY_DESCRIPTION = (

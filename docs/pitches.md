@@ -44,7 +44,7 @@ model call goes through Token Factory.
   the 9 is checked against the certificates. Cut to a real attack trace from the final run.
 - Live loop on one environment: attack, hole found, patch applied, re-attack fails, gold still passes.
 - Scale: the environment table (n shown), before and after per attack type, cost per environment.
-- Product: `python -m cheatproof.cli harden <env-id>` returns a certificate JSON. Model ID on screen in the first 20 seconds.
+- Product: `python -m rewardseal.cli harden <env-id>` returns a certificate JSON. Model ID on screen in the first 20 seconds.
 
 ## Track fit (stage 1)
 The attacker is a coding agent: it writes code, runs it in the sandbox and tests against the grader. Show Nemotron
@@ -68,4 +68,4 @@ Scores across all 7,000 environments, SWE-rebench-V2, learned patch generation (
 beyond one report page, and any headline number that was not measured.
 
 ## Name
-"RewardSeal" is the product name (U5 done 2026-10-19: "Cheatproof" is taken by CheatProof.ai).
+"RewardSeal" is the product name.

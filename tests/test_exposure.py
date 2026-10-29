@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from cheatproof.executor import Result, Session
-from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, _evidence, scan
-from cheatproof.grader import redact_text
-from cheatproof.tasks import TaskSpec
+from rewardseal.executor import Result, Session
+from rewardseal.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, _evidence, scan
+from rewardseal.grader import redact_text
+from rewardseal.tasks import TaskSpec
 
 BASE = "71fb12cefda5a3e1e223ed837bca468f8bdab874"
 OTHER = "9676c1085a90cf604df7cc56977abe773bae86b1"

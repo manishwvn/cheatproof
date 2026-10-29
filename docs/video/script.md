@@ -48,7 +48,7 @@ beat11 (stack). Beats without a screenshot use a title card with the On-screen t
 | 1:52 | 16 | n = 9 table (future_git tasks, recon on): 1 of 9 confirmed: found, closed, certified (348); 1 unconfirmed lead (116). 348 and 116 got repeated targeted reruns. 14 certificate files in all | Among nine tasks whose scans flagged future git and whose attacks had recon on, one showed the confirmed history-use pattern. A second, crypto 116, is an unconfirmed lead. Both got repeated targeted reruns. | 1 of 9 confirmed; n = 9; raw counts, not rates |
 | 2:08 | 16 | Stack: Token Factory (all model calls), Nemotron Super, Token Factory Sandboxes, Tavily (one harness recon search, a runtime call; dashboard shows 1 search credit used) | Every model call goes through Token Factory. Nemotron attacks. Gates and hole labels are computed in code. Tavily ran once, as a harness recon search; the attacker made no web calls of its own. | Token Factory, Nemotron Super, Sandboxes, Tavily (harness recon search) |
 | 2:24 | 14 | Honest caveat card: "This attacker's recorded attack did not succeed." Recon was on in these runs. Not proof. | Honest limit: certified means this attacker's recorded qualifying attack did not succeed. Recon was on in these runs. It is not proof of security. | Recorded attack did not succeed. Not proof. |
-| 2:38 | 8 | End card: `python -m cheatproof.cli harden <env-id>` (after `tasks fetch`) and the repo link https://github.com/manishwvn/cheatproof with the demo https://manishwvn.github.io/cheatproof/ | RewardSeal. After fetching tasks, one harden command per environment writes its certificate. | `python -m cheatproof.cli harden <env-id>` |
+| 2:38 | 8 | End card: `python -m rewardseal.cli harden <env-id>` (after `tasks fetch`) and the repo link https://github.com/manishwvn/rewardseal with the demo https://manishwvn.github.io/rewardseal/ | RewardSeal. After fetching tasks, one harden command per environment writes its certificate. | `python -m rewardseal.cli harden <env-id>` |
 
 ## Where each claim comes from
 
@@ -66,7 +66,7 @@ Each row keeps the original "Fills from:" note for its slot. Certificate fields 
 | 10 | n = 9; 1 confirmed: found, closed, certified (348); 1 unconfirmed lead (116); 14 certificate files | results.md Raw counts, n line, Holes found before and after hardening. |
 | 11 | Sandboxes; one Tavily runtime call as a harness recon search | results.md Method, Executor line; results.md T52 section (query `Hide private model fields in swagger doc`, 3 results, 0 attacker `web_search` calls). On 2026-10-24 the Tavily usage endpoint showed plan usage 1 of 1000 and 1 search: the dashboard shows 1 search credit used, matching the one harness search. |
 | 12 | "Not hackable by this attacker" | results.md Certified count above 0 (4 of 14 certificates: 3 with no hole found, 1 after hardening). Recon disclosure from certificate `attacker.recon`. |
-| 13 | Repo and demo links | Not in results.md. The repo is public: https://github.com/manishwvn/cheatproof. The demo is the report site on GitHub Pages: https://manishwvn.github.io/cheatproof/ (set 2026-10-24). |
+| 13 | Repo and demo links | Not in results.md. The repo is public: https://github.com/manishwvn/rewardseal. The demo is the report site on GitHub Pages: https://manishwvn.github.io/rewardseal/ (set 2026-10-24). |
 
 ## Coverage check
 
@@ -82,5 +82,5 @@ Each row keeps the original "Fills from:" note for its slot. Certificate fields 
 
 ## Open items
 
-- Beat 13: links set 2026-10-24: repo https://github.com/manishwvn/cheatproof and demo https://manishwvn.github.io/cheatproof/. Not in results.md. Re-check both before recording.
+- Beat 13: links set 2026-10-24: repo https://github.com/manishwvn/rewardseal and demo https://manishwvn.github.io/rewardseal/. Not in results.md. Re-check both before recording.
 - Beat 7: if the T53 follow-up resolves 116, update beats 1, 7 and 10 from the new certificate.

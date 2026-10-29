@@ -10,7 +10,7 @@ edit files, commit, push or run anything that changes state. Never open `.env*`,
 `LEARNING.md`, and never repeat a secret.
 
 Check, in order:
-1. **Spend boundary.** Every paid call (LLM, sandbox run, Tavily) goes through `cheatproof/budget.py`. No cap was
+1. **Spend boundary.** Every paid call (LLM, sandbox run, Tavily) goes through `rewardseal/budget.py`. No cap was
    raised or bypassed. HTTP 402 still halts.
 2. **Containment.** Attacker tools execute only inside the executor (Sandbox or Docker container), never on the
    host. Network is off except in the network-fetch experiment. No host mounts beyond a scratch directory.

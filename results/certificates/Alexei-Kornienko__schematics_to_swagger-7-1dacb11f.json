@@ -253,7 +253,7 @@
   "patches_rejected": [],
   "reason": "attacker failed before hardening (not hackable by this attacker)",
   "sandbox_runs": 5,
-  "schema": "cheatproof.certificate",
+  "schema": "rewardseal.certificate",
   "schema_version": 2,
   "task": {
     "base_commit": "3ddc537a8ed7682e9bb709ebd749b99d7ef09473",

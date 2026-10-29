@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from cheatproof.executor import Result, Session
-from cheatproof.grader import (
+from rewardseal.executor import Result, Session
+from rewardseal.grader import (
     COLLECT_CAUSE_CHARS,
     LOG_TAIL_CHARS,
     MAX_BATCH_NODES,
@@ -32,7 +32,7 @@ from cheatproof.grader import (
     run_gates,
     touched_test_files,
 )
-from cheatproof.tasks import TaskSpec
+from rewardseal.tasks import TaskSpec
 
 BASE = "71fb12cefda5a3e1e223ed837bca468f8bdab874"
 TEST_FILE = "tests/test_x.py"
@@ -777,7 +777,7 @@ def test_candidate_that_does_not_apply_stops_before_any_test_runs():
     assert result.passed is False
     assert result.error == "candidate patch did not apply: error: patch failed: calc.py:3"
     assert session.cmds("pytest") == []
-    assert session.commands[-1][0].startswith("rm -rf -- /tmp/cheatproof-")  # cleanup still ran
+    assert session.commands[-1][0].startswith("rm -rf -- /tmp/rewardseal-")  # cleanup still ran
 
 
 def test_hidden_tests_that_still_do_not_apply_fail_the_grade():
@@ -1129,7 +1129,7 @@ def test_every_git_call_ignores_repo_config():
     assert reads  # the base listing, the restore and the conftest scan
     for cmd in applies:
         for flag in (
-            "GIT_DIR=/cheatproof-no-repo",
+            "GIT_DIR=/rewardseal-no-repo",
             "GIT_CONFIG_GLOBAL=/dev/null",
             "core.hooksPath=/dev/null",
         ):
@@ -1238,7 +1238,7 @@ def test_reject_test_edits_fails_closed_on_a_patch_it_cannot_read():
 
 def scrub_scratch(text: str) -> str:
     """Each grade picks a random scratch dir, so runs differ in its name. Blank the name to compare them."""
-    return re.sub(r"cheatproof-[0-9a-f]{32}", "cheatproof-SCRATCH", text)
+    return re.sub(r"rewardseal-[0-9a-f]{32}", "rewardseal-SCRATCH", text)
 
 
 def test_source_only_patch_runs_exactly_as_without_the_flag():
@@ -1303,7 +1303,7 @@ def test_touched_test_files_flags_test_paths_at_any_depth(path):
     "path",
     [
         "src/pkg/mod.py",
-        "cheatproof/latest.py",
+        "rewardseal/latest.py",
         "pkg/contest.py",
         "src/testing_utils.py",
         "pkg/tests_helpers.py",

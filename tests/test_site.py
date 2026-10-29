@@ -1,4 +1,4 @@
-"""Tests for cheatproof/site.py (queue T09, part A; queue T18, the batch record and the summary split).
+"""Tests for rewardseal/site.py (queue T09, part A; queue T18, the batch record and the summary split).
 
 Certificates come from the fixture builders in test_certify.py and are written with certify.write_certificate. Traces
 are written by hand. The batch record is written by hand too, in the schema cli batch writes. No model, network or
@@ -23,9 +23,9 @@ from test_certify import (
     with_before,
 )
 
-from cheatproof import site
-from cheatproof.certify import SCHEMA, score_directory, write_certificate
-from cheatproof.site import _money_basis, _page_name, build_site
+from rewardseal import site
+from rewardseal.certify import SCHEMA, score_directory, write_certificate
+from rewardseal.site import _money_basis, _page_name, build_site
 
 CSP_META = (
     """<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">"""
@@ -35,7 +35,7 @@ ATTR_PAYLOAD = '"onload=alert(1)'
 MIXED_PAYLOAD = PAYLOAD + "\"'&"  # a script tag, a double quote, an apostrophe and an ampersand
 ESCAPED_TAG = "&lt;script&gt;alert(1)&lt;/script&gt;"
 NAMES = ["owner__repo-1.html", "owner__repo-2.html", "owner__repo-3.html"]
-MARKER_FILES = (".cheatproof-site", ".nojekyll")
+MARKER_FILES = (".rewardseal-site", ".nojekyll")
 
 
 def read(path: Path) -> str:
@@ -151,7 +151,7 @@ def test_empty_directory_shows_the_empty_state(tmp_path):
     assert result.pages == []
     assert result.errors == []
     assert "No certificates were found" in index
-    assert "python -m cheatproof.cli harden" in index
+    assert "python -m rewardseal.cli harden" in index
     assert "Hackability score" not in index
     assert list((out / "env").iterdir()) == []
 
@@ -351,7 +351,7 @@ def test_a_built_site_has_a_marker_and_an_empty_nojekyll(tmp_path):
     cert_dir = fixture_dir(tmp_path)
     out = tmp_path / "site"
     build_site(cert_dir, out)
-    assert (out / ".cheatproof-site").is_file()
+    assert (out / ".rewardseal-site").is_file()
     assert (out / ".nojekyll").read_bytes() == b""
 
 
@@ -1139,7 +1139,7 @@ def test_a_not_run_cost_that_is_not_a_finite_non_negative_number_is_listed_not_r
 
 def test_a_batch_file_written_by_the_batch_writer_loads_with_no_errors(tmp_path):
     """The record is written by cli._Batch, the writer cli batch uses, so the reader and writer share the shape."""
-    from cheatproof import cli
+    from rewardseal import cli
 
     cert_dir = fixture_dir(tmp_path)
     path = tmp_path / "batch.json"

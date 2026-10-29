@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from cheatproof import site, site_extras
+from rewardseal import site, site_extras
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 TASK = "CycloneDX__cyclonedx-python-348"
@@ -184,13 +184,13 @@ def test_limitations_disclosure_and_escaped_markdown(records, monkeypatch):
     docs.mkdir()
     source = (RESULTS.parent / "docs" / "limitations.md").read_text()
     (docs / "limitations.md").write_text(source + "\nUntrusted <script> & text.\n")
-    monkeypatch.setattr(site_extras, "__file__", str(records.parent / "cheatproof" / "site_extras.py"))
+    monkeypatch.setattr(site_extras, "__file__", str(records.parent / "rewardseal" / "site_extras.py"))
     out = build(records)
     page = (out / "limitations.html").read_text()
     assert "This tool is for authorized evaluation environments." in page
     assert "Do not use findings to cheat on benchmarks or leaderboards." in page
     assert "unpublished fixes, secrets or private data" in page
-    assert "github.com/manishwvn/cheatproof/issues" in page
+    assert "github.com/manishwvn/rewardseal/issues" in page
     assert "Untrusted &lt;script&gt; &amp; text." in page and "<script>" not in page
     rendered = site_extras.markdown(
         "# Title <x>\n\nText <script>\ncontinues & ends.\n\n- Item <img>\n- Other\n\n## Next\n"

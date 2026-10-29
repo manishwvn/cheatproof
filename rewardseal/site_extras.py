@@ -8,9 +8,9 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from cheatproof import audit, webaudit
-from cheatproof.certify import load_certificate
-from cheatproof.site import (
+from rewardseal import audit, webaudit
+from rewardseal.certify import load_certificate
+from rewardseal.site import (
     _cell,
     _document,
     _Entry,

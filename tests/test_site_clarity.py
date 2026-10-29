@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from cheatproof import site
+from rewardseal import site
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 TASK = "CycloneDX__cyclonedx-python-348"

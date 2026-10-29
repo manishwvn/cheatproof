@@ -3,7 +3,7 @@
 Local Docker runs each session in a container with no network (unless EnvSpec asks), CPU, memory
 and PID limits, and no host mounts. Files reach the container over stdin. Token Factory Sandboxes
 (contree_sdk) is the default backend: SandboxSession mirrors DockerSession on a chain of SDK images. Every Docker
-session start, including a reset, counts one local run in cheatproof/budget.py before any pull and before the container exists. So a spent LOCAL_RUN_CAP
+session start, including a reset, counts one local run in rewardseal/budget.py before any pull and before the container exists. So a spent LOCAL_RUN_CAP
 never pulls an image, and a failed pull still counts its run. Local runs are free and count only toward
 LOCAL_RUN_CAP. A Sandboxes session reserves one sandbox run per start and per reset instead.
 """
@@ -29,7 +29,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Protocol, Self
 
-from cheatproof.budget import Budget, BudgetExceeded
+from rewardseal.budget import Budget, BudgetExceeded
 
 MAX_OUTPUT_BYTES = 64 * 1024  # kept per stream, per run() call
 OUTPUT_MARGIN_BYTES = 4 * 1024  # the host reads this far past the cap, then kills the client
@@ -60,12 +60,12 @@ PIPE_POLL_S = 0.05
 PIPE_JOIN_S = 2
 IMAGE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./:@-]*")
 TMPFS_MAX_MB = 4096  # DOCKER_TMPFS_MB above this is clamped: tmpfs pages come out of the memory limit
-OWNER_RE = re.compile(r"[1-9][0-9]*")  # a cheatproof.owner label is a decimal pid: no 0, no leading zeros
+OWNER_RE = re.compile(r"[1-9][0-9]*")  # a rewardseal.owner label is a decimal pid: no 0, no leading zeros
 PID_MAX = 2**31 - 1  # pid_t is a signed 32-bit int: a larger label cannot name a process
-# One line per container: its ID, then its cheatproof.owner label (empty when the label is missing).
-SWEEP_FORMAT = '{{.ID}} {{.Label "cheatproof.owner"}}'
+# One line per container: its ID, then its rewardseal.owner label (empty when the label is missing).
+SWEEP_FORMAT = '{{.ID}} {{.Label "rewardseal.owner"}}'
 
-# Runs in the container as `sh -lc <this> cheatproof <cmd>`, so $1 is the command. timeout(1) with KILL
+# Runs in the container as `sh -lc <this> rewardseal <cmd>`, so $1 is the command. timeout(1) with KILL
 # stops a command that ignores TERM. Without timeout(1) in the image the command is unbounded inside, and
 # the host backstop in DockerSession.run is the only limit.
 _IN_CONTAINER_TIMEOUT = (
@@ -138,7 +138,7 @@ class DiskRefused(ExecutorRefused):
 
 
 # Task images this project pulls (SWE-bench eval images, about 4 GB each unpacked). Only these are ever removed.
-# Same namespaces as cheatproof.tasks.ALLOWED_IMAGE_PREFIXES; tasks imports this module, so it is repeated here.
+# Same namespaces as rewardseal.tasks.ALLOWED_IMAGE_PREFIXES; tasks imports this module, so it is repeated here.
 TASK_IMAGE_PREFIXES = ("swebench/", "swerebench/")
 
 
@@ -579,7 +579,7 @@ class DockerExecutor:
     def _create(self, env: EnvSpec) -> tuple[str, str]:
         """Start the container. Returns (name, id). A failure after docker run removes the named container."""
         network = "bridge" if env.network else "none"
-        name = f"cheatproof-{uuid.uuid4().hex}"
+        name = f"rewardseal-{uuid.uuid4().hex}"
         # /tmp is a sized tmpfs, so scratch files cannot fill the host disk. The root fs is not --read-only:
         # task repos must stay writable for the attacker and the grader. --storage-opt size= is not used
         # because Docker Desktop's overlay2 does not support it without xfs pquota.
@@ -591,9 +591,9 @@ class DockerExecutor:
             "--name",
             name,
             "--label",
-            "cheatproof=1",
+            "rewardseal=1",
             "--label",
-            f"cheatproof.owner={self._pid()}",
+            f"rewardseal.owner={self._pid()}",
             "--network",
             network,
             "--cpus",
@@ -674,7 +674,7 @@ class DockerExecutor:
         return True
 
     def sweep_leftovers(self) -> int:
-        """Stop and remove cheatproof=1 containers whose cheatproof.owner pid is dead on this host, or whose
+        """Stop and remove rewardseal=1 containers whose rewardseal.owner pid is dead on this host, or whose
         owner label is missing or garbage, and the containers this process could not remove (_LEAKED), by name.
         A live owner's container is kept, so a concurrent harden is not killed. Returns how many docker rm reported
         removed. Containers only: never images, volumes or the build cache. Best-effort: a docker error returns 0
@@ -682,7 +682,7 @@ class DockerExecutor:
         removed = self._remove_leaked()
         with contextlib.suppress(Exception):
             listed = self._docker(
-                ["ps", "-a", "--filter", "label=cheatproof=1", "--format", SWEEP_FORMAT], IO_TIMEOUT_S
+                ["ps", "-a", "--filter", "label=rewardseal=1", "--format", SWEEP_FORMAT], IO_TIMEOUT_S
             )
             dead: list[str] = []
             if listed.exit_code == 0:
@@ -791,7 +791,7 @@ class DockerSession(Session):
         # EXEC_GRACE_S longer as a backstop, for a hung docker exec or an image without timeout(1).
         script = _IN_CONTAINER_TIMEOUT.format(seconds=max(1, math.ceil(limit)))
         res = self._executor._docker(
-            ["exec", cid, "sh", "-lc", script, "cheatproof", cmd], limit + EXEC_GRACE_S
+            ["exec", cid, "sh", "-lc", script, "rewardseal", cmd], limit + EXEC_GRACE_S
         )
         killed = res.timed_out or (res.truncated and res.exit_code == OUTPUT_KILL_EXIT_CODE)
         stdout, out_cut = _cap(res.stdout)
@@ -1331,7 +1331,7 @@ class SandboxSession(Session):
         limit = min(float(timeout), MAX_RUN_TIMEOUT_S)
         self._live()
         script = _IN_CONTAINER_TIMEOUT.format(seconds=max(1, math.ceil(limit)))
-        argv = ["sh", "-lc", script, "cheatproof", cmd]
+        argv = ["sh", "-lc", script, "rewardseal", cmd]
         try:
             res, cut = self._call(argv, timeout=limit, disposable=False)
         except _SandboxTimeout:

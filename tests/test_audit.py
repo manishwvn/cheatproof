@@ -1,4 +1,4 @@
-"""T57: the deterministic exposure audit (cheatproof/audit.py, `audit-exposure`, the summary in report and site).
+"""T57: the deterministic exposure audit (rewardseal/audit.py, `audit-exposure`, the summary in report and site).
 
 Fakes and throwaway local repositories only: no model, attacker, sandbox, network, Tavily or paid call. The version
 control lines of the scan, the targeted fix scan and the strip-future-git patch run for real (sh, git, awk) against a
@@ -18,11 +18,11 @@ import test_exposure as te
 import test_future_scan as tf
 import test_holes as th
 
-from cheatproof import audit, certify, cli, exposure, holes, patches, site
-from cheatproof.budget import BudgetExceeded
-from cheatproof.executor import ExecutorRefused, Result
-from cheatproof.grader import GradeResult
-from cheatproof.patches import PatchOutcome
+from rewardseal import audit, certify, cli, exposure, holes, patches, site
+from rewardseal.budget import BudgetExceeded
+from rewardseal.executor import ExecutorRefused, Result
+from rewardseal.grader import GradeResult
+from rewardseal.patches import PatchOutcome
 
 GOLD_LINE = "    gold_marker = compute_gold_value(items)"
 GOLD_FIXED = f"def total(items):\n{GOLD_LINE}\n    return 0\n"
@@ -51,7 +51,7 @@ def _need(shell):
 
 class AuditSession(tf.HybridSession):
     """The scan's git lines run for real (HybridSession); so do the strip scripts (they all end with the marker
-    'cheatproof-strip'). reset() only counts: the strip is applied right after it, as in a fresh sandbox."""
+    'rewardseal-strip'). reset() only counts: the strip is applied right after it, as in a fresh sandbox."""
 
     def __init__(self, repo, shell="sh"):
         super().__init__(shell)
@@ -59,7 +59,7 @@ class AuditSession(tf.HybridSession):
         self.reset_calls = 0
 
     def run(self, cmd, timeout):
-        if "cheatproof-strip" not in cmd:
+        if "rewardseal-strip" not in cmd:
             return super().run(cmd, timeout)
         self.commands.append(cmd)
         done = subprocess.run(

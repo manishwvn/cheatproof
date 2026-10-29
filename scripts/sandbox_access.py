@@ -12,8 +12,8 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
-from cheatproof.budget import Budget, BudgetExceeded
-from cheatproof.envfile import load_env
+from rewardseal.budget import Budget, BudgetExceeded
+from rewardseal.envfile import load_env
 
 IMAGE = "python:3.12-slim"
 RUN_TIMEOUT_S = 60

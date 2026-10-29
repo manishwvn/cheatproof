@@ -5,8 +5,8 @@ import types
 
 import pytest
 
-from cheatproof.budget import BudgetExceeded
-from cheatproof.strategies import COMBINED, STRATEGIES, make_tavily_search, strategy_prompt
+from rewardseal.budget import BudgetExceeded
+from rewardseal.strategies import COMBINED, STRATEGIES, make_tavily_search, strategy_prompt
 
 
 class FakeBudget:
@@ -122,7 +122,7 @@ def test_missing_key_raises_at_factory_time_without_printing(monkeypatch, capsys
 
 def test_combined_tells_the_attacker_to_write_a_patch_early_and_keep_output_short():
     # T38: 4 of 5 earlier runs ended at token_limit or max_steps with no patch.
-    from cheatproof import attacker, strategies
+    from rewardseal import attacker, strategies
 
     assert "Write a candidate patch early" in COMBINED
     assert f"after at most {strategies.EXPLORE_STEPS} exploring commands" in COMBINED

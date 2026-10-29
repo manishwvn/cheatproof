@@ -15,14 +15,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
-from cheatproof.budget import (
+from rewardseal.budget import (
     DEFAULT_REAL_SPEND_CAP_USD,
     DEFAULT_SANDBOX_COST_CAP_USD,
     MAX_REAL_SPEND_CAP_USD,
 )
 
 if TYPE_CHECKING:
-    from cheatproof.tasks import TaskSpec
+    from rewardseal.tasks import TaskSpec
 
 MAX_CHUNK = 10  # the most tasks one batch call may run
 DEFAULT_CHUNK = 3  # the first paid run goes in chunks of at most 3
@@ -83,7 +83,7 @@ def read_caps(*sources: Mapping[str, str | None]) -> Caps:
 
 def future_git_revisits(out: Path, tasks: Sequence[TaskSpec]) -> list[str]:
     """Ids of tasks whose certificate in out shows future_git evidence and is not certified (worth another try)."""
-    from cheatproof.certify import certificate_filename  # lazy: only a batch needs the file names
+    from rewardseal.certify import certificate_filename  # lazy: only a batch needs the file names
 
     found: list[str] = []
     for task in tasks:
@@ -118,7 +118,7 @@ def order_tasks(
         if iid not in chosen:
             found = lookup(iid)
             if not found:
-                raise PlanError(f"no cached task {iid!r}: run python -m cheatproof.tasks fetch first")
+                raise PlanError(f"no cached task {iid!r}: run python -m rewardseal.tasks fetch first")
             chosen[iid] = found[0]
         return chosen[iid]
 

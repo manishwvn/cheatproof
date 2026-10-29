@@ -24,12 +24,12 @@ import test_harden as thd
 import test_holes as th
 import test_keep as tk
 
-from cheatproof import certify, cli, confirm, exposure, holes, keep, site
-from cheatproof.attacker import AttackResult
-from cheatproof.executor import Result
-from cheatproof.exposure import FutureScan, future_scan, scan
-from cheatproof.harden import RoundReport
-from cheatproof.holes import FutureAdded, classify, future_line_digest
+from rewardseal import certify, cli, confirm, exposure, holes, keep, site
+from rewardseal.attacker import AttackResult
+from rewardseal.executor import Result
+from rewardseal.exposure import FutureScan, future_scan, scan
+from rewardseal.harden import RoundReport
+from rewardseal.holes import FutureAdded, classify, future_line_digest
 
 FUTURE_LINE = tg.FUTURE_LINE
 OTHER_LINE = tg.OTHER_LINE

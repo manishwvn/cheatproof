@@ -12,7 +12,7 @@
 card is auto-charged at month start or at a billing threshold. The project must stay inside free credits (the $1 trial
 and the hackathon promo credit, not card money), including during public judging (Dec 1–15) when anyone can trigger runs.
 
-**Decision.** Every paid call goes through `cheatproof/budget.py`:
+**Decision.** Every paid call goes through `rewardseal/budget.py`:
 - It reserves the worst-case cost (estimated input × price, plus `max_tokens` × price) before calling, and settles
   the real cost from `usage` after.
 - Total, daily and sandbox-run caps are checked against a file-locked JSON ledger shared by all processes. The

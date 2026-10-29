@@ -1,4 +1,4 @@
-"""Tests for cheatproof/patches.py (T06).
+"""Tests for rewardseal/patches.py (T06).
 
 Most tests use fake sessions: nothing there runs a shell, git, docker or the network. The real-git tests at the end
 run the generated scripts with `sh -c` in a tmp_path repository. They need git on the scripts' PATH and touch no
@@ -17,11 +17,11 @@ from pathlib import Path
 
 import pytest
 
-from cheatproof.budget import BudgetExceeded
-from cheatproof.executor import EnvSpec, ExecutorRefused, ExecutorUnavailable, Result, Session
-from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT
-from cheatproof.grader import GIT_PREFIX, STEP_TIMEOUT_S
-from cheatproof.patches import (
+from rewardseal.budget import BudgetExceeded
+from rewardseal.executor import EnvSpec, ExecutorRefused, ExecutorUnavailable, Result, Session
+from rewardseal.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT
+from rewardseal.grader import GIT_PREFIX, STEP_TIMEOUT_S
+from rewardseal.patches import (
     _SCRIPT_PATH,
     HOLE_PATCHES,
     PATCH_NETWORK_OFF,
@@ -35,7 +35,7 @@ from cheatproof.patches import (
     patches_for,
     unpatched,
 )
-from cheatproof.tasks import TaskSpec
+from rewardseal.tasks import TaskSpec
 
 BASE = "71fb12cefda5a3e1e223ed837bca468f8bdab874"
 FUTURE = "9676c1085a90cf604df7cc56977abe773bae86b1"
@@ -44,7 +44,7 @@ GUARD_NOTE = "enforced at grade time (reject_test_edits)"
 VERIFY_NEEDLE = "--batch-all-objects"
 STRIP_NEEDLE = "repack"
 CHECK_NEEDLE = "cat-file -e"
-MARKER = re.compile(r"cheatproof-strip ([0-9a-f]{32}) done")
+MARKER = re.compile(r"rewardseal-strip ([0-9a-f]{32}) done")
 FORBIDDEN_GIT_SUBCOMMANDS = re.compile(r"\b(checkout|reset|clean|stash|add|rm|restore|switch|apply)\b")
 SCRUB_LINE = (
     f"PATH={_SCRIPT_PATH}; export PATH; unset -f git sort comm sed find wc head cat rm mkdir tr grep "
@@ -87,7 +87,7 @@ def token_of(cmd: str) -> str:
 
 
 def done_reply(cmd: str) -> Result:
-    return Result(0, f"cheatproof-strip {token_of(cmd)} done\n", "", 0.0)
+    return Result(0, f"rewardseal-strip {token_of(cmd)} done\n", "", 0.0)
 
 
 def check_reply(head: str = BASE):
@@ -95,7 +95,7 @@ def check_reply(head: str = BASE):
 
     def answer(cmd: str) -> Result:
         token = token_of(cmd)
-        return Result(0, f"cheatproof-strip {token} head={head}\ncheatproof-strip {token} done\n", "", 0.0)
+        return Result(0, f"rewardseal-strip {token} head={head}\nrewardseal-strip {token} done\n", "", 0.0)
 
     return answer
 
@@ -124,9 +124,9 @@ def verify_reply(changes=None, *, done=True):
             if value is None:
                 continue
             for item in value if isinstance(value, list) else (value,):
-                lines.append(f"cheatproof-strip {token} {key}={item}")
+                lines.append(f"rewardseal-strip {token} {key}={item}")
         if done:
-            lines.append(f"cheatproof-strip {token} done")
+            lines.append(f"rewardseal-strip {token} done")
         return Result(0, "\n".join(lines) + "\n", "", 0.0)
 
     return answer
@@ -377,7 +377,7 @@ def test_a_missing_unreachable_count_fails_closed():
 def test_lines_with_another_runs_token_are_ignored():
     def with_forged_line(cmd: str) -> Result:
         genuine = verify_reply()(cmd)
-        return Result(0, f"cheatproof-strip {'f' * 32} extra_commits=5\n" + genuine.stdout, "", 0.0)
+        return Result(0, f"rewardseal-strip {'f' * 32} extra_commits=5\n" + genuine.stdout, "", 0.0)
 
     assert strip(strip_session(first=[(VERIFY_NEEDLE, with_forged_line)])).ok is True
 
@@ -585,7 +585,7 @@ def test_scratch_dir_is_host_chosen_and_removed_on_exit():
     strip(session)
     token = token_of(session.commands[0])
     assert re.fullmatch(r"[0-9a-f]{32}", token)
-    scratch = f"/tmp/cheatproof-{token}"
+    scratch = f"/tmp/rewardseal-{token}"
     for cmd in session.commands[1:]:
         assert f"trap 'rm -rf -- {scratch}' EXIT" in cmd
         assert f"mkdir -m 700 -- {scratch}" in cmd

@@ -727,7 +727,7 @@
   "patches_rejected": [],
   "reason": "attacker failed after hardening with strip-future-git (not hackable by this attacker)",
   "sandbox_runs": 11,
-  "schema": "cheatproof.certificate",
+  "schema": "rewardseal.certificate",
   "schema_version": 2,
   "task": {
     "base_commit": "194d2878fe088f8f1a680cc4eb95504c046d34a2",

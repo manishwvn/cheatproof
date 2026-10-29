@@ -1,4 +1,4 @@
-"""Tests for cheatproof/certify.py (queue T07).
+"""Tests for rewardseal/certify.py (queue T07).
 
 Reports are built by hand. No model, network or sandbox runs.
 """
@@ -10,8 +10,8 @@ import re
 
 import pytest
 
-from cheatproof.attacker import AttackResult
-from cheatproof.certify import (
+from rewardseal.attacker import AttackResult
+from rewardseal.certify import (
     SCHEMA,
     SCHEMA_VERSION,
     SCORE_SCHEMA_VERSION,
@@ -24,12 +24,12 @@ from cheatproof.certify import (
     wilson_interval,
     write_certificate,
 )
-from cheatproof.exposure import ExposureReport
-from cheatproof.grader import GateReport, GradeResult, redact_text
-from cheatproof.harden import CandidateCheck, HardenReport, RoundReport
-from cheatproof.holes import HoleReport
-from cheatproof.patches import PatchOutcome
-from cheatproof.tasks import TaskSpec
+from rewardseal.exposure import ExposureReport
+from rewardseal.grader import GateReport, GradeResult, redact_text
+from rewardseal.harden import CandidateCheck, HardenReport, RoundReport
+from rewardseal.holes import HoleReport
+from rewardseal.patches import PatchOutcome
+from rewardseal.tasks import TaskSpec
 
 STRIP = "strip-future-git"
 FAILED_BEFORE = "attacker failed before hardening (not hackable by this attacker)"
@@ -495,7 +495,7 @@ def test_round_trip_build_write_load(tmp_path):
 
 def test_schema_version_is_written_and_checked(tmp_path):
     cert = valid_cert()
-    assert cert["schema_version"] == 2 and cert["schema"] == "cheatproof.certificate"
+    assert cert["schema_version"] == 2 and cert["schema"] == "rewardseal.certificate"
     validate_certificate(cert)
 
 
@@ -542,7 +542,7 @@ def test_unknown_schema_version_is_refused(version):
 
 def test_wrong_schema_name_is_refused():
     cert = valid_cert()
-    cert["schema"] = "cheatproof.report"
+    cert["schema"] = "rewardseal.report"
     with pytest.raises(ValueError, match="wrong schema"):
         validate_certificate(cert)
 
@@ -861,7 +861,7 @@ def test_load_refuses_bad_json_and_names_the_file(tmp_path):
 
 def test_load_validation_error_names_the_file(tmp_path):
     path = tmp_path / "other.json"
-    path.write_text(json.dumps({"schema": "cheatproof.report"}), encoding="utf-8")
+    path.write_text(json.dumps({"schema": "rewardseal.report"}), encoding="utf-8")
     with pytest.raises(ValueError, match=re.escape(path.name)):
         load_certificate(path)
 
@@ -1172,7 +1172,7 @@ def test_a_secret_the_redactor_misses_is_still_refused_by_the_guard():
 
 
 def test_a_2700_char_exposure_line_is_cut_before_the_build_and_the_certificate_builds():
-    from cheatproof.exposure import _evidence
+    from rewardseal.exposure import _evidence
 
     long_ref = "ref refs/heads/" + "_".join(["feature"] * 340) + " points at 9676c1085a90"
     scan = dataclasses.replace(exposure("git-history"), future_git_evidence=_evidence([long_ref]))
@@ -1507,14 +1507,14 @@ def test_score_directory_refuses_a_missing_directory(tmp_path):
 
 
 def test_certified_wording_never_says_secure_or_proof():
-    # Whole words only: the schema name "cheatproof.certificate" contains "proof" as a substring.
+    # Whole words only: the schema name "rewardseal.certificate" contains "proof" as a substring.
     for cert in (cert_for(clean_report()), cert_for(fixed_report())):
         assert re.search(r"\b(secure|proof)\b", json.dumps(cert), re.IGNORECASE) is None
     assert "not hackable by this attacker" in cert_for(fixed_report())["reason"]
 
 
 def test_error_line_is_a_free_text_key_so_it_is_clipped_and_secret_checked():
-    from cheatproof.certify import FREE_TEXT_CLIP, FREE_TEXT_KEYS, _clip_free_text
+    from rewardseal.certify import FREE_TEXT_CLIP, FREE_TEXT_KEYS, _clip_free_text
 
     assert "error_line" in FREE_TEXT_KEYS
     assert _clip_free_text({"error_line": "x" * 500}, None, "gates") == {"error_line": "x" * FREE_TEXT_CLIP}

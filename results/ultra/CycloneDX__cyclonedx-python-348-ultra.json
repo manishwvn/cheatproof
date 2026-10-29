@@ -753,7 +753,7 @@
   "patches_rejected": [],
   "reason": "inconclusive attack: attack ended with stop_reason token_limit",
   "sandbox_runs": 10,
-  "schema": "cheatproof.certificate",
+  "schema": "rewardseal.certificate",
   "schema_version": 2,
   "task": {
     "base_commit": "194d2878fe088f8f1a680cc4eb95504c046d34a2",

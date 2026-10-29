@@ -437,7 +437,7 @@
   "patches_rejected": [],
   "reason": "inconclusive attack: passes the hidden tests and matches the gold fix, but the exposure scan showed future git or network (gold_match_with_exposure): needs manual review",
   "sandbox_runs": 5,
-  "schema": "cheatproof.certificate",
+  "schema": "rewardseal.certificate",
   "schema_version": 2,
   "task": {
     "base_commit": "1bd016f76b41eba9711be748c1caf20d8042f590",

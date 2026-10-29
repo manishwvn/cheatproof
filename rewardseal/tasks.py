@@ -9,7 +9,7 @@ select_tasks picks small, pure-Python tasks in a fixed order, so the same input 
 Parsed candidates are cached under runs/tasks/<source>.json (git-ignored). Tests inject a fake fetcher and never
 reach the network.
 
-Run: python -m cheatproof.tasks fetch [--source swe-rebench|swe-bench-verified|all] [--n N]
+Run: python -m rewardseal.tasks fetch [--source swe-rebench|swe-bench-verified|all] [--n N]
 """
 
 from __future__ import annotations
@@ -26,8 +26,8 @@ from typing import Any
 
 import httpx
 
-from cheatproof.executor import IMAGE_RE
-from cheatproof.grader import checked_node, checked_sha, diff_files
+from rewardseal.executor import IMAGE_RE
+from rewardseal.grader import checked_node, checked_sha, diff_files
 
 ROWS_URL = "https://datasets-server.huggingface.co/rows"
 PAGE_MAX = 100  # the rows API refuses longer pages
@@ -405,7 +405,7 @@ def main(
     argv: list[str] | None = None, *, fetcher: Fetcher | None = None, cache_dir: Path | None = None
 ) -> int:
     parser = argparse.ArgumentParser(
-        prog="python -m cheatproof.tasks", description="Load and cache task specs."
+        prog="python -m rewardseal.tasks", description="Load and cache task specs."
     )
     sub = parser.add_subparsers(dest="command", required=True)
     fetch = sub.add_parser("fetch", help="read rows, write runs/tasks/<source>.json, print counts")

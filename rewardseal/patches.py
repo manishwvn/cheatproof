@@ -1,6 +1,6 @@
 """In-session hardening patches for one task (queue T06, ADR 0002). Code only, no model.
 
-Each patch closes one hole that cheatproof/exposure.py reports:
+Each patch closes one hole that rewardseal/exposure.py reports:
   strip-future-git  git-history. Refuses unless HEAD is exactly the task base. Then deletes every ref, reflog,
                     pseudo-ref, graft, alternate and object that base cannot reach, so the fix cannot be read from
                     .git. A verification run then checks the result.
@@ -43,13 +43,13 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
-from cheatproof.budget import BudgetExceeded
-from cheatproof.executor import EnvSpec, ExecutorRefused, ExecutorUnavailable, Result, Session
-from cheatproof.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, _network
-from cheatproof.grader import DEFAULT_WORKDIR, GIT_PREFIX, STEP_TIMEOUT_S, checked_sha, error_tail
+from rewardseal.budget import BudgetExceeded
+from rewardseal.executor import EnvSpec, ExecutorRefused, ExecutorUnavailable, Result, Session
+from rewardseal.exposure import HOLE_GIT_HISTORY, HOLE_NETWORK, HOLE_TEST_EDIT, _network
+from rewardseal.grader import DEFAULT_WORKDIR, GIT_PREFIX, STEP_TIMEOUT_S, checked_sha, error_tail
 
 if TYPE_CHECKING:
-    from cheatproof.tasks import TaskSpec
+    from rewardseal.tasks import TaskSpec
 
 PATCH_STRIP_GIT = "strip-future-git"
 PATCH_TEST_GUARD = "test-edit-guard"
@@ -270,7 +270,7 @@ def _step(session: Session, cmd: str, token: str, label: str) -> dict[str, list[
 
 def _fields(stdout: str, token: str) -> dict[str, list[str]]:
     """The key=value lines this run printed with its token, as key -> values. Any other line is ignored."""
-    prefix = f"cheatproof-strip {token} "
+    prefix = f"rewardseal-strip {token} "
     fields: dict[str, list[str]] = {}
     for line in stdout.splitlines():
         if line.startswith(prefix):
@@ -321,7 +321,7 @@ def _git(args: str) -> str:
 
 
 def _scratch(token: str) -> str:
-    return f"/tmp/cheatproof-{token}"  # host-chosen and unguessable; the script removes it on exit
+    return f"/tmp/rewardseal-{token}"  # host-chosen and unguessable; the script removes it on exit
 
 
 def _header(workdir: str) -> list[str]:
@@ -329,7 +329,7 @@ def _header(workdir: str) -> list[str]:
 
 
 def _done(token: str) -> str:
-    return f'echo "cheatproof-strip {token} done"'
+    return f'echo "rewardseal-strip {token} done"'
 
 
 def _remote_key_lines(out: str) -> list[str]:
@@ -354,7 +354,7 @@ def _check_script(workdir: str, base: str, token: str) -> str:
             *_header(workdir),
             _git(f"cat-file -e {base_rev}"),
             head,
-            f'echo "cheatproof-strip {token} head=$head_sha"',
+            f'echo "rewardseal-strip {token} head=$head_sha"',
             _done(token),
         ]
     )
@@ -415,15 +415,15 @@ def _verify_script(workdir: str, base: str, token: str) -> str:
     names = " ".join(_LEFTOVER_NAMES)
     leftover_loop = (
         f'for name in {names}; do if [ -e "$gitdir/$name" ] || [ -e "$common/$name" ]; then '
-        f'echo "cheatproof-strip {token} leftover=$name"; fi; done'
+        f'echo "rewardseal-strip {token} leftover=$name"; fi; done'
     )
     pack_loop = (
         'for f in "$common"/objects/pack/*.keep "$common"/objects/pack/*.promisor "$gitdir"/BISECT_*; do '
-        f'if [ -e "$f" ]; then echo "cheatproof-strip {token} leftover=pack-keep-promisor-bisect"; fi; done'
+        f'if [ -e "$f" ]; then echo "rewardseal-strip {token} leftover=pack-keep-promisor-bisect"; fi; done'
     )
     submodules = (
         'if [ -e "$gitdir/modules" ] || [ -e "$common/modules" ]; then '
-        f'echo "cheatproof-strip {token} submodules=1"; else echo "cheatproof-strip {token} submodules=0"; fi'
+        f'echo "rewardseal-strip {token} submodules=1"; else echo "rewardseal-strip {token} submodules=0"; fi'
     )
     # The last check: HEAD must still be base. Exit 1 fails the step, whatever the printed counts say.
     head_gate = (
@@ -464,14 +464,14 @@ def _verify_script(workdir: str, base: str, token: str) -> str:
             f"remote=$(wc -l < {s}/remote)",
             f"unreachable=$(wc -l < {s}/extra-objs)",
             f"head_sha=$(cat {s}/head)",
-            f'echo "cheatproof-strip {token} extra_commits=$extra"',
-            f'while IFS= read -r sha; do echo "cheatproof-strip {token} extra=$sha"; done < {s}/extra-sample',
-            f'echo "cheatproof-strip {token} tags=$tags"',
-            f'echo "cheatproof-strip {token} refs=$refs"',
-            f'echo "cheatproof-strip {token} loose_refs=$loose"',
-            f'echo "cheatproof-strip {token} remote_keys=$remote"',
-            f'echo "cheatproof-strip {token} unreachable_objects=$unreachable"',
-            f'echo "cheatproof-strip {token} head=$head_sha"',
+            f'echo "rewardseal-strip {token} extra_commits=$extra"',
+            f'while IFS= read -r sha; do echo "rewardseal-strip {token} extra=$sha"; done < {s}/extra-sample',
+            f'echo "rewardseal-strip {token} tags=$tags"',
+            f'echo "rewardseal-strip {token} refs=$refs"',
+            f'echo "rewardseal-strip {token} loose_refs=$loose"',
+            f'echo "rewardseal-strip {token} remote_keys=$remote"',
+            f'echo "rewardseal-strip {token} unreachable_objects=$unreachable"',
+            f'echo "rewardseal-strip {token} head=$head_sha"',
             leftover_loop,
             pack_loop,
             submodules,

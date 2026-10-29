@@ -2,7 +2,7 @@
 
 **2026-10-28: all work merged to main (PR #79, `a831673`); no open PRs.** Coding & Agentic track; the owner submits
 2026-10-28 (deadline 2026-10-30 10:00 PDT). Progress: 83% (44/56 tasks done); `python3 docs/autopilot/progress.py`.
-Demo: https://manishwvn.github.io/cheatproof/ (GitHub Pages, built from the committed data). 3045 tests pass (1 skipped). Report site extras (explorer, controls gallery, limitations) merged in PR #104; links pinned via results/PINNED_SHA.
+Demo: https://manishwvn.github.io/rewardseal/ (GitHub Pages, built from the committed data). 3045 tests pass (1 skipped). Report site extras (explorer, controls gallery, limitations) merged in PR #104; links pinned via results/PINNED_SHA.
 
 ## Result so far (details and caveats in `docs/results.md`)
 - **Deterministic exposure audit (`audit-exposure`, no attacker):** 13 of the 18 selected swe-rebench tasks audited (5
@@ -23,7 +23,7 @@ Demo: https://manishwvn.github.io/cheatproof/ (GitHub Pages, built from the comm
   `audit-exposure` (T57, #78), audit results (#79), Start here recorded path on the site (#87), Terra and Opus wording fixes (#84 to #86).
 - Batches 1 to 3 and the replications of cyclonedx-348 are in `docs/results.md`.
 
-## Budget (`~/.cheatproof-autopilot/ledger.json`)
+## Budget (`~/.rewardseal-autopilot/ledger.json`)
 - Real-spend cap `REAL_SPEND_CAP_USD` $10 ceiling; live stop $7. Daily $4, total $20. Sandboxes guard $5
   (`SANDBOX_COST_CAP_USD`), run cap 500 (owner-approved). Ledger about $3.53 at Oct 28.
 - The balance is hackathon promo credit, not card money; it must never go negative. Check the console between runs.
@@ -35,11 +35,11 @@ Demo: https://manishwvn.github.io/cheatproof/ (GitHub Pages, built from the comm
 - Open at freeze: regenerate `results/manifest.json`, set `results/PINNED_SHA`, rerun the cold-read testers.
   Open minors: T31 items 2 and 4, env-broken tasks (docling-824, BoboTiG-2132), `.env.example` still says run cap 250.
 - Real spend about $4.25 of the $8.50 stop (Sandboxes counter about $4.7 of the $5 guard).
-- Owner: `gh repo edit manishwvn/cheatproof --homepage https://manishwvn.github.io/cheatproof/`; confirm the $5
+- Owner: `gh repo edit manishwvn/rewardseal --homepage https://manishwvn.github.io/rewardseal/`; confirm the $5
   Sandboxes cap; voice-over, video and Devpost submission (T14 is the owner's alone). Nothing goes public without
   the owner.
 
 ## Pointers
 - Resume note: `docs/autopilot/HANDOFF.md` (last section). Queue: `docs/autopilot/QUEUE.md`. Routine: hourly
-  `cheatproof-autopilot`, state in `~/.cheatproof-autopilot/` (`docs/autopilot/CYCLE.md`).
-- Fresh machine: `python -m cheatproof.cli budget init` once. Certificates: schema 2.
+  `rewardseal-autopilot`, state in `~/.rewardseal-autopilot/` (`docs/autopilot/CYCLE.md`).
+- Fresh machine: `python -m rewardseal.cli budget init` once. Certificates: schema 2.

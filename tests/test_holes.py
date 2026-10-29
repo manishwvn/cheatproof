@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from cheatproof import holes
-from cheatproof.holes import (
+from rewardseal import holes
+from rewardseal.holes import (
     GOLD_OVERLAP_MIN,
     MAX_RECORD_CHARS,
     classify,
@@ -12,7 +12,7 @@ from cheatproof.holes import (
     is_test_path,
     load_trace,
 )
-from cheatproof.tasks import TaskSpec
+from rewardseal.tasks import TaskSpec
 
 
 def _hex(label: str, length: int = 40) -> str:

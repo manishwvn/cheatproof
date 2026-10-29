@@ -22,10 +22,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, Protocol
 
-from cheatproof.budget import BudgetExceeded
-from cheatproof.executor import ExecutorRefused, ExecutorUnavailable, Result, Session
-from cheatproof.llm import MAX_OUTPUT_TOKENS, estimate_tokens
-from cheatproof.sanitize import MAX_QUERY_CHARS, REDACTED, clean_text
+from rewardseal.budget import BudgetExceeded
+from rewardseal.executor import ExecutorRefused, ExecutorUnavailable, Result, Session
+from rewardseal.llm import MAX_OUTPUT_TOKENS, estimate_tokens
+from rewardseal.sanitize import MAX_QUERY_CHARS, REDACTED, clean_text
 
 MAX_RESULT_CHARS = 3000  # default: tool results sent back to the model are cut to this (plus a marker); T38 and T47 lowered it
 RESULT_CHARS_CEILING = 8000  # the old default; AttackConfig.max_result_chars may go lower, never above this
@@ -73,7 +73,7 @@ StopReason = Literal["submit", "max_steps", "token_limit", "budget", "error"]
 
 
 class ChatLLM(Protocol):
-    """What the loop needs from cheatproof.llm.GuardedLLM."""
+    """What the loop needs from rewardseal.llm.GuardedLLM."""
 
     def chat(self, model: str, messages: list[dict], max_tokens: int, **kwargs: Any) -> Any: ...
 

@@ -3,7 +3,7 @@
  "config": "default",
  "split": "test",
  "num_rows_total": 21336,
- "note": "Recorded from the datasets-server rows API on 2026-10-18, keys trimmed to the parsed set, then run through cheatproof.sanitize (the fixture guard). The sanitizer redacts base_commit (a 40-char hex run) in every row.",
+ "note": "Recorded from the datasets-server rows API on 2026-10-18, keys trimmed to the parsed set, then run through rewardseal.sanitize (the fixture guard). The sanitizer redacts base_commit (a 40-char hex run) in every row.",
  "rows": [
   {
    "row_idx": 79,

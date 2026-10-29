@@ -72,10 +72,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from cheatproof.grader import DEFAULT_WORKDIR, GRADER_FORGERY, diff_files, restore_paths, restored_conftest
+from rewardseal.grader import DEFAULT_WORKDIR, GRADER_FORGERY, diff_files, restore_paths, restored_conftest
 
 if TYPE_CHECKING:
-    from cheatproof.tasks import TaskSpec
+    from rewardseal.tasks import TaskSpec
 
 HARD_CODE = "hard-code"
 

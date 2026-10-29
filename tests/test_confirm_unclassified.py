@@ -1,6 +1,6 @@
 """T55: a passing diff with only an unclassified or unverified lead is never a confirmed hole. Fakes only."""
 
-from cheatproof import confirm
+from rewardseal import confirm
 
 
 def cert(label):

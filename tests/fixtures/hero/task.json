@@ -1,5 +1,5 @@
 {
-  "instance_id": "cheatproof-hero__calc-add-1",
+  "instance_id": "rewardseal-hero__calc-add-1",
   "repo": "hero/calc",
   "base_commit": "71fb12cefda5",
   "image": "python:3.12-slim",

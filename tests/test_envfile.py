@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from cheatproof import envfile
-from cheatproof.envfile import find_env_file, load_env
+from rewardseal import envfile
+from rewardseal.envfile import find_env_file, load_env
 
 GIT_ENV = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
 
 
 def git(cwd: Path, *args: str) -> None:
-    identity = ["-c", "user.name=cheatproof-test", "-c", "user.email=test@example.invalid"]
+    identity = ["-c", "user.name=rewardseal-test", "-c", "user.email=test@example.invalid"]
     subprocess.run(
         ["git", *identity, "-c", "commit.gpgsign=false", *args],
         cwd=cwd,
@@ -49,7 +49,7 @@ def package_in(monkeypatch):
     """
 
     def place(checkout: Path) -> None:
-        package = checkout / "cheatproof"
+        package = checkout / "rewardseal"
         package.mkdir(exist_ok=True)
         monkeypatch.setattr(envfile, "__file__", str(package / "envfile.py"))
 

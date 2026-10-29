@@ -6,9 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from cheatproof import executor
-from cheatproof.budget import Budget, BudgetExceeded, create_ledger
-from cheatproof.sanitize import REDACTED, assert_clean, sanitize
+from rewardseal import executor
+from rewardseal.budget import Budget, BudgetExceeded, create_ledger
+from rewardseal.sanitize import REDACTED, assert_clean, sanitize
 from scripts import smoke
 
 # Fake values built at runtime so no credential-shaped literal sits in the repo.
@@ -82,7 +82,7 @@ def test_usage_numbers_and_content_are_kept():
         "object": "chat.completion",
         "finish_reason": "stop",
         "usage": {"prompt_tokens": 21, "completion_tokens": 5, "total_tokens": 26},
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": "cheatproof ok"}}],
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "rewardseal ok"}}],
     }
     assert sanitize(raw) == raw
 
@@ -209,7 +209,7 @@ def test_assert_clean_passes_on_sanitized_output():
 
 
 def test_assert_clean_passes_on_model_ids_and_plain_content():
-    assert_clean({"id": MODEL, "model": MODEL, "usage": {"total_tokens": 3}, "content": "cheatproof ok"})
+    assert_clean({"id": MODEL, "model": MODEL, "usage": {"total_tokens": 3}, "content": "rewardseal ok"})
 
 
 def test_assert_clean_flags_raw_secret_in_nested_list():

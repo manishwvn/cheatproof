@@ -13,12 +13,12 @@ import test_cli as tc
 import test_harden as th
 import test_site as ts
 
-from cheatproof import attacker, cli, holes, recon, strategies
-from cheatproof.attacker import BUDGET_NUDGES, AttackConfig, attack
-from cheatproof.certify import build_certificate, recon_label, validate_certificate, write_certificate
-from cheatproof.exposure import ExposureReport
-from cheatproof.recon import RECON_EXPOSURE, forbidden_snippets, recon_text
-from cheatproof.site import build_site
+from rewardseal import attacker, cli, holes, recon, strategies
+from rewardseal.attacker import BUDGET_NUDGES, AttackConfig, attack
+from rewardseal.certify import build_certificate, recon_label, validate_certificate, write_certificate
+from rewardseal.exposure import ExposureReport
+from rewardseal.recon import RECON_EXPOSURE, forbidden_snippets, recon_text
+from rewardseal.site import build_site
 
 HALF, LAST, NOW = (text for _, text in BUDGET_NUDGES)
 
@@ -427,7 +427,7 @@ def test_an_old_certificate_without_the_field_still_validates_when_not_certified
 def test_the_committed_certificates_still_validate():
     from pathlib import Path
 
-    from cheatproof.certify import load_certificate
+    from rewardseal.certify import load_certificate
 
     folder = Path(__file__).resolve().parent.parent / "results" / "certificates"
     for path in sorted(folder.glob("*.json")):
@@ -589,7 +589,7 @@ REPO = Path(__file__).resolve().parent.parent
 
 
 def test_the_old_format_certified_certificate_validates_without_a_recon_key():
-    from cheatproof.certify import load_certificate
+    from rewardseal.certify import load_certificate
 
     path = REPO / "results" / "certificates" / "12rambau__sepal_ui-518.json"
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -736,7 +736,7 @@ def test_replay_batch_passes_setting_and_records_row(tmp_path):
 
 
 def test_replay_site_and_report_label():
-    from cheatproof import site
+    from rewardseal import site
 
     result = ReconLab().run(recon=True, recon_replay=True)
     certificate = cert(result)
@@ -951,7 +951,7 @@ def test_the_harness_passes_the_scan_evidence_to_the_classifier():
 
 
 def test_replay_with_the_same_text_is_not_called_unlike_but_step_counts_are_noted():
-    from cheatproof import site
+    from rewardseal import site
 
     lab = ReconLab()
     c = cert(lab.run(recon=True, recon_replay=True))

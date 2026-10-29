@@ -5,8 +5,8 @@ from dataclasses import replace
 
 import pytest
 
-from cheatproof import cli, holes, webaudit
-from cheatproof.tasks import TaskSpec
+from rewardseal import cli, holes, webaudit
+from rewardseal.tasks import TaskSpec
 
 LINES = [
     "calculate_specific_result(alpha_value, beta_value)",
@@ -144,7 +144,7 @@ def test_dry_run_no_key_or_calls(tmp_path, monkeypatch):
 
 
 def test_site_section(tmp_path):
-    from cheatproof import site
+    from rewardseal import site
 
     errors = []
     assert site._web_exposure_section(tmp_path / "web", tmp_path / "exposure", errors) == ""
@@ -254,7 +254,7 @@ def mixed_record(history_lines=1):
 
 
 def test_blob_and_history_maxima_are_separate(tmp_path):
-    from cheatproof import site
+    from rewardseal import site
 
     rec = mixed_record()
     for label in ("q1", "q2"):
@@ -282,8 +282,8 @@ def test_validation_checks_separate_maxima(label, group):
 def test_site_uses_entire_date_range_and_existing_index_order(tmp_path):
     from test_certify import cert_for, fixed_report
 
-    from cheatproof import site
-    from cheatproof.certify import write_certificate
+    from rewardseal import site
+    from rewardseal.certify import write_certificate
 
     rec = mixed_record(history_lines=2)
     rec["queries"][1]["searched_at"] = "2026-01-05T00:00:00Z"
@@ -300,7 +300,7 @@ def test_site_uses_entire_date_range_and_existing_index_order(tmp_path):
 
 @pytest.mark.parametrize("ancestor", [False, True])
 def test_symlink_parents_refused_by_load_write_skip_and_site(tmp_path, ancestor):
-    from cheatproof import site
+    from rewardseal import site
 
     real = tmp_path / "real"
     directory = real / "nested" if ancestor else real
@@ -381,7 +381,7 @@ def test_invalid_output_path_stops_before_search(tmp_path, bad_path):
 
 @pytest.mark.parametrize("dry_run", [False, True])
 def test_default_cli_loads_env_only_for_live_run(tmp_path, monkeypatch, dry_run):
-    from cheatproof import envfile
+    from rewardseal import envfile
 
     loaded = []
     budget = Budget()
@@ -423,7 +423,7 @@ def test_default_cli_loads_env_only_for_live_run(tmp_path, monkeypatch, dry_run)
 
 @pytest.mark.parametrize("failure", ["quota", "budget"])
 def test_second_search_failure_never_writes_partial_record(tmp_path, failure, capsys):
-    from cheatproof.budget import BudgetExceeded
+    from rewardseal.budget import BudgetExceeded
 
     budget = Budget()
 

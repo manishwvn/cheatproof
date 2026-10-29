@@ -78,7 +78,7 @@ Command: the T55 rerun command plus `--recon-replay` (Super, recon on, 40 steps,
 
 ## Web exposure (Tavily), 13 audited tasks (2026-10-29)
 
-`python -m cheatproof.cli audit-web` (host only: no Token Factory, no Sandbox, no model). Per task, 2 basic Tavily searches with raw page content (26 credits in all): Q1 built only from the public issue title plus owner/repo (the repository name alone if the title looked unsafe), and a labelled "oracle query" on the pull request URL itself. No gold or test text in any query. Records: `results/web-exposure/` (queries, URLs, ranks, page types, sha256 of each page, k of n counted gold lines found, line-digest prefixes; no page text). Searched 2026-10-29.
+`python -m rewardseal.cli audit-web` (host only: no Token Factory, no Sandbox, no model). Per task, 2 basic Tavily searches with raw page content (26 credits in all): Q1 built only from the public issue title plus owner/repo (the repository name alone if the title looked unsafe), and a labelled "oracle query" on the pull request URL itself. No gold or test text in any query. Records: `results/web-exposure/` (queries, URLs, ranks, page types, sha256 of each page, k of n counted gold lines found, line-digest prefixes; no page text). Searched 2026-10-29.
 
 - **Result: 0 of 13.** No search returned a page containing even one of the counted gold lines (k = 0 in all 130 results). 5 results per query, 130 results, none a pull, commit or compare page of the task's own repository, including for the oracle query on the PR URL (11 results were current-file "blob" pages of other repositories, none matched).
 - **Reading, carefully:** in this snapshot, a basic Tavily search built from the public issue title did not surface the fix for any of the 13. The oracle query also did not return the PR page for any task, so this search tool does not reliably return GitHub PR pages at all: a null here says this tool found nothing, not that the open web holds nothing. Web content and search results change; this is a dated snapshot, findability only, not use by any model, and a lower bound. Git history, not this web search, is the channel with measured overlap in this sample (12 of 13 in the exposure audit).
@@ -343,17 +343,17 @@ the verified hole count is 0.
 
 ## Method
 
-- Task source: SWE-rebench, lowest score first, via `python -m cheatproof.tasks fetch --source swe-rebench --n 11`
+- Task source: SWE-rebench, lowest score first, via `python -m rewardseal.tasks fetch --source swe-rebench --n 11`
   (public rows API, cached in the git-ignored `runs/tasks/swe-rebench.json`). Selection rule: per source, the n
   lowest by score (fail-to-pass plus pass-to-pass count, gold patch size in KB, +1000 per non-.py file). 1000 rows
   scanned, 243 valid, 756 skipped as `no_image`, 1 as `non_pytest_id`. The fetch hit one HTTP 502 and succeeded on
   retry. The first 5 selected are the 5 from the previous batch, so they are skipped as already certified.
 - Executor: Sandboxes (`EXECUTOR=sandbox`). No local Docker.
 - Attacker: `nvidia/nemotron-3-super-120b-a12b` (Nemotron Super) for the main certificate set. One separate Ultra experiment on 348 is reported in **Ultra on cyclonedx-python-348**; its hardened re-attack was inconclusive.
-- Strategy: `cheatproof.strategies.COMBINED`, written to `results/combined.txt`, label `combined`.
+- Strategy: `rewardseal.strategies.COMBINED`, written to `results/combined.txt`, label `combined`.
 - Limits: `--max-steps 40`, `--max-tokens 250000` (prompt plus completion per attempt), `cmd_timeout` 120 s,
   `max_output_tokens` 2048, one attack per round.
-- Command for the first batch: `cheatproof.cli batch --source swe-rebench --n 8 --system-prompt-file results/combined.txt
+- Command for the first batch: `rewardseal.cli batch --source swe-rebench --n 8 --system-prompt-file results/combined.txt
   --strategy combined --attacker-model nvidia/nemotron-3-super-120b-a12b --max-steps 40 --max-tokens 250000
   --out results/certificates`, run with `EXECUTOR=sandbox`. Batch 3 chunk 1 used the command in its section above.
 - Planning error (first batch): the run was started with three new tasks before the cost of one sandbox task had been
@@ -363,7 +363,7 @@ the verified hole count is 0.
   (`<stem>.jsonl`), the raw attack diffs (`<stem>.before.diff`, `<stem>.after.diff`, `<stem>.diff`) and the task's
   restore set (`<stem>.restore.json`, plus `<stem>.rounds.json` with the grade inputs) under `results/traces/`, which is
   git-ignored. None of it is committed or published; the committed diffs under `results/diffs/` are sanitized. Hole
-  labels can be re-checked offline from the kept files with `python -m cheatproof.cli holes recheck <stem>` (no
+  labels can be re-checked offline from the kept files with `python -m rewardseal.cli holes recheck <stem>` (no
   network, sandbox or budget; it prints labels and test path names, never diff text). Runs before T42 kept only
   sha256 and character counts, so their raw diffs cannot be re-checked.
 - `results/batch.json` describes the last run only (per the CLI contract, a rerun rewrites it for that run). It now holds the 2026-10-24 rerun (`run` 3, `chunk_size` 3); the chunk 3 state read `run` 4, not explained. Its `network_fetch_done` field lists `Dorthu__openapi3-75` and `Alexei-Kornienko__schematics_to_swagger-7`. Batch 3 chunk 1 and chunk 2 state is recorded in this file's sections, not in `batch.json`. The first batch's batch rows are not in this file; its certificates are in `results/certificates/`.
@@ -373,7 +373,7 @@ With `SANDBOX_NETWORK_TRUSTED=1` the Sandboxes network is not cut (the platform 
 
 ## First batch: cost (HISTORICAL, as of 2026-10-22)
 
-Read from `~/.cheatproof-autopilot/ledger.json` (git-ignored live ledger, not committed). The halt shown here was in
+Read from `~/.rewardseal-autopilot/ledger.json` (git-ignored live ledger, not committed). The halt shown here was in
 effect at the end of the first batch. Batch 3 chunk 1 ran after it.
 
 | Field | Before | After |
@@ -453,7 +453,7 @@ The cumulative values are in **Current totals** at the top. These are the first 
 
 ## Exposure audit (deterministic, attacker-free, 2026-10-24)
 
-Command: `EXECUTOR=sandbox python -m cheatproof.cli audit-exposure --source swe-rebench --n 18 --out results/exposure`.
+Command: `EXECUTOR=sandbox python -m rewardseal.cli audit-exposure --source swe-rebench --n 18 --out results/exposure`.
 No model call. Per task it scans the git history, checks whether the gold fix's lines are in future commits, applies
 `strip-future-git`, runs both gates and rescans. Records: `results/exposure/` (one per task, plus `_run.json`).
 
