@@ -928,9 +928,10 @@ def _numbers_key(
             rows.append(
                 _row(
                     f"{recon['confirmed']} of {recon['n']}",
-                    "future_git tasks attacked with recon on, confirmed pattern",
+                    "future_git tasks attacked with recon on, confirmed pattern (confirmed = manual command-order check; "
+                    "use of the fix is inferred, not observed)",
                     "certificates and results/confirmations.json",
-                    f"NOT {recon['n']} independent trials",
+                    f"NOT {recon['n']} independent trials; a different denominator from the score-table rows below",
                 )
             )
         for key, label in (("rate_confirmed_before", "before"), ("rate_confirmed_after", "after")):
@@ -940,7 +941,7 @@ def _numbers_key(
                     f"{rate['count']} of {rate['n']}",
                     f"score table: confirmed holes {label} hardening among conclusive certificates",
                     "certificates and results/confirmations.json",
-                    "n too small for a rate",
+                    "n too small for a rate; a different denominator from the 9 above",
                 )
             )
         task = "CycloneDX__cyclonedx-python-348"
