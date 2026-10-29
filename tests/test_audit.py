@@ -369,8 +369,11 @@ def test_the_summary_is_computed_strictly_from_the_records(tmp_path):
     assert s["fix_ids"] == ["a__a-1", "b__b-2"] and s["not_closed_ids"] == ["b__b-2", "e__e-5"]
     line = audit.summary_line(s)
     assert s["N_fix_closed"] == 1 and s["fix_not_closed_ids"] == ["b__b-2"]
-    assert "reachable in .git in 2 of 5 audited" in line and "4 of 5 have future commits" in line
-    assert "closed it in 1 of 2 environments where the fix is reachable (2 of 4 with future commits)" in line
+    assert (
+        "appears in a future commit in .git in 2 of 5 audited" in line
+        and "4 of 5 have future commits" in line
+    )
+    assert "closed it in 1 of 2 environments where those lines overlap (2 of 4 with future commits)" in line
     assert "Lower bound" in line and "workdir repository only" in line
     assert "not an audit" not in line
 
@@ -627,7 +630,7 @@ def test_the_command_writes_one_record_per_task_through_the_budget(capsys):
     )
     printed = capsys.readouterr().out
     assert "a__a-1: audited" in printed and "audit: audited 1" in printed
-    assert "reachable in .git in 1 of 1 audited" in printed
+    assert "appears in a future commit in .git in 1 of 1 audited" in printed
 
 
 def test_a_task_with_a_record_is_skipped_unless_rerun(capsys):
@@ -697,7 +700,7 @@ def test_a_task_that_the_patch_does_not_close_is_recorded_as_open(capsys):
     assert cli.main(audit_argv(), deps=deps) == 0
     rec = json.loads(Path("results/exposure/a__a-1.json").read_text())
     assert rec["future_commits_after"] == 2 and rec["closed"] is False
-    assert "closed it in 0 of 1 environments where the fix is reachable" in capsys.readouterr().out
+    assert "closed it in 0 of 1 environments where those lines overlap" in capsys.readouterr().out
 
 
 def test_instance_ids_pick_exactly_those_tasks_in_order(capsys):
@@ -820,6 +823,19 @@ def test_the_site_hero_leads_with_the_audit_when_records_exist(tmp_path):
         < body.index('class="finding-label"')
         < body.index('class="headline"')
     )
+
+
+def test_the_348_pages_link_the_evidence_file_and_explain_the_replication_count(tmp_path):
+    certs_src = Path(__file__).resolve().parents[1] / "results" / "certificates"
+    certs = tmp_path / "results" / "certificates"
+    certs.mkdir(parents=True)
+    name = "CycloneDX__cyclonedx-python-348-93d44b30.json"
+    shutil.copy(certs_src / name, certs / name)
+    out = tmp_path / "site"
+    site.build_site(certs, out)
+    page = next((out / "env").glob("*348*.html")).read_text(encoding="utf-8")
+    assert "results/evidence/348-causal.md" in page and "raw certificate on GitHub" in page
+    assert "reads 0/3" in page and "1 of 10" in page
 
 
 def test_the_site_lists_a_malformed_record_and_shows_no_number(tmp_path):

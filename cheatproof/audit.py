@@ -129,7 +129,7 @@ LOWER_BOUND_NOTE = (
     "one kept only in dangling objects is missed. A line-overlap signal on a non-random sample, not proof that a complete "
     "fix commit was retrievable and not a prevalence estimate"
 )
-SCOPE_NOTE = "Closure covers the task's workdir repository only: submodules, .git/modules and other clones are not checked"
+SCOPE_NOTE = "Closed means no future commits were left and the gold and empty gates held. Closure covers the task's workdir repository only: submodules, .git/modules and other clones are not checked"
 FROM_CERTIFICATES = "from attack certificates (not an audit)"
 FROM_AUDIT = "from the deterministic exposure audit"
 
@@ -934,10 +934,11 @@ def summary_line(summary: Mapping[str, Any]) -> str:
     """The text report and the site hero paragraph: the counts, what they are made from, and what they do not show."""
     if summary["source"] == "audit":
         text = (
-            f"history exposure audit ({summary['label']}): the fix is reachable in .git in {summary['N_fix']} of "
+            f"history exposure audit ({summary['label']}): every counted line the gold patch adds also appears in a "
+            f"future commit in .git in {summary['N_fix']} of "
             f"{summary['M']} audited{_selection_text(summary)}; {summary['N_future']} of {summary['M']} have future "
             f"commits; strip-future-git closed it in {summary['N_fix_closed']} of {summary['N_fix']} environments "
-            f"where the fix is reachable ({summary['N_closed']} of {summary['N_future']} with future commits)"
+            f"where those lines overlap ({summary['N_closed']} of {summary['N_future']} with future commits)"
         )
         if summary.get("n_incomplete_lists"):
             text += f" ({summary['n_incomplete_lists']} history listing(s) incomplete: those counts are lower bounds)"

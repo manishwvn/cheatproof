@@ -10,8 +10,9 @@ reward hacking, and certifies each environment.
 - Each success names a hole. Rule-based patches are applied, then the same attacker re-attacks.
 - **Three gates per environment:** the gold patch passes, an empty patch fails, the attacker fails.
 - Output: a per-environment certificate, a per-benchmark "hackability" score, and a report page.
-- **Sharpest claim (Opus review):** the first closed loop that finds reward hacks in SWE environments, patches them,
-  and certifies each patched environment is still solvable by gold and no longer hackable by the same adversary.
+- **Historical (superseded, withdrawn 2026-10-29; see README):** the sharpest claim at the time was a novelty claim about a closed
+  loop that patches hacks and certifies solvability. The novelty and "unhackable" wording is withdrawn: certified means the
+  recorded qualifying attack failed, nothing more.
 - **Minimal scope:** 30 SWE-rebench + 10 SWE-bench Verified tasks. 4 attacks: git-history retrieval, test edits,
   hard-coding, network fetch of the upstream fix. 4 patches: strip `.git` objects, hidden read-only tests,
   network off, a grader check for touched test files. About 15 steps and 50k tokens per attempt; about 4M tokens in

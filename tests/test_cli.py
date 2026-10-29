@@ -544,7 +544,7 @@ def test_report_renders_a_sparse_score_without_crashing(tmp_path, capsys):
     rc = cli.main(["report", "--certs", str(certs)], deps=make_deps(spy, score_directory=lambda d: sparse))
     out = capsys.readouterr().out
     assert rc == 0
-    assert "1 of 2 = 50.0%" in out
+    assert "1 of 2 (no rate shown: n too small for an interval)" in out
     assert "0 of 0 (no rate: n is 0)" in out
     assert re.search(r"^\s+x\s+1\s+-$", out, re.MULTILINE)
     assert "outcomes" not in out and "cost_usd_total" not in out
@@ -675,8 +675,8 @@ def test_report_scores_certificates_written_by_certify(tmp_path, capsys):
     assert "n=3" in out and "n_after=2" in out
     # T54: both git-history labels carry no T53 evidence and no manifest entry, so they are leads, not hackable
     assert "confirmed holes: 0; unconfirmed leads: 2; certified: 2 (via " in out
-    assert "confirmed holes before hardening: 0 of 3 = 0.0% (n too small for an interval)" in out
-    assert "confirmed holes after hardening: 0 of 2 = 0.0% (n too small for an interval)" in out
+    assert "confirmed holes before hardening: 0 of 3 (no rate shown: n too small for an interval)" in out
+    assert "confirmed holes after hardening: 0 of 2 (no rate shown: n too small for an interval)" in out
     assert "95% CI" not in out
     assert "cost_usd_total: $0.3000" in out
     assert re.search(r"^\s+git-history\s+0\s+2\s+0\s+1$", out, re.MULTILINE)

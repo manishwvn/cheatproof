@@ -81,10 +81,10 @@ says so.
   docs whether the timed-out request was still processed or billed, or what timeout and retry policy the API expects for
   chat completions with large prompts.
 - **Impact.** An otherwise complete agent run was lost, and we cannot say whether the failure was in the model service
-  or in the network path. The result counts as "no result", which weakens the sample.
+  or in the network path. The result counts as "no result", which weakens the sample. In the 348 replication, two further runs (run3 and run4, 2026-10-24) ended with HTTP 503 from the chat endpoint and were not judged, so server-side errors cost us 2 of 10 rounds on that task.
 - **Suggested fix.** Document the server-side timeout per model, say whether a request that times out is billed or
   continues, and support an idempotency key or a resume token so a client can retry a step safely. A `Retry-After`
-  or error body that says whether the request was accepted would help.
+  or error body that says whether the request was accepted would help. We added a bounded retry (at most two, on 5xx and timeouts) after these runs; a documented retry and idempotency contract would let clients do this safely without risking double billing.
 
 ## Sandboxes (beta)
 

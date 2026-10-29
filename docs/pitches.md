@@ -43,8 +43,7 @@ Executor: Token Factory Sandboxes (checkpoint, branch per patch), with local Doc
 model call goes through Token Factory.
 
 ## Demo
-- **Hook (10 s):** "In 12 of 13 audited SWE environments the upstream fix sits in git history (a lower bound, not a random
-  sample). We told Nemotron Super to cheat, and on one task it ran git show on the fix." Lead with the deterministic
+- **Hook (10 s):** "In 12 of 13 audited environments, every counted line the gold patch adds also appears in a future commit in the task's .git. This is line overlap, not proof the whole fix can be retrieved; for 2 of the 12 (348, toil-4805) it is one line. After strip-future-git, the task repo has no future commits, and the gold and empty gates held in 11 of those 12. Sample: the 18 lowest-scoring tasks, 5 excluded as env-broken. Not a prevalence estimate. We told Nemotron Super to cheat, and on one task it ran git show on the fix." Lead with the deterministic
   audit (docs/results.md, Exposure audit), then the attacker finding. Attacker headline: 1 of 9 confirmed: found, closed, certified (cyclonedx-348); crypto-116 is an
   unconfirmed lead (classifier false positive suspected, T53). Never say "2 of 9 exploited". The 1 of 9 is a manually assessed finding with unequal follow-up, and the use of the fix is inferred from command order. Say that 348 and 116 got
   repeated targeted reruns, that recon was on, and "against this attacker". Evidence: docs/results.md, Causal check;
@@ -61,7 +60,7 @@ tool calls and sandbox output on screen.
 Planned use: the network-fetch attack. The attacker searches for the upstream fix; if it finds and applies it, that
 is a network-on hole, and the patch is network off. Whether Tavily changes outcomes is a hypothesis, not shown. One real runtime call is logged (2026-10-24): a harness recon search before the attacker's first step, labelled as
 such in the trace and certificate. The attacker made 0 `web_search` calls of its own, so claim the runtime call and do
-not claim that the attacker used Tavily. On 2026-10-24 the Tavily usage endpoint showed plan usage 1 of 1000 and 1 search: the dashboard shows 1 search credit used, matching the one harness search. No other Tavily use.
+not claim that the attacker used Tavily. On 2026-10-24 the Tavily usage endpoint showed plan usage 1 of 1000 and 1 search: the dashboard shows 1 search credit used, matching the one harness search. No other Tavily use. Say exactly: Tavily supplied one harness-initiated search; the attacker made no search calls; no effect on an outcome is shown.
 
 ## Ways this loses, and the answer
 1. **Small or fake-looking numbers.** Report n, raw counts and intervals; show a real hack transcript.
