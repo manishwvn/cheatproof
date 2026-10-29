@@ -233,6 +233,17 @@ def test_the_committed_certificates_give_one_confirmed_hole_and_one_lead():
     assert without["confirmed_holes"] == 0 and without["unconfirmed_leads"] == 2
 
 
+def test_replay_after_labels_do_not_change_committed_population_summaries():
+    certs = committed_certs()
+    changed = copy.deepcopy(certs)
+    for cert in changed:
+        after = cert["harden"]["after"]
+        if after and isinstance(after.get("attack"), dict):
+            after["attack"]["recon"] = "exposure-replay"
+    manifest = confirm.load_manifest(MANIFEST)
+    assert confirm.summarize(certs, manifest) == confirm.summarize(changed, manifest)
+
+
 def test_a_lead_is_not_counted_as_hackable_in_the_confirmed_rates():
     certs = [cert_for(fixed_report("owner__repo-1")), cert_for(still_report("owner__repo-3"))]
     summary = confirm.summarize(certs)

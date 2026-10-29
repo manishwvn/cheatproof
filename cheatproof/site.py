@@ -435,7 +435,7 @@ def _is_runs(value: Any) -> bool:
     return isinstance(value, list) and all(
         isinstance(row, dict)
         and isinstance(row.get("instance_id"), str)
-        and row.get("recon") in ("exposure", None)
+        and row.get("recon") in ("exposure", "exposure-replay", None)
         and ("recon_types" not in row or _is_str_list(row["recon_types"]))
         and (row.get("harness_search") is None or isinstance(row["harness_search"], dict))  # T52, optional
         for row in value
@@ -489,7 +489,7 @@ def _check_batch(data: Any) -> None:
             if key in data
         },
         # T47: recon is the batch setting, "exposure" or null. runs holds one object per run (the writer's rows).
-        **({"recon": data["recon"] in ("exposure", None)} if "recon" in data else {}),
+        **({"recon": data["recon"] in ("exposure", "exposure-replay", None)} if "recon" in data else {}),
         **({"runs": _is_runs(data["runs"])} if "runs" in data else {}),
     }
     wrong = sorted(key for key, ok in types_ok.items() if not ok)
@@ -1691,7 +1691,17 @@ def _before_after_section(
     before_recon, after_recon = before_attack.get("recon") or "none", after_attack.get("recon") or "none"
     before_steps, after_steps = before_attack.get("steps"), after_attack.get("steps")
     comparison_note = ""
-    if (before_recon, before_steps) != (after_recon, after_steps):
+    replay_same = before_recon == "exposure" and after_recon == "exposure-replay"
+    if replay_same:
+        if before_steps != after_steps:
+            text = (
+                "Same recon text given before and after: the after-hardening attacker was shown the BEFORE-hardening "
+                f"exposure scan, now stale. Step counts differ ({_value(before_steps)} before, "
+                f"{_value(after_steps)} after): attacks are not deterministic, so one re-attack does not isolate "
+                "the effect of the patch."
+            )
+            comparison_note = f'<p class="banner" role="note">{_cell(text)}</p>'
+    elif (before_recon, before_steps) != (after_recon, after_steps):
         shown = "was shown" if before_recon == "exposure" else "was not shown"
         after_shown = "was" if after_recon == "exposure" else "was not"
         retried = _attempted_again(before_holes, after)
@@ -1956,7 +1966,12 @@ def _round_block(label: str, rnd: Any, diff: str | None) -> str:
             ("Stop reason", attack.get("stop_reason")),
             ("Submitted", attack.get("submitted")),
             ("Auto-submitted by the harness", attack.get("auto_submitted", "not recorded")),
-            ("Recon", attack.get("recon") or "none"),
+            (
+                "Recon",
+                "exposure-replay: the attacker was shown the BEFORE-hardening exposure scan, now stale"
+                if attack.get("recon") == "exposure-replay"
+                else attack.get("recon") or "none",
+            ),
             ("Recon finding types", attack.get("recon_types") or "none"),
             ("Outcome", attack.get("outcome") or "none"),
             ("Steps", attack.get("steps")),

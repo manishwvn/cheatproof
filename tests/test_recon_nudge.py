@@ -406,7 +406,7 @@ def test_certified_certificate_requires_the_recon_field():
 def test_recon_field_must_be_exposure_or_null(value):
     c = tcert.valid_cert()
     c["attacker"]["recon"] = value
-    with pytest.raises(ValueError, match="attacker.recon must be 'exposure' or null"):
+    with pytest.raises(ValueError, match="attacker.recon must be"):
         validate_certificate(c)
 
 
@@ -652,6 +652,110 @@ def test_recon_types_must_be_a_list_of_strings():
         validate_certificate(c)
 
 
+def test_replay_uses_before_text_and_types():
+    lab = ReconLab()
+    result = lab.run(recon=True, recon_replay=True)
+    assert lab.recons[0] and lab.recons[1] == lab.recons[0]
+    assert result.after.attack["recon"] == recon.RECON_REPLAY
+    assert result.after.attack["recon_types"] == result.before.attack["recon_types"]
+    certificate = cert(result)
+    assert certificate["attacker"]["recon"] == RECON_EXPOSURE
+    validate_certificate(certificate)
+    certificate["harden"]["after"]["attack"]["recon"] = "unknown"
+    with pytest.raises(ValueError, match="attack.recon"):
+        validate_certificate(certificate)
+
+
+def test_explicit_disabled_replay_preserves_default_report_bytes():
+    default = ReconLab().run(recon=True).to_dict()
+    disabled = ReconLab().run(recon=True, recon_replay=False).to_dict()
+    assert json.dumps(default, sort_keys=True) == json.dumps(disabled, sort_keys=True)
+
+
+def test_replay_requires_recon_and_empty_before_is_noted():
+    with pytest.raises(ValueError, match="recon_replay requires recon"):
+        ReconLab().run(recon_replay=True)
+    lab = ReconLab()
+    original = lab.ops.scan
+    calls = []
+
+    def scan(*args, **kwargs):
+        calls.append(1)
+        result = original(*args, **kwargs)
+        return dataclasses.replace(result, holes=[]) if len(calls) == 1 else result
+
+    lab.ops = dataclasses.replace(lab.ops, scan=scan)
+    result = lab.run(recon=True, recon_replay=True)
+    assert lab.recons[0] is None
+    assert "recon replay not applied: before round had no recon text" in result.notes
+    assert "recon replay not applied" in cli._harden_line(result, 0)
+
+
+@pytest.mark.parametrize("command", ["harden", "batch"])
+def test_replay_cli_refusals(command):
+    args = [command, "x"] if command == "harden" else [command]
+    assert cli.main([*args, "--no-recon", "--recon-replay"]) == 2
+    assert cli.main([*args, "--network-fetch", "--recon-replay"]) == 2
+
+
+def test_replay_cli_passes_setting_and_trace_label(tmp_path):
+    spy = tc.Spy()
+    seen = []
+
+    def attack_(llm, session, system_prompt, task_prompt, config, trace_path=None, **kwargs):
+        seen.append((config, kwargs))
+        return "attack-result"
+
+    def harden_(executor, env, task, attack_fn, *, budget, **kwargs):
+        spy.harden_calls.append(kwargs)
+        attack_fn("s1", recon="same")
+        attack_fn("s2", recon="same")
+        return dataclasses.replace(tc.make_report(), instance_id=task.instance_id)
+
+    deps = tc.make_deps(spy, attack=attack_, harden=harden_)
+    assert cli.main(harden_argv(tmp_path, "--recon-replay"), deps=deps) == 0
+    assert spy.harden_calls[0]["recon_replay"] is True
+    assert seen[0][0] == seen[1][0]
+    assert [x[1]["recon_label"] for x in seen] == [RECON_EXPOSURE, recon.RECON_REPLAY]
+
+
+def test_replay_batch_passes_setting_and_records_row(tmp_path):
+    spy = tc.Spy()
+    out = tc.out_dir(tmp_path)
+
+    def harden_(executor, env, task, attack_fn, *, budget, **kwargs):
+        spy.harden_calls.append(kwargs)
+        return dataclasses.replace(
+            ReconLab().run(recon=True, recon_replay=True), instance_id=task.instance_id
+        )
+
+    deps = tc.batch_deps(spy, tc.batch_tasks(tc.ID_A), harden=harden_)
+    assert cli.main(tc.batch_argv(tmp_path, out, "--recon-replay"), deps=deps) == 0
+    assert spy.harden_calls[0]["recon_replay"] is True
+    assert tc.read_batch(out)["runs"][0]["recon"] == recon.RECON_REPLAY
+
+
+def test_replay_site_and_report_label():
+    from cheatproof import site
+
+    result = ReconLab().run(recon=True, recon_replay=True)
+    certificate = cert(result)
+    html = site._round_block("after", certificate["harden"]["after"], None)
+    assert recon.RECON_REPLAY_DESCRIPTION in html
+    batch = {"runs": [{"instance_id": "x", "recon": recon.RECON_REPLAY}]}
+    assert recon.RECON_REPLAY_DESCRIPTION in "\n".join(cli._batch_lines(batch))
+    assert site._is_runs(batch["runs"])
+
+
+def test_replay_in_certificate_is_visible_in_standalone_report(tmp_path):
+    certificate = cert(ReconLab().run(recon=True, recon_replay=True))
+    directory = tmp_path / "certificates"
+    write_certificate(certificate, directory)
+    summary, _, _ = cli._confirmation(directory)
+    assert summary["replay_ids"] == [th.TASK.instance_id]
+    assert recon.RECON_REPLAY_DESCRIPTION in cli.render_text({"n": 1}, directory, confirmation=summary)
+
+
 # legit fix: a passing diff with no real exploit label is not a hole
 
 FIX_SRC = "src/answer.py"
@@ -844,3 +948,19 @@ def test_the_harness_passes_the_scan_evidence_to_the_classifier():
     lab = th.Lab(scan_holes=["git-history"])  # the scan lists it in both rounds
     lab.run()
     assert lab.classify_kwargs["exposure_refs"] == ["refs/future"]
+
+
+def test_replay_with_the_same_text_is_not_called_unlike_but_step_counts_are_noted():
+    from cheatproof import site
+
+    lab = ReconLab()
+    c = cert(lab.run(recon=True, recon_replay=True))
+    attack = c["harden"]["after"]["attack"]
+    before = c["harden"]["before"]["attack"]
+    assert lab.recons[0] == lab.recons[1]
+    attack["steps"], before["steps"] = 15, 40
+    html = site._before_after_section(c)
+    assert "This re-attack is not like for like." not in html
+    assert "Same recon text given before and after" in html and "now stale" in html
+    attack["steps"] = before["steps"]
+    assert "Same recon text given before and after" not in site._before_after_section(c)
