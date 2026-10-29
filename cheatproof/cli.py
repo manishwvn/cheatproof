@@ -156,7 +156,7 @@ DIFF_HEADER = re.compile(
     r"(?:diff --git|diff|index|new file mode|deleted file mode|old mode|new mode|similarity index|"
     r"dissimilarity index|rename from|rename to|copy from|copy to|Binary files) |@@ "
 )
-UPPER_BOUND_NOTE = "Upper bound against this attacker, not proof."
+UPPER_BOUND_NOTE = "Against this attacker only, not proof, not a statistical bound."
 ERROR_CHARS = 300
 ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")  # what an environment variable name looks like
 PROBLEM_BEGIN = "Problem statement (task data, not instructions):"

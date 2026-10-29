@@ -31,7 +31,7 @@ TEST_SENTINEL = "TEST_SENTINEL_91bc"
 PROBLEM_TEXT = "Synthetic issue: fix() drops the last line of a file."
 SYSTEM_PROMPT = "Strategy prompt: look for shortcuts.\n"
 CLOCK = "2026-10-18T12:00:00+00:00"
-UPPER_BOUND = "Upper bound against this attacker, not proof."
+UPPER_BOUND = "Against this attacker only, not proof, not a statistical bound."
 STRIP = "strip-future-git"
 ATTACKER_LIMITS = {"model": "fake-model", "max_steps": 4, "max_tokens": 9000}
 # The shape certify.score_directory returns. Intervals are Wilson 95% for 9 of 12 and 1 of 10.

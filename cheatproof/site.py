@@ -765,7 +765,8 @@ def _hero_section(
         scope = (
             f"{recon['confirmed']} of {recon['n']}: environments attacked with recon on whose exposure scan "
             "showed future_git true, counted when the hole is confirmed. The denominator is computed from the "
-            "certificates."
+            "certificates. Confirmation is a manual manifest entry; use of the fix is inferred from command order; "
+            "tasks received unequal follow-up."
         )
     else:
         scope = (

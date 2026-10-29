@@ -125,8 +125,9 @@ SOURCE_SUFFIXES = (
     ".rb",
 )
 LOWER_BOUND_NOTE = (
-    "Lower bound: a fix that was reformatted, renamed or moved, one only a merge commit carries, or one kept only in "
-    "dangling objects is missed"
+    "Lower bound on this detector: a fix that was reformatted, renamed or moved, one only a merge commit carries, or "
+    "one kept only in dangling objects is missed. A line-overlap signal on a non-random sample, not proof that a complete "
+    "fix commit was retrievable and not a prevalence estimate"
 )
 SCOPE_NOTE = "Closure covers the task's workdir repository only: submodules, .git/modules and other clones are not checked"
 FROM_CERTIFICATES = "from attack certificates (not an audit)"
