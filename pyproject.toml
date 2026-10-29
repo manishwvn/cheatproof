@@ -24,8 +24,6 @@ pythonpath = ["."]
 
 [tool.ruff]
 line-length = 110
-# Wake and progress scripts must stay Python 3.9 compatible (system python3 runs them).
-extend-exclude = ["docs/autopilot"]
 
 [build-system]
 requires = ["hatchling"]

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 MAX_CHUNK = 10  # the most tasks one batch call may run
 DEFAULT_CHUNK = 3  # the first paid run goes in chunks of at most 3
-# Ledger-measured averages (docs/autopilot/HANDOFF.md): a hardened task costs about this much in trial credit, and
+# Ledger-measured averages (October 2026 runs): a hardened task costs about this much in trial credit, and
 # about this much in the Sandboxes counter (an estimate: Sandboxes are not billed). The collect-only preflight adds one
 # more sandbox start per task; its share is an estimate too.
 TOKEN_COST_PER_TASK = 0.056

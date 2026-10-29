@@ -164,7 +164,7 @@ What this means:
 - Certified (k=1) = one completed attack failed under the recorded conditions, with exposure removed, gold pass and empty fail checked by code. This describes hardened 348; the three legacy files lack exposure removal and hardened re-attacks. It is not a security bound.
 - 1 of 9 is a count from repeated runs on one task, not a rate.
 
-T56 follow-ups (queued at that time; T56 was later implemented, see `docs/autopilot/QUEUE.md`): the legit_fix verdict for dangling-commit copies, `core.warnAmbiguousRefs=false` in the exposure commands, and a bounded retry on HTTP 503 through the budget.
+T56 follow-ups (queued at that time; T56 was later implemented): the legit_fix verdict for dangling-commit copies, `core.warnAmbiguousRefs=false` in the exposure commands, and a bounded retry on HTTP 503 through the budget.
 
 ## Replication of the hero (interim, 2026-10-24; superseded by the T55 replication above)
 
@@ -403,7 +403,7 @@ With `SANDBOX_NETWORK_TRUSTED=1` the Sandboxes network is not cut (the platform 
 
 ## Initial batch: cost (HISTORICAL, as of 2026-10-22)
 
-Read from `~/.rewardseal-autopilot/ledger.json` (git-ignored live ledger, not committed). The halt shown here was in
+Read from the local spend ledger (git-ignored, not committed). The halt shown here was in
 effect at the end of the initial batch. Batch 3 chunk 1 ran after it.
 
 | Field | Before | After |

@@ -260,4 +260,4 @@ post-patch result is ambiguous, stays not certified.
   `patches.py`, `harden.py`, `certify.py`, `site.py`, `keep.py`, `budget.py`, `llm.py`, `cli.py`.
 - `tests/`: pytest, fakes only. `results/`: committed certificates, sanitized diffs, `batch.json`, `combined.txt`.
 - `docs/results.md`: results. `docs/adr/`: spend cap and execution model. `docs/feedback.md`: feedback for Nebius and
-  NVIDIA. `docs/prize-fit.md`, `docs/pitches.md`: hackathon rules summary and pitch.
+  NVIDIA. `docs/pitches.md`: pitch text.
