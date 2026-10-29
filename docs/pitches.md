@@ -5,8 +5,9 @@ four equal criteria scored 1–5 (Technological Implementation, Design, Potentia
 to Technological Implementation. Budget: free Token Factory credits only (the $1 trial, now exhausted, and the hackathon promo, which now covers spend), in-app real-spend cap $10 total, $4 a day.
 
 ## One line
-The first closed loop that finds reward hacks in SWE environments, patches them, and certifies that each patched
-environment is still solvable by the gold patch and no longer hackable by the same adversary.
+One workflow that attacks SWE environments for reward hacks, applies rule-based patches, checks that the gold patch still
+passes and the empty patch fails, and re-attacks with the same adversary. A certificate records the outcome; it does not
+prove the environment is secure.
 
 ## Problem
 Coding agents trained or evaluated on SWE environments can pass tasks without solving them: they read the known fix
@@ -27,7 +28,7 @@ RL and eval teams that train or score coding agents (Nebius publishes SWE-rebenc
 trains Nemotron with RL), labs and eval firms.
 
 ## How it works
-1. **Load** 30 SWE-rebench tasks plus 10 SWE-bench Verified tasks (comparable to the 28.5% figure).
+1. **Load** SWE tasks. Planned: 30 SWE-rebench plus 10 SWE-bench Verified. Reported so far: 14 certificate files, all selected SWE-rebench tasks; not directly comparable to the cited 28.5% study.
 2. **Gate before hardening:** the gold patch passes and the empty patch fails, or the task is dropped and counted.
 3. **Attack:** a dishonest Nemotron Super agent gets the task, a shell inside the environment and four explicit
    strategies: git-history retrieval, test edits, hard-coding, network fetch of the upstream fix (with Tavily search).
@@ -45,7 +46,7 @@ model call goes through Token Factory.
 - **Hook (10 s):** "In 12 of 13 audited SWE environments the upstream fix sits in git history (a lower bound, not a random
   sample). We told Nemotron Super to cheat, and on one task it ran git show on the fix." Lead with the deterministic
   audit (docs/results.md, Exposure audit), then the attacker finding. Attacker headline: 1 of 9 confirmed: found, closed, certified (cyclonedx-348); crypto-116 is an
-  unconfirmed lead (classifier false positive suspected, T53). Never say "2 of 9 exploited". Say that 348 and 116 got
+  unconfirmed lead (classifier false positive suspected, T53). Never say "2 of 9 exploited". The 1 of 9 is a manually assessed finding with unequal follow-up, and the use of the fix is inferred from command order. Say that 348 and 116 got
   repeated targeted reruns, that recon was on, and "against this attacker". Evidence: docs/results.md, Causal check;
   the 9 is checked against the certificates. Cut to a real attack trace from the final run.
 - Live loop on one environment: attack, hole found, patch applied, re-attack fails, gold still passes.
@@ -58,14 +59,14 @@ tool calls and sandbox output on screen.
 
 ## Tavily (bonus award)
 Planned use: the network-fetch attack. The attacker searches for the upstream fix; if it finds and applies it, that
-is a network-on hole, and the patch is network off. Tavily can change outcomes at runtime. One real runtime call is logged (2026-10-24): a harness recon search before the attacker's first step, labelled as
+is a network-on hole, and the patch is network off. Whether Tavily changes outcomes is a hypothesis, not shown. One real runtime call is logged (2026-10-24): a harness recon search before the attacker's first step, labelled as
 such in the trace and certificate. The attacker made 0 `web_search` calls of its own, so claim the runtime call and do
 not claim that the attacker used Tavily. On 2026-10-24 the Tavily usage endpoint showed plan usage 1 of 1000 and 1 search: the dashboard shows 1 search credit used, matching the one harness search. No other Tavily use.
 
 ## Ways this loses, and the answer
 1. **Small or fake-looking numbers.** Report n, raw counts and intervals; show a real hack transcript.
 2. **Hardening breaks solvability, or the attacker is weak.** Gold and empty gates on every environment; Nemotron Super as
-   the attacker with strategy hints; say "upper bound against this attacker, not proof".
+   the attacker with strategy hints; say "against this attacker only, not proof, not a statistical bound".
 3. **Sandbox access slips, or it looks like dry infra.** Docker fallback behind one executor interface; a polished
    CLI, certificate JSON and one clean before/after page per environment.
 

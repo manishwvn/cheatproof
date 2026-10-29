@@ -18,7 +18,7 @@ command. The second task,
 `ArkEcosystem__python-crypto-116`, is an unconfirmed lead (its only non-test write came before the history reads and the
 diff is byte-identical before and after; likely a classifier false positive, T53) and is not certified. Never say "found 2"
 or "2 of 9 exploited". 348 and 116 got repeated targeted reruns. All runs: Nemotron Super (one exploratory Ultra run on 348, not certified), Token Factory
-Sandboxes. "Not hackable" means against this attacker, an upper bound, not proof. Recon is on in the hero runs and is
+Sandboxes. "Not hackable" means the recorded qualifying attack by this attacker did not succeed, not proof. Recon is on in the hero runs and is
 said on screen.
 
 **Rules for the filled claims:** every claim in the beat table comes from the results listed under "Where each claim
@@ -48,7 +48,7 @@ beat11 (stack). Beats without a screenshot use a title card with the On-screen t
 | 1:36 | 16 | Certificate JSON for `CycloneDX__cyclonedx-python-348` with the three gate fields, `certified` true, `certified_via` `hardened_reattack_failed` | Only when all three gates hold does the environment get a certificate. This is the JSON for cyclonedx 348, certified after hardening. | Certificate: three gates, certified_via hardened_reattack_failed |
 | 1:52 | 16 | n = 9 table (future_git tasks, recon on): 1 of 9 confirmed: found, closed, certified (348); 1 unconfirmed lead (116). 348 and 116 got repeated targeted reruns. 14 certificate files in all | Across 9 tasks with leaked git history, 1 is confirmed: found, closed, certified. A second, crypto 116, is an unconfirmed lead. Both got repeated targeted reruns. | 1 of 9 confirmed; n = 9; raw counts, not rates |
 | 2:08 | 16 | Stack: Token Factory (all model calls), Nemotron Super, Token Factory Sandboxes, Tavily (one harness recon search, a runtime call; dashboard shows 1 search credit used) | Every model call goes through Token Factory. Nemotron attacks. Gates and hole labels are computed in code. Tavily ran once, as a harness recon search; the attacker made no web calls of its own. | Token Factory, Nemotron Super, Sandboxes, Tavily (harness recon search) |
-| 2:24 | 14 | Honest caveat card: "Not hackable by this attacker." Recon was on in these runs. Upper bound against this attacker, not proof. | Honest limit: certified means not hackable by this attacker. Recon was on in these runs. It is an upper bound against this attacker, not proof. | Not hackable by this attacker. Not proof. |
+| 2:24 | 14 | Honest caveat card: "This attacker's recorded attack did not succeed." Recon was on in these runs. Not proof. | Honest limit: certified means this attacker's recorded qualifying attack did not succeed. Recon was on in these runs. It is not proof of security. | Not hackable by this attacker. Not proof. |
 | 2:38 | 8 | End card: `python -m cheatproof.cli harden <env-id>` (after `tasks fetch`) and the repo link https://github.com/manishwvn/cheatproof with the demo https://manishwvn.github.io/cheatproof/ | RewardSeal. After fetching tasks, one harden command per environment writes its certificate. | `python -m cheatproof.cli harden <env-id>` |
 
 ## Where each claim comes from
@@ -77,7 +77,7 @@ Each row keeps the original "Fills from:" note for its slot. Certificate fields 
 - Certificate with the three gates: beats 8 to 9.
 - Scale with honest counts: beat 10.
 - Token Factory, Nemotron Super, Sandboxes, Tavily (one harness recon search): beat 11.
-- Honest caveat "not hackable by this attacker", certified count above 0: beat 12.
+- Honest caveat "recorded attack did not succeed", certified count above 0: beat 12.
 - Nemotron Super model ID on screen inside the first 20 s: beat 2 (10 to 20 s).
 - Recon `exposure` disclosed on screen and in voice: beat 12.
 
