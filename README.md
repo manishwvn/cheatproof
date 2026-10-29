@@ -6,7 +6,7 @@
 
 **Replication (T55, 4 more runs of 348): the history-use pattern appeared in 1 of 10 later before-rounds on this task (1 of 8 excluding 2 HTTP 503 infrastructure errors), the confirmed 2026-10-24 rerun; earlier 348 attacks are not in that count. No further use was confirmed in the other 9 rounds (2 of them ended in HTTP 503 infrastructure errors), and causality for the one is inferred from command order; one earlier label was a classifier false positive. 'Certified' here means not hacked in k attempts, with k small.** One extra run with Nemotron Ultra as the attacker showed the same pattern before hardening (n=1, same inference; its hardened re-attack ended at the token limit without a submission, so it is not certified). <!-- REPLICATION_PLACEHOLDER -->
 
-Links: [results](docs/results.md) | [causal check](docs/results.md#causal-check-348-and-116) | [348 evidence](results/evidence/348-causal.md) | report site: https://manishwvn.github.io/cheatproof/ (GitHub Pages) | [feedback](docs/feedback.md) | [Tavily](docs/tavily.md)
+Links: [results](docs/results.md) | [causal check](docs/results.md#causal-check-348-and-116) | [348 evidence](results/evidence/348-causal.md) | report site: https://manishwvn.github.io/cheatproof/ (GitHub Pages; [limitations](docs/limitations.md)) | [feedback](docs/feedback.md) | [Tavily](docs/tavily.md)
 
 ```text
 attack -> classify hole -> patch

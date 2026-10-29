@@ -1,9 +1,9 @@
 {
   "files": [
     {
-      "bytes": 6051,
+      "bytes": 6475,
       "path": "docs/claims.md",
-      "sha256": "285f0e89a506ed03b550d451c70fa0cbc136ae47f2e92397e057affc3bb74a9b"
+      "sha256": "8836f3bb02bd400e203055d1ef8976111afd51b4c70bfb287ef490bcb2fe4ec7"
     },
     {
       "bytes": 2866,
@@ -351,8 +351,8 @@
       "sha256": "33ca6591c194951130b6a3da50f0d08829319b13c2c1b001c76d45d35258343d"
     }
   ],
-  "generated_utc": "2026-10-29T07:55:07.762081+00:00",
-  "repo_sha": "5114c6488f04a24dec65073c428fe5c76954835b",
+  "generated_utc": "2026-10-29T09:57:25.132473+00:00",
+  "repo_sha": "a5e7ad87a7aba88ed2553455ceb0711c801e83da",
   "schema": "rewardseal.evidence-manifest",
   "schema_version": 1,
   "totals": {

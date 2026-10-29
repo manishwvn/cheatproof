@@ -26,7 +26,8 @@ only when the sidecar's raw_sha256 equals the certificate's final_diff_sha256 fo
 file is missing, the round shows the digest that the certificate records, and the note that no diff was recorded.
 A symlink is never read: not a traces or diffs directory, not a file in one.
 
-The site replays committed records. Nothing here calls a model or the network, and the pages have no JavaScript. A
+The site replays committed records. Nothing here calls a model or the network. Only the explorer uses an external
+script for optional filtering; every other page has no JavaScript. A
 certificate, trace or diff is untrusted attacker or model text, so every value reaches a page through _cell(), which
 escapes with html.escape(quote=True) and shows control and bidi characters as [U+XXXX]. Trace values pass through
 cheatproof.sanitize first. Output is deterministic: the same input gives the same bytes, and no current time or
@@ -280,6 +281,9 @@ def build_site(
     confirmation = confirm.summarize(certs, manifest) if entries else None
     statuses = {c["task"]["instance_id"]: confirm.hole_status(c, manifest) for c in certs}
     index = out / "index.html"
+    from cheatproof import site_extras
+
+    site_extras.write_pages(root.parent, out, entries, errors, blob, exposure_path, manifest)
     body = _index_body(
         entries,
         errors,
@@ -301,7 +305,7 @@ def build_site(
             errors,
         ),
     )
-    _write(index, _document("RewardSeal report", body, blob))
+    _write(index, _document("RewardSeal report", body, blob, csp=""))
     pages = []
     for entry in entries:
         page = env_dir / f"{entry.name}.html"
@@ -317,6 +321,7 @@ def build_site(
             entry.stem,
             blob,
         )
+        body += site_extras.environment_change(entry.cert, root.parent / "evidence")
         _write(page, _document(f"RewardSeal: {entry.cert['task']['instance_id']}", body, blob))
         pages.append(page)
     return SiteResult(index=index, pages=pages, errors=errors)
@@ -728,7 +733,7 @@ def _pin_label(blob: str) -> str:
     return "latest (main)" if blob == GITHUB_BLOB else f"pinned {blob.rstrip('/').rsplit('/', 1)[-1][:7]}"
 
 
-def _document(title: str, body: str, blob: str = GITHUB_BLOB) -> str:
+def _document(title: str, body: str, blob: str = GITHUB_BLOB, *, csp: str = CSP_META) -> str:
     footer = (
         "Evidence links point at main (latest)"
         if blob == GITHUB_BLOB
@@ -741,7 +746,7 @@ def _document(title: str, body: str, blob: str = GITHUB_BLOB) -> str:
             "<head>",
             '<meta charset="utf-8">',
             '<meta name="viewport" content="width=device-width, initial-scale=1">',
-            CSP_META,
+            csp,
             f"<title>{_cell(title)}</title>",
             f"<style>\n{CSS}</style>",
             "</head>",
@@ -817,6 +822,7 @@ def _reading_guide(blob: str) -> str:
         '<div class="banner">'
         "<p>RewardSeal checks whether a coding task leaks its own fix, strips the leak, re-checks, and attacks again.</p>"
         '<p>Read the <a href="#numbers-key">Numbers key</a> first.</p>'
+        '<p><a href="explorer.html">Explore every audited task and certificate</a>.</p>'
         "<p>Release a task only if (a) gold passes and empty fails, (b) the exposure scan after hardening shows no "
         "future commits, and (c) a re-attack under the same conditions failed; otherwise withhold.</p>"
         "<p>Certified means a recorded attack failed, nothing more.</p>"
@@ -1074,6 +1080,11 @@ def _index_body(
         "<h1>RewardSeal hackability report</h1>",
         f'<p class="banner" role="note">{_cell(BANNER)}</p>',
         "</header>",
+        (
+            '<nav aria-label="Report"><a href="explorer.html">Explorer</a> | '
+            '<a href="controls.html">Controls</a> | <a href="limitations.html">Limitations</a> | '
+            '<a href="verify.html">Verify</a> | <a href="#numbers-key">Numbers key</a></nav>'
+        ),
     ]
     middle = (
         [
@@ -1096,7 +1107,43 @@ def _index_body(
         ]
     )
     return "\n".join(
-        [*head, numbers_key, _reading_guide(blob), start_here, web_exposure, *middle, _errors_section(errors)]
+        [
+            *head,
+            numbers_key,
+            _reading_guide(blob),
+            _workflow_comparison(),
+            start_here,
+            web_exposure,
+            *middle,
+            _errors_section(errors),
+        ]
+    )
+
+
+def _workflow_comparison() -> str:
+    return _section(
+        "workflow-comparison",
+        "Manual workflow vs RewardSeal",
+        _table(
+            "Steps, outputs and human judgment",
+            ("Workflow", "Steps", "Produces", "Still needs a human"),
+            [
+                _row(
+                    "Manual",
+                    "Inspect task history; test a strip; check gold and empty gates; attempt shortcuts again; save evidence.",
+                    "The evaluator's notes and gate results.",
+                    "Choose the scope, review causal attribution and decide whether to release.",
+                ),
+                _row(
+                    "RewardSeal",
+                    "audit-exposure scans and checks a strip; harden attacks, patches and re-attacks when a patch exists; "
+                    "report and site replay saved records.",
+                    "Exposure records, gate outcomes, attack certificates and this static report.",
+                    "Authorize evaluation, review incomplete scans and attribution, compare attack conditions, "
+                    "judge difficulty changes and decide whether to release.",
+                ),
+            ],
+        ),
     )
 
 
