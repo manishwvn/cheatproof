@@ -145,7 +145,7 @@ def test_numbers_key_names_every_population_and_explains_replication(records):
     assert "counts only runs whose before attack finished and was judged" in replication
     assert "the 4 later runs were unfinished or inconclusive, so it reads 0/3" in replication
     assert (
-        "across all 9 committed Super before-rounds through T55 one showed the pattern (docs/results.md)"
+        "across all 9 committed Super before-rounds in the recorded set one showed the pattern (docs/results.md)"
         in replication
     )
     assert "1 of 7 excluding 2 HTTP 503 errors" in numbers[6][1]

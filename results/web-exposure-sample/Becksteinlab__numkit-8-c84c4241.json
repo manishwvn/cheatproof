@@ -1,0 +1,161 @@
+{
+  "instance_id": "Becksteinlab__numkit-8",
+  "n": 1,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "Becksteinlab/numkit",
+      "results": [
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": true,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://github.com/Becksteinlab/numkit"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://anaconda.org/conda-forge/numkit"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": true,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://github.com/Becksteinlab/numkit/issues"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://pypi.org/project/numkit"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://becksteinlab.physics.asu.edu/aboutus/149/video-introduction-to-work-in-the-beckstein-lab"
+        }
+      ],
+      "searched_at": "2026-10-29T21:31:58.424280+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/Becksteinlab/numkit/pull/8",
+      "results": [
+        {
+          "chars": 282258,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "492d7ccb07b36846ca2f40c61c8f94f9a76f240aefd86f4cade643e769a24cf4",
+          "trivial": true,
+          "url": "https://github.com/fire17/awesome-stars"
+        },
+        {
+          "chars": 14584,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "ebd8ba5a80982ac31305d873fd0b1ae47379905d76fdcabfcdd98185e2436ffd",
+          "trivial": true,
+          "url": "https://www.youtube.com/watch?v=PPoC30dT12I"
+        },
+        {
+          "chars": 10438,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "704e57d0ccaa5b897cad7ebb0f5243b80fa5122f39e3321e42f9ec79a52700e5",
+          "trivial": true,
+          "url": "https://rocketreach.co/github-email-format_b5d3bf8bf42e46c1"
+        },
+        {
+          "chars": 9690,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "f7c964a9995f728da31756cee83952e4477b2763f5fdaa69a0056413d34407ce",
+          "trivial": true,
+          "url": "https://ca.finance.yahoo.com/news/testmu-ai-announces-github-app-150000004.html"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://rocketreach.co/go-pull-it-profile_b5f64f8cf42e8da0"
+        }
+      ],
+      "searched_at": "2026-10-29T21:32:00.519125+00:00"
+    }
+  ],
+  "repo": "Becksteinlab/numkit",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

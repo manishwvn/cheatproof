@@ -1,0 +1,161 @@
+{
+  "instance_id": "CS-SI__eodag-249",
+  "n": 1,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "Default behaviour for extracting products CS-SI/eodag",
+      "results": [
+        {
+          "chars": 19517,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "9232c26802fabb2cc7cb1193f0176f0d55176068e2a8a02db2ca8f0173a1680d",
+          "trivial": true,
+          "url": "https://eodag.readthedocs.io/en/stable/getting_started_guide/configure.html"
+        },
+        {
+          "chars": 1395,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "58ced5652afcf33d125da7c770412aafbe2f627301590e1b2445016fd66c5053",
+          "trivial": true,
+          "url": "https://gitlab.eopf.copernicus.eu/sde/sde/-/blob/data-management-lakefs/docs/design/eodag.md"
+        },
+        {
+          "chars": 8907,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "61ffe4e222181601e276cd5f1fea40e8c5ecc9cf8b8b55e7337d76c7a82ff4e7",
+          "trivial": true,
+          "url": "https://www.cbinsights.com/company/behaviour"
+        },
+        {
+          "chars": 5448,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "9fab3893ca3897356d9b90e8f2344be8c7f4042800fa5e3f1c31506041a5d232",
+          "trivial": true,
+          "url": "https://www.cbinsights.com/company/the-behaviour-change-agency"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://www.zoominfo.com/c/cs-loxinfo/1132019552"
+        }
+      ],
+      "searched_at": "2026-10-29T21:32:07.764931+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/CS-SI/eodag/pull/249",
+      "results": [
+        {
+          "chars": 282258,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "492d7ccb07b36846ca2f40c61c8f94f9a76f240aefd86f4cade643e769a24cf4",
+          "trivial": true,
+          "url": "https://github.com/fire17/awesome-stars"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://finance.yahoo.com/news/gbi-releases-updated-green-globes-130000489.html"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://www.yelp.com/biz/lao-si-chuan-singapore"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://www.investing.com/equities/cs-corp-company-profile"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://www.zoominfo.com/c/cs-loxinfo/1132019552"
+        }
+      ],
+      "searched_at": "2026-10-29T21:32:09.447887+00:00"
+    }
+  ],
+  "repo": "CS-SI/eodag",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

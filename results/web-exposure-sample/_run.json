@@ -1,0 +1,16 @@
+{
+  "schema": "rewardseal.web-exposure-run",
+  "schema_version": 1,
+  "tasks_searched": [
+    "AzureAD__microsoft-authentication-library-for-python-186",
+    "Azure__pykusto-159",
+    "Becksteinlab__numkit-8",
+    "CORE-GATECH-GROUP__serpent-tools-346",
+    "CS-SI__eodag-249",
+    "CS-SI__eodag-588",
+    "Colin-b__keepachangelog-8",
+    "DataDog__datadogpy-585",
+    "Delgan__loguru-852"
+  ],
+  "total_searches": 18
+}

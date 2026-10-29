@@ -24,6 +24,7 @@ def records(tmp_path):
         "exposure",
         "exposure-sample",
         "web-exposure",
+        "web-exposure-sample",
         "control",
         "replay-attempt",
         "evidence",
@@ -162,7 +163,12 @@ def test_controls_gallery_uses_correct_cases_and_record_links(records):
         ],
         "strip-not-applied": ["Becksteinlab__numkit-8", "55", "patch_not_applied"],
         "incomplete-scan": ["CS-SI__eodag-249", "Azure__azure-cli-1876", "Absence unproven"],
-        "attribution-116": ["ArkEcosystem__python-crypto-116", "PR #88", "lead", "step 31"],
+        "attribution-116": [
+            "ArkEcosystem__python-crypto-116",
+            "timing rule added after review",
+            "lead",
+            "step 31",
+        ],
         "same-recon-348": [TASK, "not exercised", "unclassified"],
         "retrieval-control": [
             "Dorthu__openapi3-75",
@@ -301,3 +307,71 @@ def test_cold_read_wording_fixes(records):
     assert "Certified is not release-approved; same-recon re-attack not exercised." in page348
     assert "Certified is not release-approved" not in page
     assert "Recorded counts, not a score" in (out / "index.html").read_text()
+
+
+def test_random_sample_web_exposure_and_refusal(records):
+    sample = [
+        json.loads(p.read_text())
+        for p in (records / "web-exposure-sample").glob("*.json")
+        if not p.name.startswith("_")
+    ]
+    out = build(records)
+    explorer = (out / "explorer.html").read_text()
+    actual = {cells[0]: cells for _, cells in rows(explorer)}
+    record = sample[0]
+    assert (
+        actual[record["instance_id"]][6]
+        == f"{max(record['q1_best_k'], record['q2_best_k'])} of {record['n']} best"
+    )
+    assert "9 tasks, 18 searches, 90 results, 0 with a counted gold line, 0 matching" in explorer
+    assert "4 of 9 tasks have a single counted gold line" in explorer
+    assert "0 of 13" in (out / "controls.html").read_text()
+    index = (out / "index.html").read_text()
+    assert "Random-sample web exposure" not in index
+    folder = records / "web-exposure-sample"
+    omitted = records / "omitted-web-sample"
+    folder.rename(omitted)
+    comparison = site.build_site(records / "certificates", records.parent / "without-sample")
+    assert comparison.errors == []
+    assert comparison.index.read_text() == index
+    assert (comparison.index.parent / "controls.html").read_text() == (out / "controls.html").read_text()
+    omitted.rename(folder)
+    (folder / "bad.json").write_text("{}")
+    result = site.build_site(records / "certificates", records.parent / "bad-site")
+    assert any(name == "web-exposure-sample" for name, _ in result.errors)
+    assert "Random-sample web exposure" not in (result.index.parent / "explorer.html").read_text()
+    bad_rows = {cells[0]: cells for _, cells in rows((result.index.parent / "explorer.html").read_text())}
+    assert bad_rows[record["instance_id"]][6] == "not searched"
+
+
+def test_index_intro_and_order(records):
+    index = (build(records) / "index.html").read_text()
+    assert (
+        "RewardSeal audits coding-agent training tasks for exposed fixes and other reward-hacking shortcuts, strips what it can, re-checks, and records one attacker&#x27;s results."
+        in index
+    )
+    assert (
+        "Built with Nebius Token Factory, NVIDIA Nemotron (nemotron-3-super-120b-a12b), Nebius Sandboxes, Tavily"
+        in index
+    )
+    assert '<a href="https://github.com/manishwvn/rewardseal">Repository</a>' in index
+    assert index.index('id="reading-guide"') < index.index('id="numbers-key"')
+
+
+def test_sample_note_counts_pr_path_numbers_exactly():
+    record = {
+        "instance_id": "owner__repo-12",
+        "n": 1,
+        "queries": [
+            {
+                "results": [
+                    {"k": 1, "url": "https://example.com/owner/repo/pull/12/files"},
+                    {"k": 0, "url": "https://example.com/owner/repo/pull/123"},
+                    {"k": 0, "url": "https://example.com/other?redirect=/pull/12"},
+                ]
+            }
+        ],
+    }
+    note = site_extras._sample_web_note([(Path("sample.json"), record)])
+    assert "1 tasks, 1 searches, 3 results, 1 with a counted gold line, 1 matching" in note
+    assert "1 of 1 tasks have a single counted gold line" in note

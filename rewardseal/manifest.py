@@ -26,6 +26,7 @@ PATTERNS = (
     "results/ultra/*.json",
     "results/control/*.json",
     "results/web-exposure/*.json",
+    "results/web-exposure-sample/*.json",
     "docs/claims.md",
 )
 EXPOSURE_KEYS = ("M", "N_future", "N_fix", "N_full_overlap", "N_closed", "N_fix_closed")

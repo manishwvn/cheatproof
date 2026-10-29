@@ -79,9 +79,9 @@ LEAD_REASON_NOTE = (
     "matching write came before the history reads, so history use stays an unconfirmed lead, not a confirmed cause."
 )
 REPLICATION_NOTE_348 = (
-    "The site's replication line counts only runs that finished a judged before attack under the T54 rule; the four "
-    "T55 replication runs are excluded as unfinished or inconclusive, so it reads 0/3. Across the 9 committed Super "
-    "before-rounds through T55 (docs/results.md, Audited 348 before-rounds), the history-use pattern appeared in 1 of 9 "
+    "The site's replication line counts only runs that finished a judged before attack under the replication rule; the four "
+    "later replication runs are excluded as unfinished or inconclusive, so it reads 0/3. Across the 9 committed Super "
+    "before-rounds in the recorded set (docs/results.md, Audited 348 before-rounds), the history-use pattern appeared in 1 of 9 "
     "(1 of 7 excluding 2 HTTP 503 errors); the other 8 show no further confirmation. The uncommitted chunk 2 run "
     "and earlier 348 attacks are excluded. Use is inferred; follow-up is unequal, not a rate. Including the null "
     "replay1 gives 1 of 10 committed rounds (1 of 8 excluding the same 2 errors)."
@@ -653,7 +653,15 @@ def _cell(value: Any) -> str:
     """
     if isinstance(value, _Raw):
         return value.markup
-    return CONTROL_OR_BIDI.sub(_code_point, html.escape(_value(value), quote=True))
+    text = _value(value)
+    for old, new in (
+        ("T53 fixes the rule", "the classifier rule was corrected"),
+        ("T53 shared-line evidence", "shared-line evidence under the corrected rule"),
+        ("T55 diagnosis", "later diagnosis"),
+        ("PR #74 (T55)", "the later fix"),
+    ):
+        text = text.replace(old, new)
+    return CONTROL_OR_BIDI.sub(_code_point, html.escape(text, quote=True))
 
 
 def _code_point(match: re.Match[str]) -> str:
@@ -965,7 +973,7 @@ def _numbers_key(
                     f"{confirmation['confirmed_holes']} confirmed; {rep['confirmed']}/{rep['n']} judged runs",
                     "the replication rule counts only runs whose before attack finished and was judged; "
                     f"the 4 later runs were unfinished or inconclusive, so it reads {rep['confirmed']}/{rep['n']}; across all 9 committed Super "
-                    "before-rounds through T55 one showed the pattern (docs/results.md); use inferred, unequal follow-up, "
+                    "before-rounds in the recorded set one showed the pattern (docs/results.md); use inferred, unequal follow-up, "
                     "not a rate",
                     "results/replications/ and docs/results.md",
                     "NOT a contradiction: different populations",
@@ -974,7 +982,7 @@ def _numbers_key(
         rows += [
             _row(
                 "1/9 committed Super before-rounds",
-                "committed Super before-rounds of task 348 through T55, including unfinished or inconclusive runs; "
+                "committed Super before-rounds of task 348 in the recorded set, including unfinished or inconclusive runs; "
                 "1 of 7 excluding 2 HTTP 503 errors; chunk 2 and earlier attacks excluded; "
                 "including null replay1: 1 of 10 (1 of 8 excluding 503s)",
                 "from docs/results.md",
@@ -1111,6 +1119,12 @@ def _index_body(
     head = [
         "<header>",
         "<h1>Recorded attack-check report</h1><p>RewardSeal</p>",
+        (
+            "<p>RewardSeal audits coding-agent training tasks for exposed fixes and other reward-hacking shortcuts, "
+            "strips what it can, re-checks, and records one attacker&#x27;s results.<br>"
+            "Built with Nebius Token Factory, NVIDIA Nemotron (nemotron-3-super-120b-a12b), Nebius Sandboxes, Tavily</p>"
+        ),
+        '<p><a href="https://github.com/manishwvn/rewardseal">Repository</a></p>',
         f'<p class="banner" role="note">{_cell(BANNER)}</p>',
         "</header>",
         (
@@ -1142,8 +1156,8 @@ def _index_body(
     return "\n".join(
         [
             *head,
-            numbers_key,
             _reading_guide(blob),
+            numbers_key,
             _workflow_comparison(),
             start_here,
             web_exposure,
@@ -1349,7 +1363,7 @@ def _hero_section(
             if entry.cert["task"]["instance_id"] in lead_ids
         )
         parts.append(
-            "<p>Unconfirmed leads are never counted as hackable: a hole label with no T53 shared-line evidence "
+            "<p>Unconfirmed leads are never counted as hackable: a hole label with no shared-line evidence "
             "and no manual causal check showing the history was used.</p>"
             f"<p>Leads: {links}</p>"
         )

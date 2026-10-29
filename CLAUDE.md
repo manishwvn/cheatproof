@@ -33,7 +33,7 @@ Entry for the Nebius x NVIDIA Global AI Hackathon, Coding & Agentic Engineering 
 - `rewardseal/`: package (budget, Token Factory client, executor, task loader, attacker, holes, patches, certificates, audit, site).
 - `tests/`: pytest, no network.
 - `scripts/`: `smoke.py` (live check, costs cents, goes through the budget), `retrieval_control.py`, `route_replay.py`, `draw_sample.py`.
-- `docs/`: results, claims, limitations, ADRs. `results/`: committed evidence and certificates.
+- `docs/`: results, claims, limitations, execution model in `docs/method.md`. `results/`: committed evidence and certificates.
 
 ## Commands
 ```bash
