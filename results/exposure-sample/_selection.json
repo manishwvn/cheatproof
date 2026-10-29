@@ -1,0 +1,21 @@
+{
+  "schema": "rewardseal.exposure-sample-selection",
+  "seed": 20261029,
+  "n": 12,
+  "pool_size": 225,
+  "rule": "cached swe-rebench tasks, minus deny-listed repos, minus the first 18 selected, sorted by instance id, random.Random(seed).sample",
+  "selected_ids": [
+    "AzureAD__microsoft-authentication-library-for-python-186",
+    "Azure__azure-cli-2467",
+    "Azure__pykusto-159",
+    "Becksteinlab__numkit-8",
+    "CORE-GATECH-GROUP__serpent-tools-346",
+    "CS-SI__eodag-249",
+    "CS-SI__eodag-588",
+    "Colin-b__keepachangelog-8",
+    "DataDog__datadogpy-585",
+    "DavidVujic__python-polylith-260",
+    "DavidVujic__python-polylith-76",
+    "Delgan__loguru-852"
+  ]
+}

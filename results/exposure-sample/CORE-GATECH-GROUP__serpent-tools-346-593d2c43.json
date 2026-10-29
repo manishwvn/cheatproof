@@ -1,0 +1,57 @@
+{
+  "base_commit": "09a5feab5b95f98aef4f7dc7b07edbf8e458f955",
+  "closed": true,
+  "closed_reason": null,
+  "executor": "sandbox",
+  "fix_reachable": true,
+  "fix_reachable_basis": "19 of 19 gold source lines found in future commits",
+  "future_commits_after": 0,
+  "future_commits_before": 393,
+  "future_scan": {
+    "commit_ids": [
+      "e2822da01acb",
+      "6afe64df05c2",
+      "c10fddfee858",
+      "f6ccb6b95ae3",
+      "b9cae3c27e4e",
+      "78eb7e2818de",
+      "1c2d1cd8a927",
+      "260652a974dd",
+      "190441bc955d",
+      "4350e7b16f37",
+      "c9cc94a2ab60",
+      "8b9867624964",
+      "9b59d7ba47a8",
+      "5b3653f40c69",
+      "7051b015993b",
+      "2d78e82dcd63",
+      "55fa3dfde906",
+      "7444bc3b56e8",
+      "b1fe698ba806",
+      "7dd8840eb6ba"
+    ],
+    "commits_scanned": 20,
+    "complete": true,
+    "gold_added_lines": 19,
+    "gold_lines_in_future": 19,
+    "gold_paths_touched_by_future_commits": 1,
+    "lines": 129,
+    "list_complete": true,
+    "paths": [
+      "serpentTools/parsers/results.py"
+    ]
+  },
+  "instance_id": "CORE-GATECH-GROUP__serpent-tools-346",
+  "patch": {
+    "applied": true,
+    "empty_gate_ok": true,
+    "gold_gate_ok": true,
+    "name": "strip-future-git"
+  },
+  "refs_before": 41,
+  "repo": "CORE-GATECH-GROUP/serpent-tools",
+  "sandbox_runs": 5,
+  "schema": "rewardseal.exposure-audit",
+  "schema_version": 1,
+  "timestamp": "2026-10-29T06:41:18.364556+00:00"
+}

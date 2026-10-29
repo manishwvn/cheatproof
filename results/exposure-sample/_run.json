@@ -1,0 +1,27 @@
+{
+  "excluded": {
+    "Azure__azure-cli-2467": "env_broken",
+    "DavidVujic__python-polylith-260": "env_broken",
+    "DavidVujic__python-polylith-76": "env_broken"
+  },
+  "schema": "rewardseal.exposure-audit-run",
+  "schema_version": 1,
+  "selected_ids": [
+    "AzureAD__microsoft-authentication-library-for-python-186",
+    "Azure__azure-cli-2467",
+    "Azure__pykusto-159",
+    "Becksteinlab__numkit-8",
+    "CORE-GATECH-GROUP__serpent-tools-346",
+    "CS-SI__eodag-249",
+    "CS-SI__eodag-588",
+    "Colin-b__keepachangelog-8",
+    "DataDog__datadogpy-585",
+    "DavidVujic__python-polylith-260",
+    "DavidVujic__python-polylith-76",
+    "Delgan__loguru-852"
+  ],
+  "source": [
+    "swe-rebench"
+  ],
+  "updated": "2026-10-29T07:08:01.312379+00:00"
+}
