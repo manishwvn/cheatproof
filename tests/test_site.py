@@ -229,7 +229,7 @@ def test_two_builds_give_identical_bytes(tmp_path):
     build_site(cert_dir, first, traces_dir=traces)
     build_site(cert_dir, second, traces_dir=traces)
     files = sorted(path.relative_to(first) for path in first.rglob("*") if path.is_file())
-    assert len(files) == 1 + len(NAMES) + len(MARKER_FILES)
+    assert len(files) == 5 + len(NAMES) + len(MARKER_FILES)
     for relative in files:
         assert (first / relative).read_bytes() == (second / relative).read_bytes()
     before = (first / "index.html").read_bytes()
@@ -242,7 +242,7 @@ def test_missing_certificate_directory_raises(tmp_path):
         build_site(tmp_path / "nope", tmp_path / "site")
 
 
-def test_no_script_element_anywhere_in_the_output(tmp_path):
+def test_no_script_element_outside_explorer(tmp_path):
     report = dataclasses.replace(fixed_report("owner__repo-1"), notes=(PAYLOAD,))
     cert_dir = tmp_path / "certs"
     write_certs(cert_dir, report, clean_report("owner__repo-2"))
@@ -251,9 +251,10 @@ def test_no_script_element_anywhere_in_the_output(tmp_path):
     out = tmp_path / "site"
     build_site(cert_dir, out, traces_dir=traces)
     outputs = [path for path in out.rglob("*") if path.is_file()]
-    assert len(outputs) == 3 + len(MARKER_FILES)  # the index, two pages and the two marker files
+    assert len(outputs) == 7 + len(MARKER_FILES)  # index, two env pages, four extras, marker files
     for path in outputs:
-        assert "<script" not in read(path).lower()
+        if path.name != "explorer.html":
+            assert "<script" not in read(path).lower()
 
 
 def test_index_shows_the_score_exactly_as_certify_gives_it(tmp_path):
@@ -276,7 +277,7 @@ def test_pages_have_the_csp_no_javascript_and_an_english_lang(tmp_path):
     for text in (read(result.index), read(result.pages[0])):
         assert text.startswith("<!doctype html>")
         assert '<html lang="en">' in text
-        assert CSP_META in text
+        assert (CSP_META in text) == (text != read(result.index))
         assert "<script" not in text.lower()
         assert "javascript:" not in text.lower()
 
@@ -546,7 +547,7 @@ def test_a_payload_is_escaped_wherever_it_is_shown(tmp_path, place):
     place(cert_dir)
     out = tmp_path / "site"
     build_site(cert_dir, out)
-    texts = [read(path) for path in out.rglob("*") if path.is_file()]
+    texts = [read(path) for path in out.rglob("*") if path.is_file() and path.name != "explorer.html"]
     assert texts
     for text in texts:
         assert MIXED_PAYLOAD not in text
