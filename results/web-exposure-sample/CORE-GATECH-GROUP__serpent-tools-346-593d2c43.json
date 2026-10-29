@@ -1,0 +1,161 @@
+{
+  "instance_id": "CORE-GATECH-GROUP__serpent-tools-346",
+  "n": 19,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "BUG Burnup and day values wrong for results with multiple gcu, no burnup CORE-GATECH-GROUP/serpent-tools",
+      "results": [
+        {
+          "chars": 23925,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 19,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "792fd0036fcf48afea0c32d2abc26d4639153b808715c3bf10ff13d3f9c519a1",
+          "trivial": false,
+          "url": "https://serpent-tools.readthedocs.io/en/master/examples/ResultsReader.html"
+        },
+        {
+          "chars": 20815,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 19,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "d82688a14c4ad0606a20788d27ee3a695282d86070467b6dd27de85fd9f4c2f1",
+          "trivial": false,
+          "url": "https://academy.broadcom.com/blog/valueops/burnup-burndown-charts-in-rally"
+        },
+        {
+          "chars": 25386,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 19,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "27e1abcb68e01fd04051afe4d4b5d74f215ef8efda9e924f440e05fa27c18d3a",
+          "trivial": false,
+          "url": "https://finance.yahoo.com/news/clean-core-achieves-historic-burnup-144500175.html?fr=sycsrp_catchall"
+        },
+        {
+          "chars": 3885,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 19,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "c2da4019ee9d400e02215d237b11a1f1f5591b0296cdf04e7e33adcd7d1e2ee5",
+          "trivial": false,
+          "url": "https://databank.io.oecd-nea.org/codes/serpent"
+        },
+        {
+          "chars": 18833,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 19,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "8a17b3629e86127f218c33809f0fdc2bce531667e071c088402db0e35bd50cff",
+          "trivial": false,
+          "url": "https://finance.yahoo.com/news/clean-core-cnl-sign-cost-130000533.html"
+        }
+      ],
+      "searched_at": "2026-10-29T21:32:03.441497+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/CORE-GATECH-GROUP/serpent-tools/pull/346",
+      "results": [
+        {
+          "chars": 223,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 19,
+          "page_type": "blob",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "c9e56e79355da804cbf05fccc09a6c07102b524fdd44d84af1ddd126581af294",
+          "trivial": false,
+          "url": "https://github.com/Spacial/csstuff/blob/master/README.md?plain=1"
+        },
+        {
+          "chars": 264415,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 19,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "8c2978674ce5addcbbb52dbaae7b9acffe49e423ee091eabc9b5506697f6a71f",
+          "trivial": false,
+          "url": "http://fhr.nuc.berkeley.edu/wp-content/uploads/2018/08/Challenges_Model_Sim_FHRs_GT_Workshop_3_reduced.pdf"
+        },
+        {
+          "chars": 526370,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 19,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "67ba1b4dfad3441f6ecbb941920d38f14aead2ea63690f580dacac71fc80d1f7",
+          "trivial": false,
+          "url": "https://inldigitallibrary.inl.gov/sites/sti/sti/Sort_98344.pdf"
+        },
+        {
+          "chars": 829598,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 19,
+          "page_type": "blob",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "c5ba635dc372b69f45194bc04b8bc65f65006695572588d5b77aca9dfea364e8",
+          "trivial": false,
+          "url": "https://github.com/akanazawa/Complex-Classification/blob/master/train.fastdt"
+        },
+        {
+          "chars": 3586674,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 19,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "982bc8202510758af5429d5f3d974ebdcfa76a0ecd6c729ddb9e2d6482e4995c",
+          "trivial": false,
+          "url": "https://inria.hal.science/hal-03927188v1/file/proceedings.pdf"
+        }
+      ],
+      "searched_at": "2026-10-29T21:32:06.301576+00:00"
+    }
+  ],
+  "repo": "CORE-GATECH-GROUP/serpent-tools",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

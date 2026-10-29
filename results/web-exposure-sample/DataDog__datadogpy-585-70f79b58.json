@@ -1,0 +1,161 @@
+{
+  "instance_id": "DataDog__datadogpy-585",
+  "n": 10,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "Fails to install with pip 8.1.1 DataDog/datadogpy",
+      "results": [
+        {
+          "chars": 171047,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 10,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "58a5952fa693e76ba34fc9d2ef82ed1cc30fe0066d9600bebcad68d94daaed09",
+          "trivial": false,
+          "url": "https://docs.datadoghq.com/extend/guide/custom-python-package"
+        },
+        {
+          "chars": 175918,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 10,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "f74a2411d43c84b298d0837d3be1808ac21eb88bc5013689c2ea46d810004e61",
+          "trivial": false,
+          "url": "https://docs.datadoghq.com/extend/integrations/python"
+        },
+        {
+          "chars": 6780,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 10,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "1654ee96701923f35e759facc5572021e04a85f437e2339675ebe12dbbe2d388",
+          "trivial": false,
+          "url": "https://discuss.python.org/t/unable-to-install-with-pip/64572"
+        },
+        {
+          "chars": 30993,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 10,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "11584bb8fac327dec24223f9001d009d74cfb683ca3c4d70ea64c9c532c0186e",
+          "trivial": false,
+          "url": "https://unix.stackexchange.com/questions/447840/pip-upgrade-messed-up-python-installation"
+        },
+        {
+          "chars": 3824,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 10,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "3cdf3e05c31b3f84222b7ed6910bb4719554a870ae51bab4adcdc985cec455a6",
+          "trivial": false,
+          "url": "https://discuss.hashicorp.com/t/datadog-failed-to-query-available-provider-packages/36681"
+        }
+      ],
+      "searched_at": "2026-10-29T21:32:20.197170+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/DataDog/datadogpy/pull/585",
+      "results": [
+        {
+          "chars": 19024,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 10,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "62a41bed82d4b07b2ed8669e5caa42dde0d07705302bcd6a84a9f69caa62163f",
+          "trivial": false,
+          "url": "https://finance.yahoo.com/news/datadog-inc-ddog-surpasses-analyst-123202876.html"
+        },
+        {
+          "chars": 18768,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 10,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "2c967d84dba619c934f7c6b58809476699ba908284d21569633a5b28a26fe06f",
+          "trivial": false,
+          "url": "https://finance.yahoo.com/news/datadog-ddog-q1-earnings-beat-121200325.html"
+        },
+        {
+          "chars": 48516,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 10,
+          "page_type": "blob",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "eeb38f941e734ab5d4549440ec707da698d0e44fd910d3ac599017f0dc998106",
+          "trivial": false,
+          "url": "https://github.com/BerriAI/litellm/blob/main/litellm/__init__.py"
+        },
+        {
+          "chars": 52248,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 10,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "4cc66212a8710b1b7519700b512cefda528417f3d00390af51991641706365c0",
+          "trivial": false,
+          "url": "https://ng.investing.com/news/analyst-ratings/bernstein-reiterates-datadog-stock-rating-after-analyst-day-93CH-2353860"
+        },
+        {
+          "chars": 282258,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 10,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "492d7ccb07b36846ca2f40c61c8f94f9a76f240aefd86f4cade643e769a24cf4",
+          "trivial": false,
+          "url": "https://github.com/fire17/awesome-stars"
+        }
+      ],
+      "searched_at": "2026-10-29T21:32:21.963363+00:00"
+    }
+  ],
+  "repo": "DataDog/datadogpy",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

@@ -1,0 +1,161 @@
+{
+  "instance_id": "Azure__pykusto-159",
+  "n": 1,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "Retry config causes an exception beacuse of bug in argumets order in client execute function Azure/pykusto",
+      "results": [
+        {
+          "chars": 25161,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "38eb3ec082234601f185d7fba5e65fce5da2682d6668b8fc7c6263b6708dae04",
+          "trivial": true,
+          "url": "https://medium.com/@piotrkarpaa/building-resilient-azure-functions-with-retry-policies-281cb07da362"
+        },
+        {
+          "chars": 8120,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "7757f936f775772a049e0303d03a2c455cb94a84735363f66a23b7b64d7f61af",
+          "trivial": true,
+          "url": "https://learn.microsoft.com/en-us/answers/questions/1836228/transient-error-and-retry-policy-for-service-bus-t"
+        },
+        {
+          "chars": 24743,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "f2e81d22a2d5f12353cae4f49dd1da8d42e48e03a9d860ce9f7a3e0a92e2a50c",
+          "trivial": true,
+          "url": "https://learn.microsoft.com/en-us/azure/azure-functions/functions-bindings-error-pages"
+        },
+        {
+          "chars": 52416,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "6ed76719ed520429d5c6981fdab1f6d6b8e77f13cdfeeb23311033d004413087",
+          "trivial": true,
+          "url": "https://learn.microsoft.com/en-us/azure/durable-task/common/durable-task-error-handling"
+        },
+        {
+          "chars": 12261,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "33faf850ef92e343888eb55e3d0b96535c9ac85a3886cb130bb6d8e0f048519a",
+          "trivial": true,
+          "url": "https://tracxn.com/d/companies/exception/__B9MZyeZn9IsQB97JbxzovvMkIWxkJQyfn7PJY6cX1pQ"
+        }
+      ],
+      "searched_at": "2026-10-29T21:31:55.407030+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/Azure/pykusto/pull/159",
+      "results": [
+        {
+          "chars": 282258,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "492d7ccb07b36846ca2f40c61c8f94f9a76f240aefd86f4cade643e769a24cf4",
+          "trivial": true,
+          "url": "https://github.com/fire17/awesome-stars"
+        },
+        {
+          "chars": 14584,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "ebd8ba5a80982ac31305d873fd0b1ae47379905d76fdcabfcdd98185e2436ffd",
+          "trivial": true,
+          "url": "https://www.youtube.com/watch?v=PPoC30dT12I"
+        },
+        {
+          "chars": 10438,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "704e57d0ccaa5b897cad7ebb0f5243b80fa5122f39e3321e42f9ec79a52700e5",
+          "trivial": true,
+          "url": "https://rocketreach.co/github-email-format_b5d3bf8bf42e46c1"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": true,
+          "url": "https://www.mapquest.com/de/nordrhein-westfalen/totalenergies-803115256"
+        },
+        {
+          "chars": 17321,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "9d368dd2ec9c53c7d5eb1c2da414a76ecc166850d5dbf1c95f8f4997a38638ca",
+          "trivial": true,
+          "url": "https://leadiq.com/c/pull-a-part/5a1d9c7323000054008c2245"
+        }
+      ],
+      "searched_at": "2026-10-29T21:31:56.622862+00:00"
+    }
+  ],
+  "repo": "Azure/pykusto",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

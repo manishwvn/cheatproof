@@ -1,0 +1,161 @@
+{
+  "instance_id": "Delgan__loguru-852",
+  "n": 20,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "Add new \"context\" option to specify the multiprocessing context internally used by handlers Delgan/loguru",
+      "results": [
+        {
+          "chars": 165872,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 20,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "ce9f61911046005f1a120c6d475baf7959785c4ef0ac9a8436e4261f4d778e3f",
+          "trivial": false,
+          "url": "https://media.readthedocs.org/pdf/loguru/latest/loguru.pdf"
+        },
+        {
+          "chars": 44304,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 20,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "cd3e49da42d4a390ed08908ae64bb8d6cc189d7144fc5b22d23135d5a930aa52",
+          "trivial": false,
+          "url": "https://loguru.readthedocs.io/en/stable/resources/recipes.html"
+        },
+        {
+          "chars": 5340,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 20,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "1740cb6fa13ff2499528fda217428e0268e6cef59e52ceb67214f96735c62799",
+          "trivial": false,
+          "url": "https://eliasdorneles.com/til/posts/how-to-add-extra-context-with-loguru"
+        },
+        {
+          "chars": 64682,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 20,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "008f8c640a24f6533559c7354944cc6e3e768071c59bf25c4323ae6db85ab8a6",
+          "trivial": false,
+          "url": "https://realpython.com/python-loguru"
+        },
+        {
+          "chars": 38666,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 20,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "736305b7fd2b782b0d58c3b0c8f3dc34b00df4b7f0d61530e089e1d3f67c8a35",
+          "trivial": false,
+          "url": "https://stackoverflow.com/questions/70977165/how-to-use-loguru-defaults-and-extra-information"
+        }
+      ],
+      "searched_at": "2026-10-29T21:32:24.172767+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/Delgan/loguru/pull/852",
+      "results": [
+        {
+          "chars": 218739,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 20,
+          "page_type": "blob",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "2064401b47db99d9e15ea7343e6bb49df1493049175cd9146f03439e98b614f4",
+          "trivial": false,
+          "url": "https://github.com/nikitavoloboev/github-stars/blob/master/8.md"
+        },
+        {
+          "chars": 501485,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 20,
+          "page_type": "blob",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "90101f29ad9adea7483e0747f9fa3b730119a4bdfa6af4871be7caef31ac6c99",
+          "trivial": false,
+          "url": "https://github.com/Pagliacii/Pagliacii/blob/main/AWESOME-STARS.md?itZ7e5mva=q0DdU"
+        },
+        {
+          "chars": 1400357,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 20,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "bd56e8a784ec936a56502ae25ad9e5ae9b46bedc7589602bf9c992947034d097",
+          "trivial": false,
+          "url": "https://slopcodemonitor.ai"
+        },
+        {
+          "chars": 287443,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 20,
+          "page_type": "blob",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "f89d8b7d920283a4277910076913171d5adb4ce7822663f320672a92b31dbe28",
+          "trivial": false,
+          "url": "https://github.com/cheatsnake/backend-cheats/blob/master/README_RUS.md?plain=1"
+        },
+        {
+          "chars": 146972,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 20,
+          "page_type": "blob",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "f412ce3274be42534790d4734f4ed624bae72a2c68aaee1fe1f029e3019a2cc3",
+          "trivial": false,
+          "url": "https://github.com/uhub/awesome-python/blob/master/README.md?plain=1"
+        }
+      ],
+      "searched_at": "2026-10-29T21:32:26.237151+00:00"
+    }
+  ],
+  "repo": "Delgan/loguru",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

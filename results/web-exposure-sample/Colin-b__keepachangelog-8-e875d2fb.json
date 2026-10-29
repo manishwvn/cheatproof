@@ -1,0 +1,161 @@
+{
+  "instance_id": "Colin-b__keepachangelog-8",
+  "n": 1,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "parse category entries Colin-b/keepachangelog",
+      "results": [
+        {
+          "chars": 27724,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "f8719a10021bbeb70a780f88aa47ac10c689f49d053cc54e38bab0b3669f403a",
+          "trivial": true,
+          "url": "https://announcekit.app/blog/keep-a-changelog"
+        },
+        {
+          "chars": 15517,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "bfb92a5ad6f7ea4f4769f9f22ad85ae1525f921022c39f06f97f623addc1cde8",
+          "trivial": true,
+          "url": "https://www.releasepad.io/blog/keep-a-changelog"
+        },
+        {
+          "chars": 4225,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "bd13adb2959fa6ef78a86a9744bab7d530913513ae2b4d4946f07ab3c5b7b4c4",
+          "trivial": true,
+          "url": "https://docs.rs/keep_a_changelog_file"
+        },
+        {
+          "chars": 5776,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "460b1d082443424c83a92cb2acedbfe4eb9c5c582465d4e6bce6b46baaa39c3c",
+          "trivial": true,
+          "url": "https://www.npmjs.com/package/keep-a-changelog"
+        },
+        {
+          "chars": 7007,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "e9ace5e9de3ae7d3018b8a55f07de4141371b4109c28866c32a1096e98be41b0",
+          "trivial": true,
+          "url": "https://manpages.ubuntu.com/manpages/xenial/man1/dpkg-parsechangelog.1.html"
+        }
+      ],
+      "searched_at": "2026-10-29T21:32:15.423192+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/Colin-b/keepachangelog/pull/8",
+      "results": [
+        {
+          "chars": 368020,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "688b2eac47d01e8e2f64aba493cffb902d14f54604bd1f3d595c355a5ead161b",
+          "trivial": true,
+          "url": "https://github.com/pawamoy/stars"
+        },
+        {
+          "chars": 19416,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "blob",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "2cf8b4c85f9931ecd488824a03d71d7fdcf16992a901601c8a33be8adbbf57ed",
+          "trivial": true,
+          "url": "https://github.com/immutable-js/immutable-js/blob/main/CHANGELOG.md"
+        },
+        {
+          "chars": 236521,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "b3b1a3cf77504e8b86f730b93d222b6a3ef22ef48df6dbcf682fb5b35380b3b5",
+          "trivial": true,
+          "url": "https://docs.jj-vcs.dev/latest/changelog"
+        },
+        {
+          "chars": 282258,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "492d7ccb07b36846ca2f40c61c8f94f9a76f240aefd86f4cade643e769a24cf4",
+          "trivial": true,
+          "url": "https://github.com/fire17/awesome-stars"
+        },
+        {
+          "chars": 166086,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 1,
+          "page_type": "blob",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "f73da53c36d094e9055fb2b844f286b78d7632f18d9e8d1bed2e3a587e9cae80",
+          "trivial": true,
+          "url": "https://github.com/bpftrace/bpftrace/blob/master/CHANGELOG.md"
+        }
+      ],
+      "searched_at": "2026-10-29T21:32:17.531948+00:00"
+    }
+  ],
+  "repo": "Colin-b/keepachangelog",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

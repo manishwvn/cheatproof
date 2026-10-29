@@ -1,0 +1,161 @@
+{
+  "instance_id": "AzureAD__microsoft-authentication-library-for-python-186",
+  "n": 3,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "Refresh token errors are discarded AzureAD/microsoft-authentication-library-for-python",
+      "results": [
+        {
+          "chars": 7338,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "c53a2cef374aeabe982168abc0f2823b08bf7fb57d526777c209c240389fe171",
+          "trivial": false,
+          "url": "https://learn.microsoft.com/en-us/answers/questions/735893/azure-ad-refresh-token-is-getting-invalid-frequent"
+        },
+        {
+          "chars": 9773,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": true,
+          "sha256": "c51a05c9b6b7edd2133bb14f8e28a7f2c1956300a6d9d49a708846536a448e80",
+          "trivial": false,
+          "url": "https://github.com/AzureAD/microsoft-authentication-library-for-python/discussions/386"
+        },
+        {
+          "chars": 8225,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "a7c4d6fd407a1cf8c0e3769884757979d3544cc5c0e27a544e0612f81c304600",
+          "trivial": false,
+          "url": "https://learn.microsoft.com/en-us/entra/msal/python/advanced/migrate"
+        },
+        {
+          "chars": 9898,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "9d1461e53b0f5010e478f76ab15c3bba90fbdb60a33e8e8e1288c7de4877f9d6",
+          "trivial": false,
+          "url": "https://learn.microsoft.com/en-us/entra/msal/python"
+        },
+        {
+          "chars": 51648,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "4ad3ce251537ae2f8f87f632fa9bacfb1873166c5d81e46bed8d9f39112b3b73",
+          "trivial": false,
+          "url": "https://stackoverflow.com/questions/78079834/how-to-refresh-access-tokens-with-msal-node-in-an-express-application"
+        }
+      ],
+      "searched_at": "2026-10-29T21:31:51.277790+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/AzureAD/microsoft-authentication-library-for-python/pull/186",
+      "results": [
+        {
+          "chars": 29023,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "blob",
+          "rank": 1,
+          "repo_match": true,
+          "sha256": "f01883ce64100ba8c1d46a30fd4d1ef059c550a7d1eadf5384f672321fd2c3d3",
+          "trivial": false,
+          "url": "https://github.com/AzureAD/microsoft-authentication-library-for-python/blob/dev/msal/token_cache.py"
+        },
+        {
+          "chars": 40299,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "blob",
+          "rank": 2,
+          "repo_match": true,
+          "sha256": "51b57cb384b873b357f6e59dd9705a72cdfc7b4c9040d3db53589f0f8a0ff998",
+          "trivial": false,
+          "url": "https://github.com/AzureAD/microsoft-authentication-library-for-python/blob/dev/msal/managed_identity.py"
+        },
+        {
+          "chars": 97732,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "ec66e8eb9cb660f87198998b959b54bc0266caf45afcd3e7abce43eff0a1aa57",
+          "trivial": false,
+          "url": "https://huggingface.co/datasets/adityasoni17/SWE-rebench-code-search/viewer/default/train?p=1"
+        },
+        {
+          "chars": 49928,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "blob",
+          "rank": 4,
+          "repo_match": true,
+          "sha256": "9082f3e23e2b0d70b3860e66f5e64534d18e5927f1931adc73720aa0cbce733b",
+          "trivial": false,
+          "url": "https://github.com/AzureAD/microsoft-authentication-library-for-python/blob/dev/tests/test_application.py"
+        },
+        {
+          "chars": 47169,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "blob",
+          "rank": 5,
+          "repo_match": true,
+          "sha256": "86594ed0b72120a208cf0fd7993667a52a23d25c0cb796f0d2352da7b4c6f263",
+          "trivial": false,
+          "url": "https://github.com/AzureAD/microsoft-authentication-library-for-python/blob/dev/msal/application.py"
+        }
+      ],
+      "searched_at": "2026-10-29T21:31:53.116028+00:00"
+    }
+  ],
+  "repo": "AzureAD/microsoft-authentication-library-for-python",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

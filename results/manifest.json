@@ -291,6 +291,56 @@
       "sha256": "b636b4f4c7d0bbc6ce6f827c1a250d5bfd47acc039c3b071df3f31dd5d681e04"
     },
     {
+      "bytes": 5598,
+      "path": "results/web-exposure-sample/AzureAD__microsoft-authentication-library-for-python-186-010a7c58.json",
+      "sha256": "c443af27201a36b62fd1e3fc27d1d3f72b37a9faa5880d8138cb2c13dc97a999"
+    },
+    {
+      "bytes": 5312,
+      "path": "results/web-exposure-sample/Azure__pykusto-159-e2527482.json",
+      "sha256": "d57ffaa758442f742b05a962bfe26fac706b2798ae9a0a4c8a9b0f23d22aeeee"
+    },
+    {
+      "bytes": 5007,
+      "path": "results/web-exposure-sample/Becksteinlab__numkit-8-c84c4241.json",
+      "sha256": "7d415de7c17161d2e280f476fcd4e221fa312bb16e30c7eb8ad0f2f22cfd47a9"
+    },
+    {
+      "bytes": 5385,
+      "path": "results/web-exposure-sample/CORE-GATECH-GROUP__serpent-tools-346-593d2c43.json",
+      "sha256": "75d61aff0218e09f4b7a10799a94f0371a6844d990fdc8f5c1899898c0077056"
+    },
+    {
+      "bytes": 5090,
+      "path": "results/web-exposure-sample/CS-SI__eodag-249-1faabb58.json",
+      "sha256": "4c59d64b9da18822555fdebed28c5220453e060a5757085ad53e2ba138cf43d3"
+    },
+    {
+      "bytes": 5223,
+      "path": "results/web-exposure-sample/CS-SI__eodag-588-e439bca6.json",
+      "sha256": "841bb3cf5513f6d4808f58f605dbce6d555b4b6f113b392540600d3f492cbfa2"
+    },
+    {
+      "bytes": 5029,
+      "path": "results/web-exposure-sample/Colin-b__keepachangelog-8-e875d2fb.json",
+      "sha256": "7804f510ad934ec30e313388f6735b37c33a1ab464da39a41cc9643c2fbf30ef"
+    },
+    {
+      "bytes": 5284,
+      "path": "results/web-exposure-sample/DataDog__datadogpy-585-70f79b58.json",
+      "sha256": "4e82d330e077086c567e54e6bc85c59b81da8006110863ded2c6df727ce4ce56"
+    },
+    {
+      "bytes": 5240,
+      "path": "results/web-exposure-sample/Delgan__loguru-852-c5e0e680.json",
+      "sha256": "b768cc3e59a0624664bed271c195e8ad83e77e03d20bb64976ca6760a4c4880b"
+    },
+    {
+      "bytes": 420,
+      "path": "results/web-exposure-sample/_run.json",
+      "sha256": "64f28f7c992ef806507d537c7be2b9b5538117d280850587aa44785a102451c5"
+    },
+    {
       "bytes": 5262,
       "path": "results/web-exposure/12rambau__sepal_ui-518.json",
       "sha256": "a693e3e5773f1daa33ab708f69cca3393bcebdf6f36b54b3d0662a670721780f"
@@ -361,8 +411,8 @@
       "sha256": "33ca6591c194951130b6a3da50f0d08829319b13c2c1b001c76d45d35258343d"
     }
   ],
-  "generated_utc": "2026-10-29T21:14:41.382122+00:00",
-  "repo_sha": "61df32bc5807f4f40e496674a89ea8944aa619f5",
+  "generated_utc": "2026-10-29T21:32:46.887798+00:00",
+  "repo_sha": "28cc528093622efbd3af29ed749b2d7822a0c8b6",
   "schema": "rewardseal.evidence-manifest",
   "schema_version": 1,
   "totals": {

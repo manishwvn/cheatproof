@@ -1,0 +1,161 @@
+{
+  "instance_id": "CS-SI__eodag-588",
+  "n": 5,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "TokenAuth should raise AuthenticationError CS-SI/eodag",
+      "results": [
+        {
+          "chars": 19517,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "9232c26802fabb2cc7cb1193f0176f0d55176068e2a8a02db2ca8f0173a1680d",
+          "trivial": false,
+          "url": "https://eodag.readthedocs.io/en/stable/getting_started_guide/configure.html"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.investing.com/equities/cs-corp-company-profile"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.indeed.com/cmp/Cs-Mckee-Investment-Managers/faq/how-often-do-you-get-a-raise-at-cs-mckee-investment-managers?quid=1haas3eaettme801"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://finance.yahoo.com/news/think-cs-disco-nyse-law-104143713.html"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://finance.yahoo.com/news/cs-disco-nyse-law-good-110119565.html"
+        }
+      ],
+      "searched_at": "2026-10-29T21:32:12.585558+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/CS-SI/eodag/pull/588",
+      "results": [
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.mapquest.com/ca/manitoba/cs-communications-solutions-marketing-359470362"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://finance.yahoo.com/news/gbi-releases-updated-green-globes-130000489.html"
+        },
+        {
+          "chars": 282258,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "492d7ccb07b36846ca2f40c61c8f94f9a76f240aefd86f4cade643e769a24cf4",
+          "trivial": false,
+          "url": "https://github.com/fire17/awesome-stars"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.yelp.com/biz/dcs-cs-electrical-services-annapolis"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.zoominfo.com/c/cs-loxinfo/1132019552"
+        }
+      ],
+      "searched_at": "2026-10-29T21:32:14.080930+00:00"
+    }
+  ],
+  "repo": "CS-SI/eodag",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}
