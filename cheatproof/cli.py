@@ -250,6 +250,7 @@ class Deps:
     exposure_summary: Callable[[Path], dict[str, Any] | None] | None = None
     # T57: audit.AuditOps for audit-exposure; None means AuditOps.default() (tests pass fakes).
     audit_ops: Any = None
+    web_search_factory: Callable[[Any], Callable[[str], list[dict]]] | None = None
 
     @classmethod
     def for_dry_run(cls) -> Deps:
@@ -2075,6 +2076,107 @@ NETWORK_FETCH_HELP = (
 )
 
 
+def cmd_audit_web(args: argparse.Namespace, deps: Deps) -> int:
+    """Search cached audit tasks, retaining only overlap evidence."""
+    from cheatproof import audit, webaudit
+
+    try:
+        webaudit.check_path(args.out, directory=True)
+        webaudit.check_path(args.out / "_run.json")
+        ids = args.instance_ids
+        if ids is None:
+            webaudit.check_path(args.exposure_dir, directory=True)
+            for path in audit._record_files(args.exposure_dir):
+                webaudit.check_path(path)
+            ids = [audit.load_record(p)["instance_id"] for p in audit._record_files(args.exposure_dir)]
+        if len(set(ids)) != len(ids):
+            raise ValueError("duplicate instance id")
+        tasks = []
+        for iid in ids:
+            matches = deps.find_tasks(iid, None, args.cache_dir)
+            if not matches:
+                raise ValueError(f"task is not cached: {iid}")
+            tasks.append(matches[0])
+        done, todo = [], []
+        for task in tasks:
+            path = args.out / audit.record_filename(task.instance_id)
+            webaudit.check_path(path)
+            if path.exists():
+                webaudit.load_record(path)
+            if path.exists() and not args.rerun:
+                done.append(task)
+            else:
+                webaudit.oracle_query(task.instance_id, task.repo)
+                if not args.dry_run:
+                    webaudit.queries(task)
+                todo.append(task)
+    except (OSError, ValueError):
+        print("stopped: invalid web audit input or output", file=sys.stderr)
+        return 1
+    for task in done:
+        print(f"{task.instance_id}: skipped (existing record)")
+    if args.dry_run:
+        for task in todo:
+            print(f"{task.instance_id}: 2 searches (q1 and oracle query)")
+        print(f"{len(todo)} tasks, {2 * len(todo)} searches, {2 * len(todo)} credits")
+        return 0
+    if not todo:
+        return 0
+    try:
+        budget = deps.make_budget()
+        total = 0
+
+        class CountedBudget:
+            def reserve_tavily_call(self) -> None:
+                nonlocal total
+                budget.reserve_tavily_call()
+                total += 1
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(budget, name)
+
+        factory = deps.web_search_factory or webaudit.make_tavily_raw_search
+        search = factory(CountedBudget())
+    except Exception as exc:  # noqa: BLE001 - SDK setup errors expose only their type, never credentials
+        print(f"stopped: {type(exc).__name__}", file=sys.stderr)
+        return 1
+    searched = []
+
+    def save_run() -> None:
+        webaudit._write(
+            {
+                "schema": "rewardseal.web-exposure-run",
+                "schema_version": 1,
+                "tasks_searched": searched,
+                "total_searches": total,
+            },
+            args.out,
+            "_run.json",
+        )
+
+    for task in todo:
+        searched.append(task.instance_id)
+        try:
+            record = webaudit.build_record(task, search, deps.clock)
+            webaudit.write_record(record, args.out)
+            save_run()
+        except Exception as exc:  # noqa: BLE001 - any SDK failure halts; response bodies are never printed
+            try:
+                save_run()
+            except (OSError, ValueError):
+                pass
+            status = getattr(exc, "status_code", None) or getattr(
+                getattr(exc, "response", None), "status_code", None
+            )
+            status = str(status) if type(status) is int else type(exc).__name__
+            print(f"{task.instance_id}: stopped ({status})", file=sys.stderr)
+            return 1
+        print(
+            f"{task.instance_id}: q1 {record['q1_best_k']}/{record['n']}, oracle query {record['q2_best_k']}/{record['n']}"
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m cheatproof.cli", description="Harden one task into a certificate, or report them."
@@ -2184,6 +2286,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the plan and the estimated sandbox runs; no calls, no files",
     )
 
+    web = sub.add_parser("audit-web", help="audit public web exposure using two Tavily searches per task")
+    web.add_argument("--exposure-dir", type=Path, default=Path("results/exposure"))
+    web.add_argument("--instance-ids", nargs="+")
+    web.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
+    web.add_argument("--out", type=Path, default=Path("results/web-exposure"))
+    web.add_argument("--dry-run", action="store_true")
+    web.add_argument("--rerun", action="store_true")
+
     report = sub.add_parser("report", help="score the certificates in a directory")
     report.add_argument("--certs", type=Path, default=DEFAULT_CERT_DIR, help="certificates directory")
     report.add_argument("--out", type=Path, help="also write the score as JSON to this file")
@@ -2235,6 +2345,14 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    if deps is None and args.command == "audit-web":
+        from dataclasses import replace
+
+        if not args.dry_run:
+            from cheatproof.envfile import load_env
+
+            load_env()
+        deps = replace(Deps.for_dry_run(), make_budget=Budget.from_env)
     if deps is None:
         dry = args.command in ("batch", "audit-exposure") and args.dry_run
         deps = Deps.for_dry_run() if dry else Deps.default()
@@ -2244,6 +2362,8 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
         return cmd_batch(args, deps)
     if args.command == "audit-exposure":
         return cmd_audit_exposure(args, deps)
+    if args.command == "audit-web":
+        return cmd_audit_web(args, deps)
     if args.command == "site":
         return cmd_site(args, deps)
     if args.command == "budget":
