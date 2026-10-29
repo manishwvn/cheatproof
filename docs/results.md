@@ -92,7 +92,7 @@ Command: the T55 rerun command plus `--recon-replay` (Super, recon on, 40 steps,
 
 ### Web exposure (Tavily), 9 random-sample tasks (2026-10-29), reported apart
 
-Records: `results/web-exposure-sample/`, run 2026-10-29 21:31:48Z–21:32:26Z UTC. There were 18 searches (local counter),
+Records: `results/web-exposure-sample/`, run 2026-10-29 21:31:51Z–21:32:26Z UTC (recorded query timestamps). There were 18 searches (local counter),
 2 per task (title-built Q1 and PR-URL oracle), with 5 results per query: 90 results. Becksteinlab__numkit-8 had no
 usable title, so its Q1 was the repository name alone. **Result: 0 of 9**; `q1_best_k` and `q2_best_k` were 0 for all 9.
 No result contained a counted gold line; 0 were pull, commit or compare pages of the task's repo, and 0 matched the

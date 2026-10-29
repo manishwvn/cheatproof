@@ -89,7 +89,7 @@ line counts and matched digest prefixes. The audit stops on HTTP 401, 402 or 429
 
 The 13-task records are in `results/web-exposure/`: 26 searches (local counter), 130 results, 0 of 13 with a counted
 gold-line match. The separate random-sample records are in `results/web-exposure-sample/`: 18 searches (local counter),
-90 results, 0 of 9 with a counted gold-line match, run 2026-10-29 21:31:48Z–21:32:26Z UTC.
+90 results, 0 of 9 with a counted gold-line match, run 2026-10-29 21:31:51Z–21:32:26Z UTC (recorded query timestamps).
 Each query returned 5 results. Report these audits apart, never as a combined count or rate.
 For numkit-8 the title was unusable, so its Q1 used the repository name alone.
 Four random-sample tasks have n=1 counted gold line (Azure__pykusto-159, Becksteinlab__numkit-8,
