@@ -2,7 +2,7 @@
 
 **2026-10-28: all work merged to main (PR #79, `a831673`); no open PRs.** Coding & Agentic track; the owner submits
 2026-10-28 (deadline 2026-10-30 10:00 PDT). Progress: 83% (44/56 tasks done); `python3 docs/autopilot/progress.py`.
-Demo: https://manishwvn.github.io/cheatproof/ (GitHub Pages, built from the committed data). 2891 tests pass (1 skipped).
+Demo: https://manishwvn.github.io/cheatproof/ (GitHub Pages, built from the committed data). 2898 tests pass (1 skipped).
 
 ## Result so far (details and caveats in `docs/results.md`)
 - **Deterministic exposure audit (`audit-exposure`, no attacker):** 13 of the 18 selected swe-rebench tasks audited (5
