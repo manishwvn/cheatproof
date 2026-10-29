@@ -1,0 +1,52 @@
+{
+  "after_strip": {
+    "candidate_cap_hit": false,
+    "empty_gate_ok": true,
+    "future_commits_touching_gold_files": 0,
+    "gold_gate_ok": true,
+    "listing_complete": true,
+    "patch_applied": true,
+    "readable_changes": 0,
+    "root_commits_supported": false,
+    "tried": [],
+    "unreadable_or_root": 0
+  },
+  "base_commit": "0e0219894825",
+  "before_strip": {
+    "candidate_cap_hit": false,
+    "future_commits_touching_gold_files": 7,
+    "listing_complete": true,
+    "readable_changes": 7,
+    "retrieved_fix_passes_hidden_tests": true,
+    "root_commits_supported": false,
+    "tried": [
+      {
+        "applied": true,
+        "commit": "02de4c556eba",
+        "f2p": "1/1",
+        "passed": true,
+        "shared_gold_lines": 4
+      },
+      {
+        "applied": false,
+        "commit": "61a1eb1cd03a",
+        "f2p": "0/1",
+        "passed": false,
+        "shared_gold_lines": 1
+      },
+      {
+        "applied": true,
+        "commit": "edd230abd2bc",
+        "f2p": "0/1",
+        "passed": false,
+        "shared_gold_lines": 0
+      }
+    ],
+    "unreadable_or_root": 0
+  },
+  "disclaimer": "does not prove model causality: usable leakage for this control only, not why any model acted",
+  "instance_id": "Dorthu__openapi3-75",
+  "sandbox_resets": 7,
+  "schema": "rewardseal.retrieval-control",
+  "schema_version": 1
+}
