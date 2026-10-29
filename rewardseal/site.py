@@ -66,6 +66,14 @@ GITHUB_BLOB = "https://github.com/manishwvn/rewardseal/blob/main/"
 # Evidence files committed beside the certificates: task id -> path in the repo.
 EVIDENCE_FILES = {"CycloneDX__cyclonedx-python-348": "results/evidence/348-causal.md"}
 NOT_RELEASE_APPROVED = "Certified is not release-approved; same-recon re-attack not exercised."
+CERTIFIED_MEANING = (
+    "Certified (k=1) = one completed attack failed under the recorded conditions, with exposure removed, "
+    "gold pass and empty fail checked by code."
+)
+LEGACY_CAVEAT = (
+    "This describes the hardened 348 result. The three legacy certificates record a failed initial attack "
+    "with no hole found; they do not record exposure removal or a hardened re-attack."
+)
 LEAD_REASON_NOTE = (
     "the reason text above is the recorded classifier output. Manual review (see Hole status) found the only "
     "matching write came before the history reads, so history use stays an unconfirmed lead, not a confirmed cause."
@@ -310,7 +318,7 @@ def build_site(
             errors,
         ),
     )
-    _write(index, _document("RewardSeal report", body, blob, csp=""))
+    _write(index, _document("Recorded attack-check report | RewardSeal", body, blob, csp=""))
     _write(
         out / "verify.html",
         _document(
@@ -840,11 +848,11 @@ def _reading_guide(blob: str) -> str:
         "How to read this report in 60 seconds",
         '<div class="banner">'
         "<p>RewardSeal checks whether a coding task leaks its own fix, strips the leak, re-checks, and attacks again.</p>"
-        '<p>Read the <a href="#numbers-key">Numbers key</a> first.</p>'
+        '<p>Start with the <a href="#numbers-key">Numbers key</a>.</p>'
         '<p><a href="explorer.html">Explore every audited task and certificate</a>.</p>'
         "<p>Release a task only if (a) gold passes and empty fails, (b) the exposure scan after hardening shows no "
         "future commits, and (c) a re-attack under the same conditions failed; otherwise withhold.</p>"
-        "<p>Certified means a recorded attack failed, nothing more.</p>"
+        f"<p>{CERTIFIED_MEANING} {LEGACY_CAVEAT} This is not a security bound.</p>"
         f"<p>{_link_html(blob + 'docs/claims.md', 'docs/claims.md (' + _pin_label(blob) + ')')}: "
         "the list of every number allowed.</p></div>",
     )
@@ -884,7 +892,7 @@ def _second_audit(root: Path, errors: list[tuple[str, str]]) -> str:
                     ),
                     ("Closed after strip-future-git", f"{summary['N_fix_closed']} of {summary['N_fix']}"),
                     ("n", summary["M"]),
-                    ("Frame (from docs/results.md)", "first 1000 dataset rows; repos 0-9 and A-E"),
+                    ("Frame (from docs/results.md)", "1000-row dataset frame; repos 0-9 and A-E"),
                     ("Seed", data["seed"]),
                     ("Rule", data["rule"]),
                     ("Population", "random within that frame only"),
@@ -1006,7 +1014,7 @@ def _fate(cert: Mapping[str, Any] | None, audited: str) -> str:
                 if confirm.reattack_failed(cert)
                 else "certified after hardening (real fix)"
             )
-        return "certified, first attack failed (no hardening)"
+        return "certified, initial attack failed (no hardening)"
     if not attacked and _map(before.get("gates")).get("ok") is False:
         return "gates failed before any attack (env-broken)"
     if any(r.get("inconclusive") or r.get("error") for r in (before, after)):
@@ -1097,7 +1105,7 @@ def _index_body(
     confirmation, manifest, replications and statuses (T54) feed the hero block and the confirmed/lead counts."""
     head = [
         "<header>",
-        "<h1>RewardSeal hackability report</h1>",
+        "<h1>Recorded attack-check report</h1><p>RewardSeal</p>",
         f'<p class="banner" role="note">{_cell(BANNER)}</p>',
         "</header>",
         (
@@ -1269,9 +1277,8 @@ def _caveats(confirmation: Mapping[str, Any]) -> list[str]:
     )
     one_line = "One attacker: a single model and prompt tried each environment. A different attacker may find other holes."
     certified_line = (
-        "Certified means this attacker's recorded qualifying attack did not succeed: either its first attack, or its "
-        "re-attack after hardening (attacks per round are on each environment page). It does not mean the "
-        "environment is secure."
+        f"{CERTIFIED_MEANING} {LEGACY_CAVEAT} This attacker's recorded qualifying attack did not succeed; "
+        "attacks per round are on each environment page. This is not a security guarantee."
     )
     return [n_line, recon_line, one_line, certified_line]
 
@@ -1551,8 +1558,7 @@ def _score_section(
         "score",
         "Hackability score",
         "<p><small>Recorded counts, not a score: the numbers below come from mixed, selected samples.</small></p>"
-        f"<p>{lead}A certified task is one where the recorded qualifying attack by this attacker did not succeed. "
-        "That is not a claim that it is secure or proven.</p>",
+        f"<p>{lead}{CERTIFIED_MEANING} {LEGACY_CAVEAT} This is not a security guarantee.</p>",
         f"<p>{_cell(confirm.counts_line(confirmation))}</p>" if confirmation is not None else "",
         _section("run-record", "Run record", reconciliation, *_run_record_parts(batch, loaded), level=3),
         _table(
@@ -1650,8 +1656,8 @@ def _environments_section(entries: Sequence[_Entry], statuses: Mapping[str, conf
         "environments",
         "Environments",
         _table(
-            "One row per environment. Certified means the recorded qualifying attack failed; it does not establish that "
-            "no usable hole remains (via: how it was certified). It is not a claim that the task is secure.",
+            "One row per environment. The recorded qualifying attack failed for each certified row; it does not "
+            "establish that no usable hole remains (via: how it was certified). See the k=1 definition and legacy caveat above.",
             headers,
             rows,
         ),
@@ -1717,7 +1723,7 @@ def _env_body(
             _gates_section(cert["harden"]),
             _holes_section(cert["harden"]),
             _patches_section(cert["harden"]),
-            _rounds_section(cert["harden"], diffs or {}),
+            _rounds_section(cert["harden"], diffs or {}, _map(cert.get("attacker"))),
             _section("transcript", "Transcript (harness record)", transcript),
         ]
     )
@@ -1812,6 +1818,30 @@ def _history_scan_rows(rnd: Mapping[str, Any]) -> list[tuple[str, Any]]:
     return [("History scan after the attack", text)]
 
 
+def _steps_used(attack: Mapping[str, Any], attacker: Mapping[str, Any]) -> str:
+    text = f"{_value(attack.get('steps'))} steps used"
+    configured = attacker.get("max_steps")
+    if _is_count(configured):
+        text += f" (budget configured: {configured})"
+    return text
+
+
+def _configured_budget(attacker: Mapping[str, Any]) -> str:
+    steps, tokens = attacker.get("max_steps"), attacker.get("max_tokens")
+    if _is_count(steps) and _is_count(tokens):
+        return f"Same step and token budget configured for both rounds: {steps} steps / {tokens} tokens. "
+    return ""
+
+
+def _round_end(attack: Mapping[str, Any]) -> str:
+    used = _value(attack.get("steps"))
+    if attack.get("submitted"):
+        return f"attacker submitted after {used} steps used"
+    if attack.get("auto_submitted"):
+        return f"harness auto-submitted after {used} steps used; no attacker submission"
+    return f"no submission recorded; stop reason: {_value(attack.get('stop_reason'))}"
+
+
 def _before_after_section(
     cert: Mapping[str, Any],
     *,
@@ -1843,6 +1873,8 @@ def _before_after_section(
         else "Before and after hardening, as recorded. Results hold against this attacker only."
     )
     after_attack = _map(after.get("attack"))
+    attacker = _map(cert.get("attacker"))
+    budget_note = _configured_budget(attacker)
     before_recon, after_recon = before_attack.get("recon") or "none", after_attack.get("recon") or "none"
     before_steps, after_steps = before_attack.get("steps"), after_attack.get("steps")
     comparison_note = ""
@@ -1851,12 +1883,12 @@ def _before_after_section(
         if before_steps != after_steps:
             text = (
                 "Same recon text given before and after: the after-hardening attacker was shown the BEFORE-hardening "
-                f"exposure scan, now stale. Step counts differ ({_value(before_steps)} before, "
+                f"exposure scan, now stale. {budget_note}Steps used differ ({_value(before_steps)} before, "
                 f"{_value(after_steps)} after): attacks are not deterministic, so one re-attack does not isolate "
                 "the effect of the patch."
             )
             comparison_note = f'<p class="banner" role="note">{_cell(text)}</p>'
-    elif (before_recon, before_steps) != (after_recon, after_steps):
+    elif before_recon != after_recon:
         shown = "was shown" if before_recon == "exposure" else "was not shown"
         after_shown = "was" if after_recon == "exposure" else "was not"
         retried = _attempted_again(before_holes, after)
@@ -1866,12 +1898,19 @@ def _before_after_section(
             else "the original route retry is recorded below"
         )
         text = (
-            f"This re-attack is not like for like. Before hardening the attacker {shown} the exposure scan "
-            f"(recon: {before_recon}, {_value(before_steps)} steps); after hardening it {after_shown} "
-            f"(recon: {after_recon}, {_value(after_steps)} steps), and {retry_text} "
-            f"(earlier hole attempted again: {retried}). It does not isolate the effect of the patch."
+            f"This re-attack is not like for like: recon differed. {budget_note}"
+            f"Before hardening the attacker {shown} the exposure scan "
+            f"(recon: {before_recon}, {_steps_used(before_attack, attacker)}); after hardening it {after_shown} "
+            f"(recon: {after_recon}, {_steps_used(after_attack, attacker)}), and {retry_text} "
+            f"(earlier hole attempted again: {retried}). Round end: {_round_end(after_attack)}. "
+            "It does not isolate the effect of the patch."
         )
         comparison_note = f'<p class="banner" role="note">{_cell(text)}</p>'
+    elif before_steps != after_steps:
+        comparison_note = (
+            f"<p>{_cell(budget_note)}Steps used differ; usage alone does not indicate a configured budget difference. "
+            "Attacks are not deterministic; one re-attack does not isolate the effect of the patch.</p>"
+        )
     return _section(
         anchor,
         heading,
@@ -1882,6 +1921,9 @@ def _before_after_section(
             [
                 ("Hole labels", before_holes.get("labels")),
                 ("Recon", before_attack.get("recon") or "none"),
+                ("Steps used", _steps_used(before_attack, attacker)),
+                ("How round ended", _round_end(before_attack)),
+                ("Configured token budget", attacker.get("max_tokens")),
                 ("How it was found", _found_how(before_attack)),
                 *_history_scan_rows(before),
                 ("Patches applied", harden.get("accepted")),
@@ -1892,6 +1934,12 @@ def _before_after_section(
             [
                 ("Exposure scan", exposure),
                 ("Gates held", gates_ok),
+                ("Recon", after_attack.get("recon") or "none"),
+                ("Steps used", _steps_used(after_attack, attacker)),
+                ("How round ended", _round_end(after_attack)),
+                ("Configured token budget", attacker.get("max_tokens")),
+                ("Stop reason", after_attack.get("stop_reason")),
+                ("Attacker submitted", after_attack.get("submitted")),
                 ("Re-attack outcome", _after_outcome(after)),
                 ("Earlier hole attempted again", _attempted_again(before_holes, after)),
                 ("Certified via", _via_text(cert)),
@@ -1930,6 +1978,7 @@ def _result_section(cert: Mapping[str, Any], status: confirm.HoleStatus | None =
     return _section(
         "result",
         "Result",
+        f"<p>{CERTIFIED_MEANING} {LEGACY_CAVEAT} This is not a security bound.</p>",
         _kv_table(
             "Certificate summary",
             [
@@ -2113,7 +2162,8 @@ def _patches_section(harden: Mapping[str, Any]) -> str:
     )
 
 
-def _round_block(label: str, rnd: Any, diff: str | None) -> str:
+def _round_block(label: str, rnd: Any, diff: str | None, attacker: Mapping[str, Any] | None = None) -> str:
+    attacker = attacker or {}
     rnd = _map(rnd)
     attack = _map(rnd.get("attack"))
     grade = rnd.get("attack_grade")
@@ -2130,7 +2180,8 @@ def _round_block(label: str, rnd: Any, diff: str | None) -> str:
             ),
             ("Recon finding types", attack.get("recon_types") or "none"),
             ("Outcome", attack.get("outcome") or "none"),
-            ("Steps", attack.get("steps")),
+            ("Steps used", _steps_used(attack, attacker)),
+            ("Configured token budget", attacker.get("max_tokens")),
             ("Tokens in", attack.get("tokens_in")),
             ("Tokens out", attack.get("tokens_out")),
             ("Diff ok", attack.get("diff_ok")),
@@ -2212,12 +2263,14 @@ def _diff_block(attack: Mapping[str, Any], diff: str | None) -> str:
     return f"{text}\n{digest}"
 
 
-def _rounds_section(harden: Mapping[str, Any], diffs: Mapping[str, str | None]) -> str:
-    parts = [_round_block("Before hardening", harden["before"], diffs.get("before"))]
+def _rounds_section(
+    harden: Mapping[str, Any], diffs: Mapping[str, str | None], attacker: Mapping[str, Any]
+) -> str:
+    parts = [_round_block("Before hardening", harden["before"], diffs.get("before"), attacker)]
     if harden["after"] is None:
         parts.append("<h3>After hardening</h3>\n<p>No after round was run.</p>")
     else:
-        parts.append(_round_block("After hardening", harden["after"], diffs.get("after")))
+        parts.append(_round_block("After hardening", harden["after"], diffs.get("after"), attacker))
     return _section("rounds", "Attack rounds", *parts)
 
 

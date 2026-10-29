@@ -26,7 +26,7 @@ substantially different. There is no team-size cap.
 - Stage 2: four equally weighted criteria, each scored 1–5: **Technological Implementation** (use of Token Factory or
   AI Cloud plus NVIDIA models), **Design** (complete product, not a PoC), **Potential Impact** (credible real problem
   and audience, demonstrated), **Quality of the Idea** (creative, non-obvious, understands the problem space).
-- Ties are broken by criterion order (Tech Implementation first).
+- Ties are broken by criterion order (Tech Implementation takes priority).
 - Judges may judge only from the text, images and video; assume they do.
 
 ## Hard requirements
@@ -58,6 +58,10 @@ OFAC-sanctioned places. Also excludes employees, families and households of the 
 - Sandboxes (beta): access via `tokenfactory.nebius.com/sandboxes/about` or contree@nebius.com. 50 concurrent ops.
   Networking can only be on or off. Only stdout/stderr are captured. Root in the VM. Per-run price not documented.
 - Post-training does not support Nemotron models.
+
+## Operator decision example
+
+An evaluation owner inspects the recorded exposure scan, applies `strip-future-git`, and runs the gold and empty gates. RewardSeal records the scan, patch, gates and re-attack. The owner can keep the environment for the stated evaluation conditions or quarantine it when gates fail, exposure remains, or an attack is inconclusive. Keeping or quarantining is an operator decision; adoption and time saved have not been measured.
 
 ## The bar (signals from organiser updates and forum only)
 The organisers say to push past the basics: an agent that plans, writes, tests and iterates on a real repo. Name the

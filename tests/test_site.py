@@ -460,7 +460,7 @@ def test_the_score_says_how_many_certificate_files_were_left_out(tmp_path, bad, 
         (cert_dir / "wrong.json").write_text('{"schema": "other"}', encoding="utf-8")
     index = read(build_site(cert_dir, tmp_path / "site").index)
     link = '(see <a href="#errors">errors</a>).'
-    assert f"n = 3 valid certificates. {sentence} {link} A certified task" in index
+    assert f"n = 3 valid certificates. {sentence} {link} Certified (k=1)" in index
 
 
 def test_control_and_bidi_characters_are_shown_as_codes(tmp_path):
@@ -923,7 +923,7 @@ def test_a_batch_that_does_not_parse_is_an_error_row_and_is_not_loaded(tmp_path,
     assert "batch record not loaded" in index
     assert "selection record not available" not in index
     assert "n run" not in index
-    assert "n = 3 valid certificates. A certified task" in index  # a bad batch is not an excluded certificate
+    assert "n = 3 valid certificates. Certified (k=1)" in index  # a bad batch is not an excluded certificate
     assert "excluded (see" not in index
     assert "batch.json" in index
 

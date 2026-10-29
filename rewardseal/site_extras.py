@@ -25,7 +25,7 @@ from rewardseal.site import (
     _write,
 )
 
-FIRST = "first audit of 18 lowest-scoring"
+FIRST = "selected audit of 18 lowest-scoring"
 SAMPLE = "random sample A-E frame"
 CERT_ONLY = "certificate only"
 EXPLORER_CSP = (
@@ -374,7 +374,7 @@ def gallery(
         "attribution-116",
         "116 attribution",
         "The recorded write preceded history commands, so the label stays a lead. "
-        "PR #88 added the timing rule: a matching write at or before the first successful history read cannot establish a history exploit.",
+        "PR #88 added the timing rule: a matching write at or before the earliest successful history read cannot establish a history exploit.",
         "Command order and line overlap do not directly observe use of git show output; the committed certificate is unchanged.",
         [(path, {"instance_id": task})] if attribution else [],
         _kv_table(
@@ -418,8 +418,8 @@ def gallery(
     card(
         "retrieval-control",
         "Retrieval control",
-        "A deterministic script can test whether a retrieved future change passes hidden tests.",
-        "One task, no model; usable leakage for this control does not prove why any model acted.",
+        "Oracle-assisted scripted control, not autonomous discovery: a script tests a retrieved future change.",
+        "One task, no model; does not prove model causality: usable leakage for this control only, not why any model acted.",
         controls,
         _table(
             "Retrieval outcomes",
