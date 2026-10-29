@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://raw.githubusercontent.com 'self'">
+  <title>RewardSeal · Verify evidence</title>
+  <link rel="stylesheet" href="verify.css">
+</head>
+<body>
+<main>
+  <p class="label">REWARDSEAL / RECORDED EVIDENCE</p>
+  <h1>Verify the evidence yourself.</h1>
+  <p class="notice">Verifies artifact integrity and calculations, not historical execution or security.</p>
+  <p>Compare a frozen manifest with artifact bytes fetched directly from this repository's main branch.
+    Exposure and certificate totals are calculated again in your browser. A manifest is a snapshot, not a signature.</p>
+  <div class="controls">
+    <button id="verify" type="button">Verify evidence</button>
+    <button id="tamper" type="button" disabled>Tamper demo</button>
+  </div>
+  <p id="status" role="status" aria-live="polite">Ready. No artifacts fetched yet.</p>
+  <p id="totals" aria-live="polite">Totals have not been checked.</p>
+  <table aria-label="Evidence SHA-256 verification">
+    <thead><tr><th scope="col">Path</th><th scope="col">Expected</th><th scope="col">Actual</th><th scope="col">OK/FAIL</th></tr></thead>
+    <tbody id="files"></tbody>
+  </table>
+  <p>Tamper demo changes one byte of a downloaded file in memory. Nothing is written or uploaded.
+    Verify again to reset. The local CLI also checks for extra files in covered folders.</p>
+</main>
+<script src="verify.js" defer></script>
+</body>
+</html>

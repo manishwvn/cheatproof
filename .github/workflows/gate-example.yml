@@ -1,0 +1,12 @@
+name: RewardSeal gate example
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      # pin to a commit SHA before production use
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rewardseal-gate
