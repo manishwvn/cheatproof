@@ -1,0 +1,161 @@
+{
+  "instance_id": "12rambau__sepal_ui-518",
+  "n": 12,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "add posibility to add text in the map_btn 12rambau/sepal_ui",
+      "results": [
+        {
+          "chars": 2022,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 12,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "554b3cef9aca3abfc600152ff18a10bedf7bfc9f689c6d355ffcf3812b95927d",
+          "trivial": false,
+          "url": "https://www.businessinsider.com/reference/how-to-add-text-to-imovie"
+        },
+        {
+          "chars": 1412,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 12,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "ac8828af71c318c175d3de079d6679bed86400d256523b9d23af62dda330264c",
+          "trivial": false,
+          "url": "https://www.businessinsider.com/reference/how-to-add-alt-text-in-excel"
+        },
+        {
+          "chars": 1412,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 12,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "ac8828af71c318c175d3de079d6679bed86400d256523b9d23af62dda330264c",
+          "trivial": false,
+          "url": "https://www.businessinsider.com/guides/tech/how-to-add-alt-text-in-excel"
+        },
+        {
+          "chars": 2128,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 12,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "888655ac824a2dcd8c7e021f47fb601c0cc46927d82f2a87a7931046e78e9ad4",
+          "trivial": false,
+          "url": "https://www.businessinsider.com/reference/how-to-add-alt-text-in-powerpoint"
+        },
+        {
+          "chars": 2128,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 12,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "888655ac824a2dcd8c7e021f47fb601c0cc46927d82f2a87a7931046e78e9ad4",
+          "trivial": false,
+          "url": "https://www.businessinsider.com/guides/tech/how-to-add-alt-text-in-powerpoint?op=1"
+        }
+      ],
+      "searched_at": "2026-10-29T07:47:44.710377+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/12rambau/sepal_ui/pull/518",
+      "results": [
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 12,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.mapquest.com/us/oklahoma/durant/74701-2327/518-e-highway-70-33.99729,-96.36479"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 12,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.mapquest.com/ca/quebec/ste-jeanne-darc/g0w-1e0/518-rue-principale-48.868,-72.07996"
+        },
+        {
+          "chars": 282258,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 12,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "492d7ccb07b36846ca2f40c61c8f94f9a76f240aefd86f4cade643e769a24cf4",
+          "trivial": false,
+          "url": "https://github.com/fire17/awesome-stars"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 12,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.mapquest.com/us/nj/ocean-view/08230/518-sea-isle-blvd"
+        },
+        {
+          "chars": 10438,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 12,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "704e57d0ccaa5b897cad7ebb0f5243b80fa5122f39e3321e42f9ec79a52700e5",
+          "trivial": false,
+          "url": "https://rocketreach.co/github-email-format_b5d3bf8bf42e46c1"
+        }
+      ],
+      "searched_at": "2026-10-29T07:47:46.455917+00:00"
+    }
+  ],
+  "repo": "12rambau/sepal_ui",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

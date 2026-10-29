@@ -1,0 +1,161 @@
+{
+  "instance_id": "CycloneDX__cyclonedx-python-367",
+  "n": 4,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "[CONDA] Include component hashes when generating SBoM from Conda Explicit MD5 List CycloneDX/cyclonedx-python",
+      "results": [
+        {
+          "chars": 26461,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "82119b9b04e19ff6469d67bd40ff4b61ba1b2e1454d63748fa0066c4b214a604",
+          "trivial": false,
+          "url": "https://runsafesecurity.com/blog/sbom-minimum-elements-cyclonedx-spdx"
+        },
+        {
+          "chars": 1056,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "e15a7ca537f3c8c5bf6ac6dcf0294574c46262dd8a580342947f10a7ea053be9",
+          "trivial": false,
+          "url": "https://anaconda.org/conda-forge/cyclonedx-bom"
+        },
+        {
+          "chars": 13612,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "9810e4724a8fb256b851d741daddf4a3107742de822ee9f2e80ca6bdf600a847",
+          "trivial": false,
+          "url": "https://lists.buildroot.org/pipermail/buildroot/2025-February/774918.html"
+        },
+        {
+          "chars": 14894,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": true,
+          "sha256": "cd9696f25e8d4efa75192cdbf30298a410d2473cf94448ce63e7bc977097ba8f",
+          "trivial": false,
+          "url": "https://github.com/CycloneDX/cyclonedx-python"
+        },
+        {
+          "chars": 43039,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "2dc5a0a8e05e2e4306eae52c0d2609a4e32c4461ed246c8d9c1a1b2483b6cbdd",
+          "trivial": false,
+          "url": "https://stackoverflow.com/questions/79292527/generate-sbom-using-cyclonedx-for-repository-containing-multiple-languages"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:28.377700+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/CycloneDX/cyclonedx-python/pull/367",
+      "results": [
+        {
+          "chars": 29580,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "blob",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "9cc495cd3b19bb1d01c50edd4c5a1bb760e8cd9c7239b83dbc97d9548e9ef37d",
+          "trivial": false,
+          "url": "https://github.com/aws-samples/sample-ai-assistant-on-agentcore/blob/main/THIRD_PARTY_LICENSES"
+        },
+        {
+          "chars": 28937,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "c72526b4172ad42b2f812ae94fd3ed25e6ff744732ba75b6294044bb2fc8801c",
+          "trivial": false,
+          "url": "https://app.unpkg.com/@cyclonedx/cdxgen@10.10.4/files/README.md"
+        },
+        {
+          "chars": 40732,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "blob",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "9bbafbe517360cfeb9aadf0c514a61549dcb2de60294afbf4059e679df199397",
+          "trivial": false,
+          "url": "https://github.com/CycloneDX/cyclonedx-core-java/blob/master/src/main/resources/bom-1.4.schema.json"
+        },
+        {
+          "chars": 5608,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "blob",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "f9b37672b9d99abfa5f2d91e1b6c1b93119fa99d27c313f20ed22aa01cc0d22f",
+          "trivial": false,
+          "url": "https://github.com/aquasecurity/trivy/blob/main/docs/guide/target/sbom.md"
+        },
+        {
+          "chars": 20827,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 4,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "eaa71c3ad53834e8bf29be4bf94a860b99f7a4d278c545862efb25c180f918de",
+          "trivial": false,
+          "url": "https://finance.yahoo.com/news/sonatype-embraces-cyclonedx-standard-integrating-161200104.html"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:30.209123+00:00"
+    }
+  ],
+  "repo": "CycloneDX/cyclonedx-python",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

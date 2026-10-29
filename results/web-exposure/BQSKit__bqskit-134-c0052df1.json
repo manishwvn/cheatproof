@@ -1,0 +1,161 @@
+{
+  "instance_id": "BQSKit__bqskit-134",
+  "n": 8,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "Compiler ignores custom gate set when compiling a random 2-qubit circuit BQSKit/bqskit",
+      "results": [
+        {
+          "chars": 17833,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 8,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "85e692c324df1676e751ab766b7c43e5a340753f9fad6c20139edd695f408062",
+          "trivial": false,
+          "url": "https://finance.yahoo.com/news/quantum-art-achieves-10x-circuit-124500068.html"
+        },
+        {
+          "chars": 150866,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 8,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "7a851587ff0d6d0f3d782cc295da4bc7164b330c37e916f5c7f22a4b8a0bb560",
+          "trivial": false,
+          "url": "https://en.wikipedia.org/wiki/Compiler"
+        },
+        {
+          "chars": 19116,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 8,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "3e198887e28e9a8573e7ac674786d210a83e32284e4b7b2f91ffdd4b6985f099",
+          "trivial": false,
+          "url": "https://finance.yahoo.com/news/quantum-art-advance-scalable-quantum-130100591.html?fr=sycsrp_catchall"
+        },
+        {
+          "chars": 18945,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 8,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "7c0386b795e1c3d47152f9cda3a2f38846f2a189ae8d4a796246df2dc643f1c9",
+          "trivial": false,
+          "url": "https://finance.yahoo.com/news/quantum-art-advance-scalable-quantum-130100591.html"
+        },
+        {
+          "chars": 20101,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 8,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "04ab6695d3ccbf3ff8fe3f9921ef395f203607cb76bc1e4d51ace56c22af1acc",
+          "trivial": false,
+          "url": "https://finance.yahoo.com/markets/stocks/articles/rigetti-computings-2-qubit-gate-152000147.html"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:14.496501+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/BQSKit/bqskit/pull/134",
+      "results": [
+        {
+          "chars": 157800,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 8,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "2c94244d09f29d53c43889ecdefdb3ed3487d84db56960802109d8c31db694e2",
+          "trivial": false,
+          "url": "https://www.lfdr.de/Theses/2024/MA-Gierisch.pdf"
+        },
+        {
+          "chars": 478853,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 8,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "a8dad6e5039b8370771827a78d8660f45cd56df334a7bd579b1456846fb501b2",
+          "trivial": false,
+          "url": "https://software-lab.org/publications/Dissertation_Matteo_Paltenghi.pdf"
+        },
+        {
+          "chars": 62942,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 8,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "0d6db3df703997536aa81f5fb1419050db50eb3fd849d38ea4cd12cd9623c1b2",
+          "trivial": false,
+          "url": "https://iopscience.iop.org/article/10.1088/2632-2153/ae5b21/pdf"
+        },
+        {
+          "chars": 13837,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 8,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "c43cb92647776a6349f75a2832784d70f29c15e4f7c9a0db587c3d39fc5f8a49",
+          "trivial": false,
+          "url": "https://tracxn.com/d/legal-entities/india/pull-skill-technologies-india-private-limited/__QWlMkFvpNtz0yEdvo3a0t6nPglgC3ZPlgm9zIp_S8Cg"
+        },
+        {
+          "chars": 223304,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 8,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "59c82cfb20e00994dea174e16af3f963ad4b9b5a8b1042cbdb478b2c01a52bc7",
+          "trivial": false,
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13337728"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:16.454376+00:00"
+    }
+  ],
+  "repo": "BQSKit/bqskit",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

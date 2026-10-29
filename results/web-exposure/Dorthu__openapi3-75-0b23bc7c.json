@@ -1,0 +1,161 @@
+{
+  "instance_id": "Dorthu__openapi3-75",
+  "n": 5,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "Doesn't resolve JSON path escape codes Dorthu/openapi3",
+      "results": [
+        {
+          "chars": 10079,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "a83f6c2dc2e7e454c31411f6e5c092ff73ca0aa73c372eb55b83b66f52006535",
+          "trivial": false,
+          "url": "https://developercommunity.visualstudio.com/t/Generating-code-for-an-OpenAPI-Service-R/10244904"
+        },
+        {
+          "chars": 11819,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "e4b17cef380c1cd5cdef0ed9c39e48c1d7a30239b0809fbf81cf0f48444c68c7",
+          "trivial": false,
+          "url": "https://trib.tv/posts/2026/jsonpath"
+        },
+        {
+          "chars": 20831,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "9f411a8747cab693fc460d9dc750431422e5b9a36528d5cdb881cfcb3adab128",
+          "trivial": false,
+          "url": "https://restfulapi.net/json-jsonpath"
+        },
+        {
+          "chars": 9486,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "dbd92d4688db96d8cd6a3ff2e42229fc4a6b203681421feabe4268be97c0008e",
+          "trivial": false,
+          "url": "https://community.qlik.com/t5/Official-Support-Articles/How-to-solve-issues-with-Invalid-JSONPath-errors/ta-p/1856982"
+        },
+        {
+          "chars": 1950,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "bf43fb1884b164ac2a998b23f3c88761561f37d53eaf552ea137678edc5c72ab",
+          "trivial": false,
+          "url": "https://developercommunity.microsoft.com/t/11072032"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:33.871947+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/Dorthu/openapi3/pull/75",
+      "results": [
+        {
+          "chars": 6559,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": true,
+          "sha256": "06b76fee417c57c2dbc01a920f9ac8e496e1d7683c108f4edfeebd4c265db523",
+          "trivial": false,
+          "url": "https://github.com/Dorthu/openapi3"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://rocketreach.co/laurent-dorthu-email_62050868"
+        },
+        {
+          "chars": 14584,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "ebd8ba5a80982ac31305d873fd0b1ae47379905d76fdcabfcdd98185e2436ffd",
+          "trivial": false,
+          "url": "https://www.youtube.com/watch?v=PPoC30dT12I"
+        },
+        {
+          "chars": 282258,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "492d7ccb07b36846ca2f40c61c8f94f9a76f240aefd86f4cade643e769a24cf4",
+          "trivial": false,
+          "url": "https://github.com/fire17/awesome-stars"
+        },
+        {
+          "chars": 10438,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 5,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "704e57d0ccaa5b897cad7ebb0f5243b80fa5122f39e3321e42f9ec79a52700e5",
+          "trivial": false,
+          "url": "https://rocketreach.co/github-email-format_b5d3bf8bf42e46c1"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:35.577257+00:00"
+    }
+  ],
+  "repo": "Dorthu/openapi3",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

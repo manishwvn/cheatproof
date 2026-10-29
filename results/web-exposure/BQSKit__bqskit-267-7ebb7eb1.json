@@ -1,0 +1,161 @@
+{
+  "instance_id": "BQSKit__bqskit-267",
+  "n": 2,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "`circuit.dim` is 0 for large circuits BQSKit/bqskit",
+      "results": [
+        {
+          "chars": 17921,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "d2e503e956419b4198e5a51ed252b73dc7b259998e4dee3a20c2a8b899101f65",
+          "trivial": false,
+          "url": "https://bqskit.readthedocs.io"
+        },
+        {
+          "chars": 3984,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "2c2d87a77c06c0af21f34edb907ad8a9a4683385cac9d79b019f55ca6e569682",
+          "trivial": false,
+          "url": "https://bqskit.lbl.gov"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.mapquest.com/us/arizona/onboard-circuits-364669967"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://rocketreach.co/all-circuits-profile_b4495b16fcdcb8a9"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://rocketreach.co/advanced-circuits-profile_b5c6e8eef42e0cd8"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:17.642886+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/BQSKit/bqskit/pull/267",
+      "results": [
+        {
+          "chars": 478853,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "a8dad6e5039b8370771827a78d8660f45cd56df334a7bd579b1456846fb501b2",
+          "trivial": false,
+          "url": "https://software-lab.org/publications/Dissertation_Matteo_Paltenghi.pdf"
+        },
+        {
+          "chars": 542709,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "d1dd64c4f55d14f413cc2142281510913d49cc64daf9a84b72778623c94caf5f",
+          "trivial": false,
+          "url": "http://wscg.zcu.cz/QC-2025/papers-CSRN/CSRN-QC.pdf"
+        },
+        {
+          "chars": 680127,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "eb1309a2f470db96ec289d8ab18d94f821f943bf4fb126ef4f1724943429a6f4",
+          "trivial": false,
+          "url": "https://electricscotland.com/culture/features/scots/manualofmodernscots.pdf"
+        },
+        {
+          "chars": 458952,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "c607a5df336f57d71b85797bddb923449b008a19a419ad67a7b4e7a7a1c169a0",
+          "trivial": false,
+          "url": "https://iopscience.iop.org/issue/1402-4896/100/12"
+        },
+        {
+          "chars": 282258,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "492d7ccb07b36846ca2f40c61c8f94f9a76f240aefd86f4cade643e769a24cf4",
+          "trivial": false,
+          "url": "https://github.com/fire17/awesome-stars"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:21.349093+00:00"
+    }
+  ],
+  "repo": "BQSKit/bqskit",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

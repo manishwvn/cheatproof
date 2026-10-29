@@ -1,0 +1,161 @@
+{
+  "instance_id": "Azure__msrest-for-python-167",
+  "n": 2,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "Response content type json parser Azure/msrest-for-python",
+      "results": [
+        {
+          "chars": 25864,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": true,
+          "sha256": "beff9ea4ae63a3d26865b69fc80c129479b4ab60f1685135b284ad10fc4cad7f",
+          "trivial": false,
+          "url": "https://github.com/Azure/msrest-for-python"
+        },
+        {
+          "chars": 8024,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "6c685906b9882fdbe0f055ead3455fc8057c09e17b9491872220a2283ab1cf65",
+          "trivial": false,
+          "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/json-mode"
+        },
+        {
+          "chars": 9305,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "647bd1948e471ed7fe97977b94fa40c98b2835bafca204aa4e59ea04e7b7ddea",
+          "trivial": false,
+          "url": "https://schulich.libguides.com/c.php?g=740150&p=5340540"
+        },
+        {
+          "chars": 5362,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "03a3f2d12762657cca3e067069a9d43e0b6d47998a9cd6e8deb9c17a166f23f1",
+          "trivial": false,
+          "url": "https://www.youtube.com/watch?v=YSL-7GnljPw"
+        },
+        {
+          "chars": 5992,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "8e094c301dcb6888d1cb44c6fd675cf32cf298200e29056c977dfad41e0d3deb",
+          "trivial": false,
+          "url": "https://www.cbinsights.com/investor/parser-digital"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:06.685069+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/Azure/msrest-for-python/pull/167",
+      "results": [
+        {
+          "chars": 43134,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "26d528048aa7a596a88c2cdb8aa25ab503667f832126c8cdc80a753f3e6b426f",
+          "trivial": false,
+          "url": "https://learn.microsoft.com/en-us/troubleshoot/azure/virtual-machines/linux/linux-upgrade-sles"
+        },
+        {
+          "chars": 282258,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "492d7ccb07b36846ca2f40c61c8f94f9a76f240aefd86f4cade643e769a24cf4",
+          "trivial": false,
+          "url": "https://github.com/fire17/awesome-stars"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.indeed.com/q-data-engineer-azure-sql-python-jobs.html"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.indeed.com/q-data-engineer-azure-databricks-python-jobs.html"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 2,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.indeed.com/q-azure-databricks-developer-with-etl-python-jobs.html"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:08.252164+00:00"
+    }
+  ],
+  "repo": "Azure/msrest-for-python",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

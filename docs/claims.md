@@ -24,6 +24,7 @@ in the repo. Nothing else may be used. If a number changes, change this sheet fi
 | Real Token Factory spend | about $4.15 at Oct 29 (ledger counter, an overestimate against the console); promo credit, no card | `~/.cheatproof-autopilot/ledger.json` (local, not committed), `docs/results.md` (Console) |
 | Tests | see `STATUS.md` (CI runs them on every PR) | `.github/workflows/ci.yml` |
 | Second audit: random sample within the A-E frame | 9 audited of 12 drawn (3 env-broken); at least half of counted lines in a future commit in 7 of 9; closed in 5 of those 7 (2 not closed: gold gate failed after strip; strip patch did not apply). Counts only, no rate | `results/exposure-sample/`, `docs/sample-protocol.md`, `docs/results.md` |
+| Web exposure (Tavily), 13 audited | 0 of 13: no result (130) contained a counted gold line; no result was a pull/commit/compare page of the task's repo, even for the oracle PR-URL query; searched 2026-10-29, findability only, dated snapshot, this tool only | `results/web-exposure/`, `docs/results.md` |
 | Retrieval control (openapi3-75) | applying the top-ranked future commit (4 shared gold lines) passed the hidden tests before the strip; 0 future commits and gates held after; one task, no model | `results/control/Dorthu__openapi3-75-retrieval-control.json`, `docs/results.md` |
 | Demo | https://manishwvn.github.io/cheatproof/ (recorded replay of committed data, not a live attack) | `.github/workflows/pages.yml` |
 
@@ -45,4 +46,4 @@ re-attack, record), not the discovery.
 
 ## Not on this sheet, so not to be said
 Any rate or percentage; "unhackable"; "first"; any figure from the literature; any claim about Ultra beyond the single run;
-any claim that Tavily changed an outcome; any web-exposure number before `docs/web-exposure.md` exists.
+any claim that Tavily changed an outcome; any claim that the open web is safe (the web result is a null for one search tool on one day).

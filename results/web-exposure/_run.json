@@ -1,0 +1,20 @@
+{
+  "schema": "rewardseal.web-exposure-run",
+  "schema_version": 1,
+  "tasks_searched": [
+    "12rambau__sepal_ui-518",
+    "Alexei-Kornienko__schematics_to_swagger-7",
+    "ArkEcosystem__python-crypto-116",
+    "Azure__autorest.python-475",
+    "Azure__azure-cli-1876",
+    "Azure__msrest-for-python-167",
+    "Azure__msrest-for-python-55",
+    "BQSKit__bqskit-134",
+    "BQSKit__bqskit-267",
+    "CycloneDX__cyclonedx-python-348",
+    "CycloneDX__cyclonedx-python-367",
+    "DataBiosphere__toil-4805",
+    "Dorthu__openapi3-75"
+  ],
+  "total_searches": 26
+}

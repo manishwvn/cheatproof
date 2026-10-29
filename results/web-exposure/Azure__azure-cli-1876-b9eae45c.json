@@ -1,0 +1,161 @@
+{
+  "instance_id": "Azure__azure-cli-1876",
+  "n": 11,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "\"@file support\": should handle the BOM on file loading Azure/azure-cli",
+      "results": [
+        {
+          "chars": 11192,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 11,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": false,
+          "sha256": "841308813e22d45177486caf7c9ff00cf6e86a1718c491ec011cedbfebd2cf15",
+          "trivial": false,
+          "url": "https://transloadit.com/devtips/leverage-azure-cli-to-automate-cloud-file-transfers-efficiently"
+        },
+        {
+          "chars": 23588,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 11,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": true,
+          "sha256": "1f80e36f57c798a09a4ddea704c67ca1487adcab750f4f72fbbc6b167b9a158b",
+          "trivial": false,
+          "url": "https://github.com/Azure/azure-cli/issues/28497"
+        },
+        {
+          "chars": 4493,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 11,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "923fb593f69aa44d787785614c78d17206f3bb3016874f87bd5b3c6c0c93769e",
+          "trivial": false,
+          "url": "https://learn.microsoft.com/en-us/answers/questions/5580091/azure-cli-commands-all-fail"
+        },
+        {
+          "chars": 21554,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 11,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "0f18610d00d26a2db2fdf6f933fc15ade8772fac56222b0d182915be7d9e8396",
+          "trivial": false,
+          "url": "https://learn.microsoft.com/en-us/cli/azure/use-azure-cli-successfully-troubleshooting?view=azure-cli-latest"
+        },
+        {
+          "chars": 65302,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 11,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "88b93ff3e25b508429a6b2e0016217207bd36e05a3970a6bf4c0c626789dd88b",
+          "trivial": false,
+          "url": "https://unix.stackexchange.com/questions/381230/how-can-i-remove-the-bom-from-a-utf-8-file"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:03.212932+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/Azure/azure-cli/pull/1876",
+      "results": [
+        {
+          "chars": 49378,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 11,
+          "page_type": "blob",
+          "rank": 1,
+          "repo_match": true,
+          "sha256": "7b2a7f7a6706deec40a6e1b41daa91fdb0e15ba6d8900be555992be050dacc55",
+          "trivial": false,
+          "url": "https://github.com/Azure/azure-cli/blob/dev/src/azure-cli/azure/cli/command_modules/acr/_help.py"
+        },
+        {
+          "chars": 97732,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 11,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "ec66e8eb9cb660f87198998b959b54bc0266caf45afcd3e7abce43eff0a1aa57",
+          "trivial": false,
+          "url": "https://huggingface.co/datasets/adityasoni17/SWE-rebench-code-search/viewer/default/train?p=1"
+        },
+        {
+          "chars": 55691,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 11,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "f823f1e897da2d787c3919272b403307436ab72b162a4e6ed70cab46d0c10c3c",
+          "trivial": false,
+          "url": "https://www.coingecko.com/learn/api-azure-functions-serverless-solutions"
+        },
+        {
+          "chars": 4213,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 11,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "5b84510b1c702b4e586a26781ed37ee91a9e0de8dbf5f137d58c176e6beca994",
+          "trivial": false,
+          "url": "https://learn.microsoft.com/en-us/troubleshoot/azure/hpc/cyclecloud/invalid-client-secret"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 11,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://ca.indeed.com/q-azure-cloud-system-administrator-jobs.html"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:04.710219+00:00"
+    }
+  ],
+  "repo": "Azure/azure-cli",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}

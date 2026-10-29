@@ -1,0 +1,161 @@
+{
+  "instance_id": "Azure__msrest-for-python-55",
+  "n": 3,
+  "q1_best_k": 0,
+  "q1_best_k_blob_pages": 0,
+  "q1_best_k_history_pages": 0,
+  "q1_first_pr_or_commit_rank": null,
+  "q1_half_or_more": false,
+  "q2_best_k": 0,
+  "q2_best_k_blob_pages": 0,
+  "q2_best_k_history_pages": 0,
+  "queries": [
+    {
+      "label": "q1",
+      "query": "Improve exception string if custom exception Azure/msrest-for-python",
+      "results": [
+        {
+          "chars": 25864,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": true,
+          "sha256": "beff9ea4ae63a3d26865b69fc80c129479b4ab60f1685135b284ad10fc4cad7f",
+          "trivial": false,
+          "url": "https://github.com/Azure/msrest-for-python"
+        },
+        {
+          "chars": 15600,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "e15aee0d29d0fc9419135440415c29d1c04dabbe7567b2fa918f05d8f37152a0",
+          "trivial": false,
+          "url": "https://learn.microsoft.com/en-us/azure/developer/python/sdk/fundamentals/errors"
+        },
+        {
+          "chars": 37256,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "e51d8b2b3c5b6631900c2dd0af40acde45cbdb34c23446c1d245c352cf8b49ba",
+          "trivial": false,
+          "url": "https://medium.com/@alokrahuldevops/day-75-exception-handling-in-python-projects-building-production-grade-custom-exceptions-for-3ea5d785a7ea"
+        },
+        {
+          "chars": 16804,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "651b71c1781c5fad64ba3306ffde84284f31579a42caa4a2101cb83e676f96f1",
+          "trivial": false,
+          "url": "https://oneuptime.com/blog/post/2026-01-22-create-custom-exceptions-python/view"
+        },
+        {
+          "chars": 8297,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "ed02cbf986e2209b7cefeb0d3adc171f36708b4051304563ad83b380424d7c91",
+          "trivial": false,
+          "url": "https://learn.microsoft.com/en-us/python/api/azure-core/azure.core.exceptions?view=azure-python"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:09.762970+00:00"
+    },
+    {
+      "label": "oracle",
+      "query": "github.com/Azure/msrest-for-python/pull/55",
+      "results": [
+        {
+          "chars": 25864,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 1,
+          "repo_match": true,
+          "sha256": "beff9ea4ae63a3d26865b69fc80c129479b4ab60f1685135b284ad10fc4cad7f",
+          "trivial": false,
+          "url": "https://github.com/Azure/msrest-for-python"
+        },
+        {
+          "chars": 282258,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 2,
+          "repo_match": false,
+          "sha256": "492d7ccb07b36846ca2f40c61c8f94f9a76f240aefd86f4cade643e769a24cf4",
+          "trivial": false,
+          "url": "https://github.com/fire17/awesome-stars"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 3,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.indeed.com/q-data-engineer-azure-databricks-python-jobs.html"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 4,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.indeed.com/q-data-engineer-azure-sql-python-jobs.html"
+        },
+        {
+          "chars": 0,
+          "current_file_page": false,
+          "k": 0,
+          "matched_line_digests": [],
+          "n": 3,
+          "page_type": "other",
+          "rank": 5,
+          "repo_match": false,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "trivial": false,
+          "url": "https://www.indeed.com/q-azure-databricks-developer-with-etl-python-jobs.html"
+        }
+      ],
+      "searched_at": "2026-10-29T07:48:12.922712+00:00"
+    }
+  ],
+  "repo": "Azure/msrest-for-python",
+  "schema": "rewardseal.web-exposure",
+  "schema_version": 1
+}
