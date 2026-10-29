@@ -18,3 +18,5 @@ Evidence and raw-certificate links use `results/PINNED_SHA` when present: one li
 
 Exit 1 means the site was written but a committed file did not load; the page lists it under errors. Exit 0 means every file loaded.
 CI (`.github/workflows/pages.yml`) builds the same way on push to main. It deploys to GitHub Pages only after a successful build, on a public repo, with Pages enabled.
+
+When web exposure records are present, the index reports the full search date range and separates pull/commit/compare overlaps from current-file page overlaps. The oracle query searches for the pull request URL; these results show findability, not use, and are a lower-bound snapshot.

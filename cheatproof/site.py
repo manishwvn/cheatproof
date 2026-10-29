@@ -295,6 +295,11 @@ def build_site(
         _numbers_key(confirmation, exposure_summary, replications, manifest, sample),
         reconciliation,
         blob,
+        _web_exposure_section(
+            root.parent / "web-exposure",
+            Path(exposure_dir) if exposure_dir is not None else root.parent / "exposure",
+            errors,
+        ),
     )
     _write(index, _document("RewardSeal report", body, blob))
     pages = []
@@ -327,6 +332,83 @@ def _exposure_summary(certs: Path, records: Path, errors: list[tuple[str, str]])
     except (audit.ExposureAuditError, OSError) as exc:
         errors.append(("exposure", f"exposure audit records refused: {exc}"))
         return None
+
+
+def _web_exposure_section(directory: Path, exposure_dir: Path, errors: list[tuple[str, str]]) -> str:
+    from cheatproof import audit, webaudit
+
+    try:
+        webaudit.check_path(directory, directory=True)
+        paths = sorted(p for p in directory.glob("*.json") if not p.name.startswith("_"))
+        if not paths:
+            return ""
+        records = [webaudit.load_record(p) for p in paths]
+        if len({r["instance_id"] for r in records}) != len(records):
+            raise ValueError("duplicate instance id")
+        webaudit.check_path(exposure_dir, directory=True)
+        git = {}
+        for path in audit._record_files(exposure_dir):
+            webaudit.check_path(path)
+            scan = audit.load_record(path)
+            git[scan["instance_id"]] = scan
+    except (ValueError, OSError) as exc:
+        errors.append(("web-exposure", f"web exposure records refused: {type(exc).__name__}"))
+        return ""
+    rows = []
+    full = 0
+    for rec in records:
+        scan = git.get(rec["instance_id"], {}).get("future_scan", {})
+        overlap = (
+            f"{scan.get('gold_lines_in_future')} of {scan.get('gold_added_lines')} lines"
+            if scan
+            else "not recorded"
+        )
+        q1 = rec["queries"][0]["results"]
+        best = max(q1, key=lambda r: r["k"], default=None)
+        full += int(rec["n"] > 0 and rec["q1_best_k_history_pages"] == rec["n"])
+        rows.append(
+            _row(
+                rec["instance_id"],
+                overlap,
+                rec["q1_first_pr_or_commit_rank"] or "none",
+                f"{rec['q1_best_k_history_pages']}/{rec['n']}",
+                f"{rec['q2_best_k_history_pages']}/{rec['n']}",
+                f"Q1 {rec['q1_best_k_blob_pages']}/{rec['n']}; oracle query {rec['q2_best_k_blob_pages']}/{rec['n']}",
+                best["page_type"] if best else "none",
+            )
+        )
+    count = sum(r["q1_half_or_more"] for r in records)
+    dates = sorted(q["searched_at"][:10] for r in records for q in r["queries"])
+    period = f"On {dates[0]}" if dates[0] == dates[-1] else f"Between {dates[0]} and {dates[-1]}"
+    sentence = (
+        f"{period}, a Tavily search built only from the public issue title and the repository name (the repository name alone when the title was empty or looked unsafe) returned a page containing "
+        f"at least half of the counted gold lines in {count} of {len(records)} audited environments "
+        f"(all of them in {full}). Findability, not use. Web content changes: a dated snapshot and a lower bound."
+    )
+    if count == 0:
+        sentence = (
+            f"{period}, no search built only from the public issue title returned a page with "
+            "at least half of the counted gold lines."
+        )
+    return _section(
+        "web-exposure",
+        "Web exposure (Tavily)",
+        f"<p>{_cell(sentence)}</p>",
+        "<p>Rows with n &lt;= 1 are one-line overlaps.</p>",
+        _table(
+            "Web exposure",
+            (
+                "Instance",
+                "git overlap",
+                "Q1 PR/commit hit",
+                "Q1 history k/n",
+                "Oracle query history k/n",
+                "current-file page k/n",
+                "page type",
+            ),
+            rows,
+        ),
+    )
 
 
 def _load_all(root: Path) -> tuple[list[_Entry], list[tuple[str, str]]]:
@@ -983,6 +1065,7 @@ def _index_body(
     numbers_key: str = "",
     reconciliation: str = "",
     blob: str = GITHUB_BLOB,
+    web_exposure: str = "",
 ) -> str:
     """excluded counts the certificate files left out (errors also holds a bad batch record, which is not one).
     confirmation, manifest, replications and statuses (T54) feed the hero block and the confirmed/lead counts."""
@@ -1012,7 +1095,9 @@ def _index_body(
             _environments_section(entries, statuses or {}),
         ]
     )
-    return "\n".join([*head, numbers_key, _reading_guide(blob), start_here, *middle, _errors_section(errors)])
+    return "\n".join(
+        [*head, numbers_key, _reading_guide(blob), start_here, web_exposure, *middle, _errors_section(errors)]
+    )
 
 
 START_HERE_STEPS = (
