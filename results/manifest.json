@@ -86,6 +86,11 @@
       "sha256": "c15d07162342f7e40cc310fce623db7180c2c4a30dfdf832b590a43b132450d4"
     },
     {
+      "bytes": 1368,
+      "path": "results/control/CycloneDX__cyclonedx-python-348-retrieval-control.json",
+      "sha256": "c710155768617945de457bb2d4f6a4734880314e23a44a965df4adc3af571942"
+    },
+    {
       "bytes": 1353,
       "path": "results/control/Dorthu__openapi3-75-retrieval-control.json",
       "sha256": "4b90e5ea1bf5a077276b00c9806890f6928cfb3c87cc4ff3e83e8268de91ec7f"
@@ -94,6 +99,11 @@
       "bytes": 4394,
       "path": "results/evidence/348-causal.md",
       "sha256": "6b28e3b6ade59adb0a1c71d875612047a18804fed4bcd7c18a4c1f4770d8f606"
+    },
+    {
+      "bytes": 2036,
+      "path": "results/evidence/348-route-replay.json",
+      "sha256": "d00a23468bf758879edebfa9056a8659755f6e619728437900380684f2fab2ca"
     },
     {
       "bytes": 1916,
@@ -351,8 +361,8 @@
       "sha256": "33ca6591c194951130b6a3da50f0d08829319b13c2c1b001c76d45d35258343d"
     }
   ],
-  "generated_utc": "2026-10-29T20:03:30.441180+00:00",
-  "repo_sha": "01bbe0ac043d74156028993178433a179c4d741e",
+  "generated_utc": "2026-10-29T20:33:02.316088+00:00",
+  "repo_sha": "dea83069c0436127841ddf03d6a0abbcb65068ab",
   "schema": "rewardseal.evidence-manifest",
   "schema_version": 1,
   "totals": {

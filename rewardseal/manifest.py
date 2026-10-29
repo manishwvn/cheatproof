@@ -21,6 +21,7 @@ PATTERNS = (
     "results/confirmations.json",
     "results/batch.json",
     "results/evidence/*.md",
+    "results/evidence/*.json",
     "results/replications/*.json",
     "results/ultra/*.json",
     "results/control/*.json",
