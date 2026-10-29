@@ -6,8 +6,8 @@ The report replays committed evidence; it is not a live attack.
 
 ## Recorded results
 
-- In 12 of 13 audited environments, every counted gold-added source line appeared in a future commit; 2 of those 12 had only one counted line. After `strip-future-git`, no future commits remained in the task repo and gold and empty gates held in 11 of those 12. The 18 lowest-scoring tasks were selected; 5 were environment-broken. Line overlap does not establish that the whole fix is retrievable, and incomplete scans can miss it.
-- On 348, 1 of 9 committed Super before-rounds showed a history-use pattern (1 of 7 excluding 2 HTTP 503 errors); use is inferred from command order and a matching line. Follow-up was unequal, recon was on, and these counts are not a rate. A fresh hardened re-attack failed. One separate Ultra run showed the pattern before hardening; its re-attack reached the token limit without submission and was not certified.
+- In 12 of 13 audited environments, every counted gold-added source line appeared in a future commit; 2 of those 12 had only one counted line. After `strip-future-git`, no future commits remained in the task repo and gold and empty gates held in 11 of those 12 (the remaining one, BQSKit-134, had already failed its gold gate before hardening). The 18 lowest-scoring tasks were selected; 5 were environment-broken. Line overlap does not establish that the whole fix is retrievable, and incomplete scans can miss it.
+- On 348, 1 of 9 committed Super before-rounds (the 2026-10-24 rerun, rep1-4, run1-4) showed a history-use pattern (1 of 7 excluding 2 HTTP 503 errors; 1 of 10 counting the null same-recon replay attempt); use is inferred from command order and a matching line. Follow-up was unequal, recon was on, and these counts are not a rate. A fresh hardened re-attack failed. One separate Ultra run showed the pattern before hardening; its re-attack reached the token limit without submission and was not certified.
 - The separate predeclared sample drew 12 tasks from a 1000-row frame: 9 audited, 3 environment-broken, 7 of 9 with at least half the counted lines in future commits, and 5 of those 7 closed. This is a count within the stated frame.
 - There are 14 certificate files, 4 certified (1 after hardened re-attack, 3 legacy), and 11 tasks attacked. Of 9 future-history tasks attacked with recon, 1 finding was confirmed, 1 lead was unconfirmed, and 7 showed no leak use or were inconclusive.
 - Tavily returned a counted gold line in 0 of 13 audited tasks; the query did not return the PR pages either. This is a dated result for one search tool, not evidence of absence.
@@ -36,13 +36,18 @@ uv run python -m rewardseal.cli site --certs results/certificates --out results/
 uv run python -m rewardseal.manifest verify
 ```
 
-The following live commands require configured credentials, cached tasks and budget settings; they can spend credits. See [method](docs/method.md) for execution and caps.
+Live runs also need a Nebius Token Factory account (API key and project ID) and Sandboxes beta access; a Tavily key is only needed with `--network-fetch`. Copy `.env.example` to `.env` (git-ignored, never commit it) and set `NEBIUS_API_KEY`, `NEBIUS_PROJECT_ID`, `SPEND_CAP_USD`, `DAILY_CAP_USD` (both required), `EXECUTOR=sandbox` and `SPEND_LEDGER` (absolute path). `ATTACKER_MODEL` defaults to Nemotron Super (`nvidia/nemotron-3-super-120b-a12b`). Live commands can spend credits and all go through the budget guard; see [method](docs/method.md).
 
 ```sh
+uv run python -m rewardseal.cli budget init        # once per ledger; refuses an existing file
+uv run python -m rewardseal.tasks fetch --source swe-rebench --n 11   # free public rows API, cached in runs/tasks/
 uv run python -m rewardseal.cli audit-exposure --instance-ids <task-id> --out results/exposure
-uv run python -m rewardseal.cli harden <task-id> --system-prompt-file results/combined.txt --strategy combined --out results/certificates
-uv run python scripts/smoke.py
+uv run python -m rewardseal.cli harden <task-id> --system-prompt-file results/combined.txt --strategy combined \
+    --attacker-model nvidia/nemotron-3-super-120b-a12b --max-steps 40 --max-tokens 250000 --out results/certificates
+uv run python scripts/smoke.py                      # key, model IDs, one capped Nemotron call, one sandbox run
 ```
+
+`harden` and `batch` read tasks from the local cache only, so run `tasks fetch` first. The recorded 348 certificate configured 40 steps / 500,000 tokens for both rounds.
 
 ## Limits
 

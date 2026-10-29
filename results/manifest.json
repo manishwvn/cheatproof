@@ -361,8 +361,8 @@
       "sha256": "33ca6591c194951130b6a3da50f0d08829319b13c2c1b001c76d45d35258343d"
     }
   ],
-  "generated_utc": "2026-10-29T21:11:13.412563+00:00",
-  "repo_sha": "3a96a10a119335742dd6f0feec4b5a6719179085",
+  "generated_utc": "2026-10-29T21:14:41.382122+00:00",
+  "repo_sha": "61df32bc5807f4f40e496674a89ea8944aa619f5",
   "schema": "rewardseal.evidence-manifest",
   "schema_version": 1,
   "totals": {
