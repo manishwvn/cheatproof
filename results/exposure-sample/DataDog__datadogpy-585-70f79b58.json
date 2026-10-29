@@ -1,0 +1,51 @@
+{
+  "base_commit": "3b5b03198899bee8d4d1bb6cc0ee1f398f6bafc0",
+  "closed": true,
+  "closed_reason": null,
+  "executor": "sandbox",
+  "fix_reachable": true,
+  "fix_reachable_basis": "10 of 10 gold source lines found in future commits",
+  "future_commits_after": 0,
+  "future_commits_before": 295,
+  "future_scan": {
+    "commit_ids": [
+      "fc4c14715c76",
+      "c71bd8de53aa",
+      "a90896ab681c",
+      "ec571f6593c9",
+      "af1c23bf9cd1",
+      "27e161b83be3",
+      "6c5fd54b7989",
+      "e9900e3b1445",
+      "3e81ec6790e9",
+      "109a987c7548",
+      "7e6a3f3de6df",
+      "7d644c95d2b8",
+      "6f1d687f2b8d"
+    ],
+    "commits_scanned": 13,
+    "complete": true,
+    "gold_added_lines": 10,
+    "gold_lines_in_future": 10,
+    "gold_paths_touched_by_future_commits": 2,
+    "lines": 65,
+    "list_complete": true,
+    "paths": [
+      "datadog/api/http_client.py",
+      "setup.py"
+    ]
+  },
+  "instance_id": "DataDog__datadogpy-585",
+  "patch": {
+    "applied": true,
+    "empty_gate_ok": true,
+    "gold_gate_ok": true,
+    "name": "strip-future-git"
+  },
+  "refs_before": 114,
+  "repo": "DataDog/datadogpy",
+  "sandbox_runs": 5,
+  "schema": "rewardseal.exposure-audit",
+  "schema_version": 1,
+  "timestamp": "2026-10-29T07:00:14.110238+00:00"
+}

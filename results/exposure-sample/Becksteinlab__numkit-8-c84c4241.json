@@ -1,0 +1,41 @@
+{
+  "base_commit": "af05227af13f4bb56f867b026014048f0e3f0454",
+  "closed": false,
+  "closed_reason": "patch_not_applied",
+  "executor": "sandbox",
+  "fix_reachable": true,
+  "fix_reachable_basis": "1 of 1 gold source lines found in future commits",
+  "future_commits_after": 55,
+  "future_commits_before": 55,
+  "future_scan": {
+    "commit_ids": [
+      "da1f8e68d39d",
+      "163ed866e879",
+      "c27784ea105b",
+      "e91616f283ce"
+    ],
+    "commits_scanned": 4,
+    "complete": true,
+    "gold_added_lines": 1,
+    "gold_lines_in_future": 1,
+    "gold_paths_touched_by_future_commits": 1,
+    "lines": 7,
+    "list_complete": true,
+    "paths": [
+      "src/numkit/timeseries.py"
+    ]
+  },
+  "instance_id": "Becksteinlab__numkit-8",
+  "patch": {
+    "applied": false,
+    "empty_gate_ok": true,
+    "gold_gate_ok": true,
+    "name": "strip-future-git"
+  },
+  "refs_before": 13,
+  "repo": "Becksteinlab/numkit",
+  "sandbox_runs": 5,
+  "schema": "rewardseal.exposure-audit",
+  "schema_version": 1,
+  "timestamp": "2026-10-29T06:38:01.518430+00:00"
+}

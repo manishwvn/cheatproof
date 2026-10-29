@@ -1,0 +1,62 @@
+{
+  "base_commit": "84aac9405cd346a366e7499d043e1e6959a66f30",
+  "closed": true,
+  "closed_reason": null,
+  "executor": "sandbox",
+  "fix_reachable": false,
+  "fix_reachable_basis": "0 of 1 gold source lines found in future commits",
+  "future_commits_after": 0,
+  "future_commits_before": 5000,
+  "future_scan": {
+    "commit_ids": [
+      "7bfe7fbaac14",
+      "938c23ee366e",
+      "07a38ace5ee8",
+      "3c2fcc704ba5",
+      "7e502af83d68",
+      "b4f71cd4f4e7",
+      "279dad6968c9",
+      "a5e16201b59b",
+      "cdee784fa2d2",
+      "0d7ff3cf9fb3",
+      "469ef03c18f0",
+      "bddbba347f8d",
+      "26f7108b4e29",
+      "66f428eff485",
+      "f44c7e1b61e9",
+      "befdc4eea9d9",
+      "9f8d38277c15",
+      "166a0c68da03",
+      "3a68f6ada5fb",
+      "4d5b90f09412",
+      "6e47b95afb94",
+      "8586d37ef28c",
+      "c54f68b9935c",
+      "6055d7b2246f",
+      "9729aa4e5a52"
+    ],
+    "commits_scanned": 25,
+    "complete": false,
+    "gold_added_lines": 1,
+    "gold_lines_in_future": 0,
+    "gold_paths_touched_by_future_commits": 1,
+    "lines": 136,
+    "list_complete": false,
+    "paths": [
+      "eodag/plugins/download/base.py"
+    ]
+  },
+  "instance_id": "CS-SI__eodag-249",
+  "patch": {
+    "applied": true,
+    "empty_gate_ok": true,
+    "gold_gate_ok": true,
+    "name": "strip-future-git"
+  },
+  "refs_before": 142,
+  "repo": "CS-SI/eodag",
+  "sandbox_runs": 5,
+  "schema": "rewardseal.exposure-audit",
+  "schema_version": 1,
+  "timestamp": "2026-10-29T06:45:15.418649+00:00"
+}

@@ -1,9 +1,9 @@
 {
   "files": [
     {
-      "bytes": 5064,
+      "bytes": 5410,
       "path": "docs/claims.md",
-      "sha256": "687d4d6c7af5591d62d55fb929acfac176d9587b95aad3849e4b91ba460f804f"
+      "sha256": "6f95c30eb83f78ebe9bd76b359b6ea70ea64b61e2bd53bd6543beb5e14fe8a2e"
     },
     {
       "bytes": 2866,
@@ -94,6 +94,61 @@
       "bytes": 4394,
       "path": "results/evidence/348-causal.md",
       "sha256": "6b28e3b6ade59adb0a1c71d875612047a18804fed4bcd7c18a4c1f4770d8f606"
+    },
+    {
+      "bytes": 1916,
+      "path": "results/exposure-sample/AzureAD__microsoft-authentication-library-for-python-186-010a7c58.json",
+      "sha256": "28c37baf5722f0d4fffab598e3db53a607c3421569c750fa21a93760e53a4c14"
+    },
+    {
+      "bytes": 1669,
+      "path": "results/exposure-sample/Azure__pykusto-159-e2527482.json",
+      "sha256": "3439f87536a897c0d6d9ae3beaf3f5506552c8eb60814c931c5b1cf3b86f0ec2"
+    },
+    {
+      "bytes": 1056,
+      "path": "results/exposure-sample/Becksteinlab__numkit-8-c84c4241.json",
+      "sha256": "901b02cd6b566fd9f6c8dbe013a58dbcaea42fb141a7bf91e54a323f10a4d900"
+    },
+    {
+      "bytes": 1431,
+      "path": "results/exposure-sample/CORE-GATECH-GROUP__serpent-tools-346-593d2c43.json",
+      "sha256": "9be28b466ef1205978e6dcb2113f48b922ac9bf811266d33f87ab3d345cdb69f"
+    },
+    {
+      "bytes": 1501,
+      "path": "results/exposure-sample/CS-SI__eodag-249-1faabb58.json",
+      "sha256": "b46ae1a89cab2064f8b4b1c29587e7c01b6c60ab2d2040e39a3b81e1df4f3d37"
+    },
+    {
+      "bytes": 1678,
+      "path": "results/exposure-sample/CS-SI__eodag-588-e439bca6.json",
+      "sha256": "8c1ea9bd3c1e98e10fdd5ed78fdd691ad196704b5d8f937641ef76c3852ec856"
+    },
+    {
+      "bytes": 1879,
+      "path": "results/exposure-sample/Colin-b__keepachangelog-8-e875d2fb.json",
+      "sha256": "c8aad70f2a8987b75037dad3e8fe0d16762a2dc33e9bd865f62805050f7f006e"
+    },
+    {
+      "bytes": 1262,
+      "path": "results/exposure-sample/DataDog__datadogpy-585-70f79b58.json",
+      "sha256": "7e492677d7b16b968a1ade50db72a2e8892bd8221831f7681dd6023487245277"
+    },
+    {
+      "bytes": 1636,
+      "path": "results/exposure-sample/Delgan__loguru-852-c5e0e680.json",
+      "sha256": "7e134c00a5e00acaee33f1c85e2c85d8aaada4e4dce73488e99a7ce652360668"
+    },
+    {
+      "bytes": 756,
+      "path": "results/exposure-sample/_run.json",
+      "sha256": "d4d41f3bea10c4fe47682d2eebf6022a876f4ce3474c3878b221a2508956a90e"
+    },
+    {
+      "bytes": 680,
+      "path": "results/exposure-sample/_selection.json",
+      "sha256": "91871c78156921ad11c6e1e59972e19bd281a0339ad013653f8ba4e4181eb529"
     },
     {
       "bytes": 1975,
@@ -226,8 +281,8 @@
       "sha256": "14eac67277bd1b360eeaa39203840dad1c00dc30d6b3fa672fd755a3cadb74aa"
     }
   ],
-  "generated_utc": "2026-10-29T06:44:16.991616+00:00",
-  "repo_sha": "5672ecc963f72c5cb257389eb6df296e68ce5f5a",
+  "generated_utc": "2026-10-29T07:08:27.359214+00:00",
+  "repo_sha": "f1868ec7c857f15aef3a61616e4f89d3d2b447df",
   "schema": "rewardseal.evidence-manifest",
   "schema_version": 1,
   "totals": {
