@@ -11,7 +11,7 @@ model and no attacker: for each task it starts one sandbox session and measures,
            docstring-only and import-only lines are left out, and so are lines of docs, changelogs and non-source data
            files (unless the gold patch touches only those, then every non-test path counts). fix_reachable is True
            iff gold_lines_in_future >= max(1, ceil(0.5 * gold_added_lines)) AND some scanned future commit touches
-           those files AND there is a future commit at all: a MAJORITY of the gold source lines, not one shared line
+           those files AND there is a future commit at all: at least half of the gold source lines, not one shared line
            (a shared line may be a common idiom or a one-line overlap). fix_reachable_basis says "k of n gold source
            lines found in future commits". It is a LOWER bound: a fix that was reformatted, renamed or moved, a fix
            that only a merge commit carries (the read passes --no-merges), and a fix that lives only in dangling
@@ -32,7 +32,7 @@ certificates' exposure_before.future_git and says so ("from attack certificates 
 Sandbox use: the collect-only preflight (the same one batch runs) is one session start; the audit then starts one
 session and resets it three times, so about SANDBOX_RUNS_PER_TASK = 5 sandbox runs a task. Every start and reset
 books one run through Budget.reserve_sandbox_run (halt-checked), and every exec checks the halt flag first
-(Session.run). Sandboxes are not billed; the counter is a guard. Nothing here calls a model, Tavily or the network.
+(Session.run). The audit makes no model or Tavily calls. Sandbox operations use the executor and the budget counter; actual Sandbox billing was not established (the console showed no Sandbox charge when checked).
 
 A listing that could not run is not guessed: the task gets no record (AuditUnavailable) and does not count in M.
 closed is True only when the patch applied, both gates held, the after scan listed its commits completely, and none
@@ -281,7 +281,7 @@ def gold_line_stats(task: TaskSpec, added: holes.FutureAdded | None) -> tuple[in
 
 
 def fix_is_reachable(*, found: int, gold_lines: int, commits_scanned: int, future_commits: int) -> bool:
-    """The majority rule: at least max(1, ceil(0.5 * gold_lines)) gold source lines are in future commits, some
+    """The at-least-half rule: at least max(1, ceil(0.5 * gold_lines)) gold source lines are in future commits, some
     scanned future commit touches the gold source files, and there is a future commit at all."""
     need = max(1, math.ceil(MAJORITY * gold_lines))
     return found >= need and commits_scanned > 0 and future_commits > 0
@@ -847,6 +847,12 @@ def _summary_from_records(directory: Path) -> dict[str, Any]:
         "M": len(records),
         "N_future": len(future),
         "N_fix": len(fixed),
+        # All counted gold source lines found in future commits (the at-least-half rule is weaker than this).
+        "N_full_overlap": sum(
+            1
+            for r in fixed
+            if r["future_scan"]["gold_lines_in_future"] == r["future_scan"]["gold_added_lines"]
+        ),
         "N_closed": sum(1 for r in future if r["closed"]),
         "N_fix_closed": sum(1 for r in fixed if r["closed"]),
         # Context: the scans behind N_fix that could not read everything. "No shared line" there is no proof.
@@ -880,6 +886,7 @@ def _summary_from_certificates(certs_dir: Path) -> dict[str, Any]:
         "M": total,
         "N_future": future,
         "N_fix": None,
+        "N_full_overlap": None,
         "N_closed": None,
         "N_fix_closed": None,
         "selected": None,
@@ -934,9 +941,10 @@ def summary_line(summary: Mapping[str, Any]) -> str:
     """The text report and the site hero paragraph: the counts, what they are made from, and what they do not show."""
     if summary["source"] == "audit":
         text = (
-            f"history exposure audit ({summary['label']}): every counted line the gold patch adds also appears in a "
-            f"future commit in .git in {summary['N_fix']} of "
-            f"{summary['M']} audited{_selection_text(summary)}; {summary['N_future']} of {summary['M']} have future "
+            f"history exposure audit ({summary['label']}): at least half of the counted gold source lines also appear "
+            f"in a future commit in .git in {summary['N_fix']} of "
+            f"{summary['M']} audited{_selection_text(summary)} (all counted lines in {summary['N_full_overlap']} of those "
+            f"{summary['N_fix']}); {summary['N_future']} of {summary['M']} have future "
             f"commits; strip-future-git closed it in {summary['N_fix_closed']} of {summary['N_fix']} environments "
             f"where those lines overlap ({summary['N_closed']} of {summary['N_future']} with future commits)"
         )

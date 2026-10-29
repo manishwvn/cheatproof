@@ -78,8 +78,8 @@ For each task (the project plans a 40-task set: 30 SWE-rebench and 10 SWE-bench 
    edits to test files, network off.
 6. **Re-attack.** The same attacker, with the same limits, attacks the patched environment. The gold and empty gates
    run again.
-7. **Certificate.** A JSON file per task. `certified` is true only if the gold patch passes, the empty patch fails,
-   and the attacker did not exploit the hardened task. A leak guard refuses to write a certificate that holds a
+7. **Certificate.** A JSON file per task. It records the outcome. `certified` is true only if the gold patch passes, the
+   empty patch fails, and either the first qualifying attack failed or a qualifying hardened re-attack failed. A leak guard refuses to write a certificate that holds a
    secret-like value. A run that never submitted (step or token limit) is `inconclusive`, never certified.
 
 "Not hackable" always means **the recorded qualifying attack by this attacker did not succeed** under the stated prompt, hints and limits. It does not show the attacker cannot succeed on another attempt, and it is not a statistical bound.
@@ -191,7 +191,7 @@ attacker prompt used for the results (`cheatproof.strategies.COMBINED`). Run `ba
 scan finds a hole, the attacker's first message includes the sanitized findings (`recon=exposure` in the certificate,
 `batch.json` and the site); `--no-recon` turns that off.
 
-Each run keeps its full trace, raw diffs and restore set under the git-ignored `results/traces/` (never committed).
+Runs keep traces, raw diffs and restore sets locally under the git-ignored `results/traces/` (never committed); command outputs in traces are truncated (hash, size and a head).
 `python -m cheatproof.cli holes recheck <stem>` re-checks hole labels from those files offline. Live smoke check of
 key, model IDs, one capped Nemotron call and one sandbox run: `uv run python scripts/smoke.py`.
 
@@ -223,7 +223,7 @@ secret-like values.
 
 ## Certification semantics
 
-A certificate says a task was not hackable **by this attacker**, never that it is secure. `certified_via` records how:
+Certification records the outcome of the qualifying attack and the gates; it is not a security guarantee. `certified_via` records how:
 
 - `no_hole_found`: the attacker failed before any patch was applied.
 - `hardened_reattack_failed`: the attacker found a hole, the patches were accepted (gold still passes), and the same

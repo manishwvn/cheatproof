@@ -364,7 +364,7 @@ def test_the_env_page_shows_a_before_after_panel_for_a_legit_fix(tmp_path):
         "legit_fix (passed the hidden tests like the gold fix; not an exploit)",
         "Hole closed, task still solvable",
         "against this attacker",
-        "legit_fix: hole closed, task still solvable",
+        "legit_fix: the recorded checks did not find the earlier exposure",
     ):
         assert text in page, text
     assert "EXPLOIT-DIFF" not in page and "return 41 + 1" not in page
@@ -528,7 +528,10 @@ def test_the_index_shows_via_next_to_certified_and_the_new_caption(tmp_path):
     assert "<td>yes</td><td>legit_fix</td>" in index
     assert "<td>yes</td><td>no_hole_found</td>" in index
     assert "<td>yes</td><td>legacy</td>" in index
-    assert "no hole left that this attacker could use (via: how it was certified)" in index
+    assert (
+        "Certified means the recorded qualifying attack failed" in index
+        and "(via: how it was certified)" in index
+    )
     assert "Certified via legit_fix (also counted in Certified)</th><td>1</td>" in index
     assert "Certified via legacy (also counted in Certified)</th><td>1</td>" in index
 
@@ -578,5 +581,8 @@ def test_the_site_shows_the_harness_search_tag_the_via_column_and_the_panel(tmp_
     assert "harness search via Tavily" in index
     assert '<th scope="col">Via</th>' in index and "<td>yes</td><td>legit_fix</td>" in index
     page = next((tmp_path / "site" / "env").glob("*.html")).read_text(encoding="utf-8")
-    assert "Before and after hardening" in page and "legit_fix: hole closed, task still solvable" in page
+    assert (
+        "Before and after hardening" in page
+        and "legit_fix: the recorded checks did not find the earlier exposure" in page
+    )
     assert "harness search via Tavily" in page or "tavily" in page

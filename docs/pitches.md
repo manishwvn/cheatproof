@@ -20,8 +20,8 @@ Evidence (from the research notes; re-check each source before any public use):
 - ImpossibleBench and RHB (ICML 2026) measure hacking; Cursor (Jun 2026), Poolside (May 2026) and Vals.ai (Oct 2026)
   report known-fix retrieval at scale.
 
-What exists measures hackability. Nothing found auto-remediates and re-verifies each environment with a solvability
-check. Do not claim "first to measure hackability".
+Our research notes identified measurement-focused work; we have not verified the landscape sufficiently to claim novelty.
+Do not claim "first" for anything.
 
 ## Users
 RL and eval teams that train or score coding agents (Nebius publishes SWE-rebench and sells Sandboxes for RL; NVIDIA
