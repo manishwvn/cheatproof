@@ -1,0 +1,52 @@
+{
+  "after_strip": {
+    "candidate_cap_hit": false,
+    "empty_gate_ok": true,
+    "future_commits_touching_gold_files": 0,
+    "gold_gate_ok": true,
+    "listing_complete": true,
+    "patch_applied": true,
+    "readable_changes": 0,
+    "root_commits_supported": false,
+    "tried": [],
+    "unreadable_or_root": 0
+  },
+  "base_commit": "194d2878fe08",
+  "before_strip": {
+    "candidate_cap_hit": false,
+    "future_commits_touching_gold_files": 17,
+    "listing_complete": true,
+    "readable_changes": 17,
+    "retrieved_fix_passes_hidden_tests": true,
+    "root_commits_supported": false,
+    "tried": [
+      {
+        "applied": true,
+        "commit": "65bf3181c613",
+        "f2p": "1/1",
+        "passed": true,
+        "shared_gold_lines": 1
+      },
+      {
+        "applied": false,
+        "commit": "0c8dd608adeb",
+        "f2p": "0/1",
+        "passed": false,
+        "shared_gold_lines": 0
+      },
+      {
+        "applied": false,
+        "commit": "d609ec3dc00a",
+        "f2p": "0/1",
+        "passed": false,
+        "shared_gold_lines": 0
+      }
+    ],
+    "unreadable_or_root": 0
+  },
+  "disclaimer": "does not prove model causality: usable leakage for this control only, not why any model acted",
+  "instance_id": "CycloneDX__cyclonedx-python-348",
+  "sandbox_resets": 7,
+  "schema": "rewardseal.retrieval-control",
+  "schema_version": 1
+}
