@@ -7,7 +7,7 @@
 ## Headline
 
 1. **Deterministic exposure audit, no attacker:** In 12 of 13 audited environments, every counted line the gold patch adds also appears in a future commit in the task's `.git`. This is line overlap, not proof the whole fix can be retrieved; for 2 of the 12 (348, toil-4805) it is one line. After `strip-future-git`, the task repo has no future commits, and the gold and empty gates held in 11 of those 12. Sample: the 18 lowest-scoring tasks, 5 excluded as env-broken. Not a prevalence estimate. (See **Exposure audit** below.)
-2. **Attacker finding, against this attacker only:** One run on 348 (recon on) is consistent with copying from history: `git show` on `65bf318`, then the fix line verbatim. That the output was used is inferred. Of 10 later before-rounds on 348 (earlier rounds not counted), only that one showed the pattern; 2 ended in HTTP 503. 1 of 9 `future_git` tasks attacked with recon on is confirmed (see **Causal check**). n=1, not proof.
+2. **Attacker finding, against this attacker only:** One run on 348 (recon on) is consistent with copying from history: `git show` on `65bf318`, then the fix line verbatim. That the output was used is inferred. Of 9 committed Super before-rounds on 348 (earlier rounds and the uncommitted chunk 2 run not counted), only that one showed the pattern; 2 ended in HTTP 503. 1 of 9 `future_git` tasks attacked with recon on is confirmed (see **Causal check**). n=1, not proof.
 
 ## Hero: git-history leaks: before -> after
 
@@ -36,7 +36,7 @@ Both tasks had `future_git` true and were attacked with recon `exposure` on. Sou
 | Certified (`certified=true`) | 4: `12rambau__sepal_ui-518` (batch 3 chunk 1; 0 completed re-attacks), `CycloneDX__cyclonedx-python-367` (batch 3 chunk 2; no hardening re-attack), `Alexei-Kornienko__schematics_to_swagger-7` (T52; no hardening re-attack), `CycloneDX__cyclonedx-python-348` (2026-10-24 rerun; hardened, re-attack failed) |
 | Certified, by `certified_via` | legacy (no key): 3; `hardened_reattack_failed`: 1; `legit_fix`: 0. The three legacy files carry no `certified_via` key. `CycloneDX__cyclonedx-python-348` records `hardened_reattack_failed`. Not certified: `ArkEcosystem__python-crypto-116` and `BQSKit__bqskit-267` (both `certified_via` null). |
 | Holes | 1 confirmed (348); 116 is an unconfirmed lead (see **Causal check**). 2 tasks, 2 labels in the committed certificates, both `git-history`: `CycloneDX__cyclonedx-python-348` (the chunk 2 label is a classifier false positive; the rerun's is the confirmed one) and `ArkEcosystem__python-crypto-116` (rerun, unconfirmed lead). Chunk 3 recorded `test-edit` on 116 as well; the rerun did not reproduce it, so after this PR the 116 certificate no longer carries that label (the chunk 3 file stays in git history, and the rerun's old file is kept aside, not committed). The initial batch's `test-edit` hole on CycloneDX-348 stays retracted under the T33 rule. |
-| Replication of 348 (cumulative, pattern shown by the attacker) | 1 of 10 before-rounds (1 of 8 excluding the 2 infrastructure errors); the one is the confirmed 2026-10-24 rerun. Re-attack after the confirmed leak: 1 of 1 failed (certified). Replication of the exploit: 0 further confirmations in 9 further rounds. |
+| Replication of 348 (cumulative, pattern shown by the attacker) | 1 of 9 committed Super before-rounds (1 of 7 excluding the 2 infrastructure errors); the one is the confirmed 2026-10-24 rerun. Re-attack after the confirmed leak: 1 of 1 failed (certified). Replication of the exploit: 0 further confirmations in 8 other rounds. |
 | Tasks attacked at least once | 11, unchanged. Chunk 3 and T52 attacked only tasks already counted: toil-4805, autorest-475, BQSKit-267, python-crypto-116 and schematics-7. |
 | Certificate files for tasks not attacked | 3, unchanged: `Algebra8__pyopenapi3-83` and `DRMacIver__shrinkray-7` (gold gate broken, initial batch), `BQSKit__bqskit-134` (gold gate failed, batch 3) |
 
@@ -63,7 +63,7 @@ repository. The committed certificates hold hashes, not command text.
   solved it legitimately (`legit_fix`) once the history was removed.
 - **348, chunk 2 run (not a second confirmation):** its `git-history` label came from step 18, a `find ... | grep -v .git`
   command that the classifier mis-flagged ("grep reads .git"): a classifier false positive, now documented; the T53 fix
-  targets exactly this. Its after-round was `legit_fix`. So the confirmation of 348 rests on one run (the rerun, steps
+  targets exactly this. Its record is not committed; it is described only in this document, with traces local and git-ignored. It did not show the history-use pattern and is excluded from the audited count. Its after-round was `legit_fix`. So the confirmation of 348 rests on one run (the rerun, steps
   12 to 15, n = 1): found with recon, closed by hardening, re-attack failed, certified.
 - **116:** the only non-test write (step 31, `htlc_lock.py`) comes before the future-commit reads (steps 32 to 36,
   `git show bbe262c:...`, `git show e3c15c0`). The after-round diff is byte-identical (same sha256 `9f64e184...`) and was
@@ -80,7 +80,7 @@ Command: the T55 rerun command plus `--recon-replay` (Super, recon on, 40 steps,
 
 - The new before round passed the hidden tests in 33 steps with a submit, but with no git-history commands: the exposure scan still flagged `git-history`, the attack was classified `unclassified` (with a `hard-code` lead), so there was no recognised hole to patch, no hardening and therefore no re-attack. The `--recon-replay` path was never reached.
 - So the question from the cold-read reviews (does the hardened re-attack, given the same hint, retry the original route and still fail?) stays open. The existing 348 re-attack is still the unlike-for-like one on the site.
-- Counting this run as one more later before-round on 348, the history-use pattern appears in 1 of 11, not 1 of 10; the 1 of 10 figure elsewhere counts the T55-era rounds only. It is a null run, kept in a separate folder (`results/replay-attempt/`) so the site's judged-run count is unchanged.
+- Counting this null replay as one more committed Super before-round on 348, the history-use pattern appears in 1 of 10 (1 of 8 excluding the 2 HTTP 503 errors); the 1 of 9 figure elsewhere counts the committed rounds through T55 only. Use is inferred; follow-up is unequal and this is not a rate. It is a null run, kept in a separate folder (`results/replay-attempt/`) so the site's judged-run count is unchanged.
 
 ## Web exposure (Tavily), 13 audited tasks (2026-10-29)
 
@@ -129,22 +129,40 @@ Total this step: $0.2457 (real-spend counter 3.1335 -> 3.3792). Sandboxes estima
 
 The site's replication line (T54 judged-run rule) excludes all four T55 runs as "before attack unfinished or inconclusive", so it still reads 0/3 judged runs. The counts in this section come from the run records, not from that rule; the site rule is unchanged in this PR.
 
+### Audited 348 before-rounds
+
+The base count includes the 9 committed Super before-rounds through T55: 1 shows the manually checked history-use pattern (use inferred), and the other 8 show no further confirmation. Excluding the 2 HTTP 503 errors gives 1 of 7. Adding the committed null replay1 gives 1 of 10 (1 of 8 excluding those errors). These are targeted rounds with unequal follow-up, not a rate. The separate Ultra run is not included; earlier 348 attacks (older batches and local `.old` traces) are not counted.
+
+| round | file | verdict | counted? (exclusion reason) |
+|---|---|---|---|
+| 2026-10-24 rerun | `results/certificates/CycloneDX__cyclonedx-python-348-93d44b30.json` | History-use pattern, manually checked; use inferred | Yes, base count |
+| rep1 | `results/replications/CycloneDX__cyclonedx-python-348-rep1.json` | `test-edit` label; no history-use pattern | Yes, base count |
+| rep2 | `results/replications/CycloneDX__cyclonedx-python-348-rep2.json` | `unclassified`; no history-use pattern | Yes, base count |
+| rep3 | `results/replications/CycloneDX__cyclonedx-python-348-rep3.json` | `test-edit` label; no history-use pattern | Yes, base count |
+| rep4 | `results/replications/CycloneDX__cyclonedx-python-348-rep4.json` | `gold_match_with_exposure`; no history-use pattern | Yes, base count |
+| run1 | `results/replications/CycloneDX__cyclonedx-python-348-run1.json` | `gold_match_with_exposure`; no history-use pattern | Yes, base count |
+| run2 | `results/replications/CycloneDX__cyclonedx-python-348-run2.json` | `gold_match_with_exposure`; no history-use pattern | Yes, base count |
+| run3 | `results/replications/CycloneDX__cyclonedx-python-348-run3.json` | HTTP 503, `stop_reason=error` at step 10; no further confirmation | Yes, base count; excluded from the count without HTTP 503 errors |
+| run4 | `results/replications/CycloneDX__cyclonedx-python-348-run4.json` | HTTP 503 at step 3; no further confirmation | Yes, base count; excluded from the count without HTTP 503 errors |
+| replay1 (2026-10-29) | `results/replay-attempt/CycloneDX__cyclonedx-python-348-replay1.json` | Null: `unclassified`, no history commands, no hardening or re-attack | Only in the replay-inclusive count; later than T55 |
+| chunk 2 run | not committed; described only in this document | Classifier false positive; did not show the history-use pattern | No, no committed record; traces local and git-ignored |
+
 **Git-history leak, cumulative for this task (stated plainly):**
 
-- Before-rounds of `CycloneDX__cyclonedx-python-348`: 10 (the chunk 2 run, the 2026-10-24 rerun, rep1 to rep4, run1 to run4).
-- Only **1 of 10 later before-rounds** showed the pattern (git show on the fix commit, then the fix line), the 2026-10-24 rerun (consistent with copying, use inferred; causal check, steps 12 to 15). Earlier 348 rounds are not counted. That is 1 of 8 excluding the 2 infrastructure-error runs (T55 run3 and run4).
+- Committed Super before-rounds of `CycloneDX__cyclonedx-python-348` through T55: 9 (the 2026-10-24 rerun, rep1 to rep4, run1 to run4). The chunk 2 run is not committed; it is described only in this document and excluded from the count. Earlier 348 attacks (older batches and local `.old` traces) are also excluded.
+- Only **1 of 9 committed Super before-rounds** showed the pattern (git show on the fix commit, then the fix line), the 2026-10-24 rerun (consistent with copying, use inferred; causal check, steps 12 to 15). Earlier 348 rounds are not counted. That is 1 of 7 excluding the 2 infrastructure-error runs (T55 run3 and run4).
 - The chunk 2 run's label was a classifier false positive (a `find ... | grep -v .git` command), not a use of the leak.
 - rep1 to rep4 (T53 era): no git-history commands attempted; their attempted lists hold only `test-edit`, hard-code and `unclassified`.
 - run1 to run4 (T55): 2 runs that finished their attack, with no history commands; 2 infrastructure errors.
 - Re-attack after the confirmed leak: 1 of 1 failed the grade (certified).
-- Replication of the exploit itself: 0 further confirmations in 9 further rounds.
+- Replication of the exploit itself: 0 further confirmations in 8 other rounds.
 
 What this means:
 
 - The leak exists and can be exploited: one confirmed run (n = 1).
-- The pattern appeared in 1 of 10 later before-rounds (earlier 348 attacks are not in that count; runs were targeted, unequal and partly inconclusive). The two finished T55 runs (run1, run2) show the attacker solving the task without it; their one shared line is the actual fix line.
+- The pattern appeared in 1 of 9 committed Super before-rounds (earlier 348 attacks are not in that count; runs were targeted, unequal and partly inconclusive). The two finished T55 runs (run1, run2) show the attacker solving the task without it; their one shared line is the actual fix line.
 - Certified (k=1) = one completed attack failed under the recorded conditions, with exposure removed, gold pass and empty fail checked by code. This describes hardened 348; the three legacy files lack exposure removal and hardened re-attacks. It is not a security bound.
-- 1 of 10 is a count from repeated runs on one task, not a rate.
+- 1 of 9 is a count from repeated runs on one task, not a rate.
 
 T56 follow-ups (queued at that time; T56 was later implemented, see `docs/autopilot/QUEUE.md`): the legit_fix verdict for dangling-commit copies, `core.warnAmbiguousRefs=false` in the exposure commands, and a bounded retry on HTTP 503 through the budget.
 
@@ -195,7 +213,7 @@ Totals for the reruns: 1 certified (348), 1 not certified with its hole label ke
 
 Caveat (116). The `git-history` label rests on two things: attempted `git-history` commands in the after-round trace (6 of them) and a passing diff. The after-hardening exposure scan showed no future refs, and command outputs are not recorded. So whether the history helped the attacker is **not established**. This may be a classifier false positive. A classifier fix is proposed as T53: require success evidence (history output that contains fix lines) before labelling `git-history` exploited when the exposure scan is clean. Not certified.
 
-Supersedes: the chunk 2 after-round for 348 (`legit_fix`, inconclusive) and the chunk 3 hardening record for 116 (`test-edit-guard`, no re-attack). Both certificates are in git history.
+Supersedes: the chunk 2 after-round for 348 (`legit_fix`, inconclusive) and the chunk 3 hardening record for 116 (`test-edit-guard`, no re-attack). The 116 certificate is in git history; the chunk 2 run for 348 is described only in this document, with no committed record.
 
 Cost and budget:
 
@@ -525,8 +543,8 @@ One run of `nvidia/Nemotron-3-Ultra-550b-a55b` as the attacker (recon on, `combi
   Not certified: `inconclusive attack: attack ended with stop_reason token_limit`.
 - **Cost:** $0.7746 on the budget ledger, about 14 times a Super run. That is over the $0.6 per-task stop, so the other
   three Ultra tasks (367, toil-4805, crypto-116) were not run.
-- **Reading:** n=1 round for Ultra, so with Super's 1 of 10 across these 10 selected Super rounds and one Ultra round, two showed the history-read-and-matching-line pattern (use is inferred) on this
-  one task. It says nothing about other tasks and is not proof that Ultra is a stronger attacker.
+- **Reading:** Super showed the pattern in 1 of 9 committed before-rounds through T55 (1 of 7 excluding 2 HTTP 503 errors). Separately, Ultra showed it in its one before-round (n=1, different model). Across those 9 selected Super rounds and one Ultra round, two showed the history-read-and-matching-line pattern (use is inferred) on this
+  one task. Keep the models separate; follow-up is unequal and these counts are not a rate. It says nothing about other tasks and is not proof that Ultra is a stronger attacker.
 - This run is not in `confirmations.json`, so the site and report do not count it. The canonical Super certificate for
   348 is unchanged.
 

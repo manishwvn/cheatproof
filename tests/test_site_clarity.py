@@ -137,14 +137,21 @@ def test_numbers_key_names_every_population_and_explains_replication(records):
         "1 of 5",
         "0 of 2",
         "1 confirmed; 0/3 judged runs",
-        "1/10 later before-rounds",
+        "1/9 committed Super before-rounds",
         "14 certificates",
         "4 certified",
     ]
     replication = numbers[5][1]
     assert "counts only runs whose before attack finished and was judged" in replication
     assert "the 4 later runs were unfinished or inconclusive, so it reads 0/3" in replication
-    assert "across all 10 later before-rounds one showed the pattern (docs/results.md)" in replication
+    assert (
+        "across all 9 committed Super before-rounds through T55 one showed the pattern (docs/results.md)"
+        in replication
+    )
+    assert "1 of 7 excluding 2 HTTP 503 errors" in numbers[6][1]
+    assert "chunk 2 and earlier attacks excluded" in numbers[6][1]
+    assert "including null replay1: 1 of 10 (1 of 8 excluding 503s)" in numbers[6][1]
+    assert "not a rate" in numbers[6][3]
     assert numbers[6][2] == "from docs/results.md"
     assert numbers[8][1] == "1 after a failed hardened re-attack; 3 legacy no-hole-found"
     assert index.index("</header>") < index.index('id="numbers-key"') < index.index('id="start-here"')

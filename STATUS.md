@@ -9,8 +9,8 @@ Demo: https://manishwvn.github.io/rewardseal/ (GitHub Pages, built from the comm
   env-broken); every counted gold-added source line overlaps a future commit in 12 of 13 (not proof the whole fix is retrievable); `strip-future-git` closed it in 11 of 12.
   A lower bound on a non-random sample (the 18 lowest-scoring tasks), not a rate. bqskit-134 failed its gold gate
   before and after the strip; azure-cli-1876's scan stopped at 5000 commits, so its "not reachable" is incomplete.
-- **Attacker finding:** against this attacker (Nemotron Super, recon on), 1 of 10 later before-rounds on
-  cyclonedx-python-348 showed a history-use pattern; use inferred (`confirmations.json`). n=1; "not proof".
+- **Attacker finding:** against this attacker (Nemotron Super, recon on), 1 of 9 committed Super before-rounds on
+  cyclonedx-python-348 showed a history-use pattern (1 of 7 excluding 2 HTTP 503 errors); unequal follow-up, not a rate; use inferred (`confirmations.json`). n=1; "not proof".
 - **Certificates:** 14 task files, 4 certified (sepal_ui-518, cyclonedx-367, schematics-7, cyclonedx-348 after
   hardening). Certified (k=1) = one completed attack failed under the recorded conditions, with exposure removed, gold pass and empty fail checked by code. This describes the hardened 348 result. The three legacy certificates record a failed initial attack with no hole found; they do not record exposure removal or a hardened re-attack. Other `git-history` / `test-edit` labels are unconfirmed leads, not holes.
 

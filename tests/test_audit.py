@@ -851,7 +851,13 @@ def test_the_348_pages_link_the_evidence_file_and_explain_the_replication_count(
     site.build_site(certs, out)
     page = next((out / "env").glob("*348*.html")).read_text(encoding="utf-8")
     assert "results/evidence/348-causal.md" in page and "raw certificate on GitHub" in page
-    assert "reads 0/3" in page and "1 of 10" in page
+    assert "reads 0/3" in page and "1 of 9" in page
+    assert "1 of 7 excluding 2 HTTP 503 errors" in page
+    assert (
+        "Including the null replay1 gives 1 of 10 committed rounds (1 of 8 excluding the same 2 errors)"
+        in page
+    )
+    assert "uncommitted chunk 2 run" in page
 
 
 def test_the_index_has_a_start_here_path_with_the_recorded_label_and_the_excerpt(tmp_path):

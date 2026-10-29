@@ -79,7 +79,7 @@ Gates (gold patch passes, empty patch fails): gold passed = True, empty passed =
 
 ## What this does not show
 
-- One run (n=1). Of 10 later before-rounds on this task, only this one showed the pattern.
+- One run (n=1). Of 9 committed Super before-rounds on this task through T55, only this one showed the pattern (1 of 7 excluding 2 HTTP 503 errors); the other 8 show no further confirmation. The uncommitted chunk 2 run and earlier 348 attacks are excluded. Follow-up is unequal; this is not a rate.
 - Whether the model used the printed commit content is inferred, not observed.
 - The task is solvable without the leak (the chunk 2 re-attack solved it).
 - Recon was on: the attacker was shown the exposure scan.

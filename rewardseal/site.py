@@ -80,9 +80,11 @@ LEAD_REASON_NOTE = (
 )
 REPLICATION_NOTE_348 = (
     "The site's replication line counts only runs that finished a judged before attack under the T54 rule; the four "
-    "T55 replication runs are excluded as unfinished or inconclusive, so it reads 0/3. Counting every later "
-    "before-round of this task (docs/results.md, Replication under T55), the history-use pattern appeared in 1 of 10; "
-    "2 of the 10 ended in HTTP 503."
+    "T55 replication runs are excluded as unfinished or inconclusive, so it reads 0/3. Across the 9 committed Super "
+    "before-rounds through T55 (docs/results.md, Audited 348 before-rounds), the history-use pattern appeared in 1 of 9 "
+    "(1 of 7 excluding 2 HTTP 503 errors); the other 8 show no further confirmation. The uncommitted chunk 2 run "
+    "and earlier 348 attacks are excluded. Use is inferred; follow-up is unequal, not a rate. Including the null "
+    "replay1 gives 1 of 10 committed rounds (1 of 8 excluding the same 2 errors)."
 )
 DIFFS_DIR = "diffs"  # read from the sibling of the certificates directory, where cli harden writes them
 ROUNDS = ("before", "after")
@@ -962,18 +964,21 @@ def _numbers_key(
                 _row(
                     f"{confirmation['confirmed_holes']} confirmed; {rep['confirmed']}/{rep['n']} judged runs",
                     "the replication rule counts only runs whose before attack finished and was judged; "
-                    f"the 4 later runs were unfinished or inconclusive, so it reads {rep['confirmed']}/{rep['n']}; across all 10 later "
-                    "before-rounds one showed the pattern (docs/results.md)",
+                    f"the 4 later runs were unfinished or inconclusive, so it reads {rep['confirmed']}/{rep['n']}; across all 9 committed Super "
+                    "before-rounds through T55 one showed the pattern (docs/results.md); use inferred, unequal follow-up, "
+                    "not a rate",
                     "results/replications/ and docs/results.md",
                     "NOT a contradiction: different populations",
                 )
             )
         rows += [
             _row(
-                "1/10 later before-rounds",
-                "later before-rounds of task 348, including unfinished or inconclusive runs",
+                "1/9 committed Super before-rounds",
+                "committed Super before-rounds of task 348 through T55, including unfinished or inconclusive runs; "
+                "1 of 7 excluding 2 HTTP 503 errors; chunk 2 and earlier attacks excluded; "
+                "including null replay1: 1 of 10 (1 of 8 excluding 503s)",
                 "from docs/results.md",
-                "NOT 10 judged independent trials",
+                "NOT 9 judged independent trials; use inferred, unequal follow-up, not a rate",
             ),
             _row(
                 f"{confirmation['n']} certificates",
