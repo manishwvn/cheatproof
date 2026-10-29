@@ -65,6 +65,11 @@ DEFAULT_CERT_DIR = "results/certificates"
 GITHUB_BLOB = "https://github.com/manishwvn/cheatproof/blob/main/"
 # Evidence files committed beside the certificates: task id -> path in the repo.
 EVIDENCE_FILES = {"CycloneDX__cyclonedx-python-348": "results/evidence/348-causal.md"}
+NOT_RELEASE_APPROVED = "Certified is not release-approved; same-recon re-attack not exercised."
+LEAD_REASON_NOTE = (
+    "the reason text above is the recorded classifier output. Manual review (see Hole status) found the only "
+    "matching write came before the history reads, so history use stays an unconfirmed lead, not a confirmed cause."
+)
 REPLICATION_NOTE_348 = (
     "The site's replication line counts only runs that finished a judged before attack under the T54 rule; the four "
     "T55 replication runs are excluded as unfinished or inconclusive, so it reads 0/3. Counting every later "
@@ -306,7 +311,20 @@ def build_site(
         ),
     )
     _write(index, _document("RewardSeal report", body, blob, csp=""))
+    _write(
+        out / "verify.html",
+        _document(
+            "Evidence verifier",
+            '<p><a href="index.html">Back to the index</a></p><h1>Evidence verifier</h1>'
+            "<p>The browser verifier is added by the Pages workflow, next to manifest.json. In a local build this is a "
+            "placeholder: open docs/verify/index.html from the repository, or run "
+            "<code>python -m cheatproof.manifest verify</code>.</p>"
+            f'<p><a href="{_cell(blob)}docs/verify/index.html">docs/verify/index.html on GitHub</a></p>',
+            blob,
+        ),
+    )
     pages = []
+    not_exercised = site_extras.not_exercised_ids(root.parent)
     for entry in entries:
         page = env_dir / f"{entry.name}.html"
         diffs = {
@@ -320,6 +338,7 @@ def build_site(
             statuses[entry.cert["task"]["instance_id"]],
             entry.stem,
             blob,
+            entry.cert["task"]["instance_id"] in not_exercised,
         )
         body += site_extras.environment_change(entry.cert, root.parent / "evidence")
         _write(page, _document(f"RewardSeal: {entry.cert['task']['instance_id']}", body, blob))
@@ -1530,6 +1549,7 @@ def _score_section(
     return _section(
         "score",
         "Hackability score",
+        "<p><small>Recorded counts, not a score: the numbers below come from mixed, selected samples.</small></p>"
         f"<p>{lead}A certified task is one where the recorded qualifying attack by this attacker did not succeed. "
         "That is not a claim that it is secure or proven.</p>",
         f"<p>{_cell(confirm.counts_line(confirmation))}</p>" if confirmation is not None else "",
@@ -1661,6 +1681,7 @@ def _env_body(
     status: confirm.HoleStatus | None = None,
     stem: str | None = None,
     blob: str = GITHUB_BLOB,
+    not_exercised: bool = False,
 ) -> str:
     task = cert["task"]
     links = []
@@ -1686,6 +1707,7 @@ def _env_body(
             ),
             *link_row,
             _result_section(cert, status),
+            *([_what_means(NOT_RELEASE_APPROVED)] if not_exercised and cert.get("certified") else []),
             *([f"<p>{_cell(REPLICATION_NOTE_348)}</p>"] if task["instance_id"] in EVIDENCE_FILES else []),
             _exposure_section(cert["exposure_before"]),
             _before_after_section(cert),
@@ -1756,7 +1778,7 @@ def _after_outcome(rnd: Mapping[str, Any]) -> str:
     if rnd.get("no_attempt"):
         return "no attempt"
     if holes.get("exploited") is True:
-        return f"hole still found ({_value(holes.get('labels'))})"
+        return f"classifier flagged a hole after hardening ({_value(holes.get('labels'))}; see Hole status)"
     if attack.get("outcome") == "legit_fix":
         return "legit_fix (passed the hidden tests like the gold fix; not an exploit)"
     if rnd.get("inconclusive"):
@@ -1928,6 +1950,7 @@ def _result_section(cert: Mapping[str, Any], status: confirm.HoleStatus | None =
         _what_means("a ledger estimate, not billed spend")
         if cert.get("cost_basis") == "budgeted ledger delta"
         else "",
+        _what_means(LEAD_REASON_NOTE) if status is not None and status.task == "lead" else "",
         "<h3>Notes</h3>",
         notes_html,
     )
