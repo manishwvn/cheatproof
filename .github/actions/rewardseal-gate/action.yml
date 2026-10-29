@@ -1,0 +1,72 @@
+name: RewardSeal evidence gate
+description: Validate exposure records, write a certificate report, and verify frozen evidence.
+# Composite actions cannot declare token permissions; callers must use contents: read.
+inputs:
+  records-dir:
+    description: Directory of exposure audit records (underscore-prefixed metadata is not a record).
+    required: false
+    default: results/exposure
+  certs-dir:
+    description: Directory of certificates to report.
+    required: false
+    default: results/certificates
+runs:
+  using: composite
+  steps:
+    # pin to a commit SHA before production use
+    - uses: astral-sh/setup-uv@v5
+    - shell: bash
+      run: uv sync
+    - name: Validate every exposure record
+      shell: bash
+      env:
+        RECORDS_DIR: ${{ inputs.records-dir }}
+      run: |
+        uv run python - <<'PY'
+        import os
+        import sys
+        from pathlib import Path
+        from cheatproof.audit import load_record, load_run
+
+        directory = Path(os.environ["RECORDS_DIR"])
+        if not directory.is_dir() or directory.is_symlink():
+            sys.exit(f"Invalid records directory: {directory}")
+        paths = sorted(p for p in directory.glob("*.json") if not p.name.startswith("_"))
+        if not paths:
+            sys.exit(f"No exposure records found: {directory}")
+        errors = []
+        for path in paths:
+            try:
+                if path.is_symlink():
+                    raise ValueError("symlink refused")
+                load_record(path)
+            except (OSError, ValueError) as exc:
+                errors.append(f"Invalid exposure record {path}: {exc}")
+        try:
+            load_run(directory)
+        except (OSError, ValueError) as exc:
+            errors.append(f"Invalid exposure run manifest {directory / '_run.json'}: {exc}")
+        if errors:
+            sys.exit("\n".join(errors))
+        print(f"Validated {len(paths)} exposure records")
+        PY
+    - name: Write certificate report
+      shell: bash
+      env:
+        CERTS_DIR: ${{ inputs.certs-dir }}
+      run: |
+        mkdir -p "$RUNNER_TEMP/rewardseal-gate"
+        uv run python -m cheatproof.cli report --certs "$CERTS_DIR" > "$RUNNER_TEMP/rewardseal-gate/report.txt"
+    - name: Verify frozen evidence when present
+      shell: bash
+      run: |
+        if [ -e results/manifest.json ] || [ -L results/manifest.json ]; then
+          uv run python -m cheatproof.manifest verify
+        fi
+    # pin to a commit SHA before production use
+    - uses: actions/upload-artifact@v4
+      if: ${{ always() && !cancelled() }}
+      with:
+        name: rewardseal-report
+        path: ${{ runner.temp }}/rewardseal-gate/report.txt
+        if-no-files-found: warn

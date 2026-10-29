@@ -1,0 +1,244 @@
+{
+  "files": [
+    {
+      "bytes": 5064,
+      "path": "docs/claims.md",
+      "sha256": "687d4d6c7af5591d62d55fb929acfac176d9587b95aad3849e4b91ba460f804f"
+    },
+    {
+      "bytes": 2866,
+      "path": "results/batch.json",
+      "sha256": "60cd120eaeaf2bce6c408a144add7dc2658a286d5305e58de3bab811639f3ae8"
+    },
+    {
+      "bytes": 25941,
+      "path": "results/certificates/12rambau__sepal_ui-518.json",
+      "sha256": "b49c2ca465e92c04ae1ebdf74a6117469615e9c818af8e5ace532b065e674a27"
+    },
+    {
+      "bytes": 8365,
+      "path": "results/certificates/Alexei-Kornienko__schematics_to_swagger-7-1dacb11f.json",
+      "sha256": "ff5d186912fa70535c54a7f14123c036ce369845fcf35638a1a16566bf018ca1"
+    },
+    {
+      "bytes": 3664,
+      "path": "results/certificates/Algebra8__pyopenapi3-83-46d7abbd.json",
+      "sha256": "8c2f82ee61364df1d57f894cdd8a6ea9df4b8bbc6d52cee8baea5c193f0e20cf"
+    },
+    {
+      "bytes": 28990,
+      "path": "results/certificates/ArkEcosystem__python-crypto-116-cb6ec271.json",
+      "sha256": "34e8ec72a2f8727a90a796ae308444c129fa95fe9f8b459cd673d67efc3e9341"
+    },
+    {
+      "bytes": 18825,
+      "path": "results/certificates/Azure__autorest.python-475-4e06cdae.json",
+      "sha256": "7b8c41a0f139673c9f4b713735331b7010ea87b998df7818e5cd4a7216718d62"
+    },
+    {
+      "bytes": 22439,
+      "path": "results/certificates/Azure__msrest-for-python-167-8d0346f8.json",
+      "sha256": "2d7c7d3a2e6d7c0ed88e699531fb66e5a11158667e5c1b942953ff046abb7966"
+    },
+    {
+      "bytes": 19011,
+      "path": "results/certificates/Azure__msrest-for-python-55-50e2ebc6.json",
+      "sha256": "be660d8c49c777d3eab7cd16cf58aecba0a9569e628ef2f49f5a3b62a287519d"
+    },
+    {
+      "bytes": 3703,
+      "path": "results/certificates/BQSKit__bqskit-134-c0052df1.json",
+      "sha256": "7aa5bab3a00988870c7b08adcbb05d60e6219fdcdb76b1278de45086f64c946e"
+    },
+    {
+      "bytes": 46341,
+      "path": "results/certificates/BQSKit__bqskit-267-7ebb7eb1.json",
+      "sha256": "83d253554ded3f672d88258d33215a8622de37ba1b9defe52b9b8abc6847406f"
+    },
+    {
+      "bytes": 28532,
+      "path": "results/certificates/CycloneDX__cyclonedx-python-348-93d44b30.json",
+      "sha256": "c42d4827c0808435626d264b2cc67162d20186439096fb8bb1db5a44654ca373"
+    },
+    {
+      "bytes": 21639,
+      "path": "results/certificates/CycloneDX__cyclonedx-python-367-90b317c4.json",
+      "sha256": "de21dde29e07829e1cfd1fac2463be2c1387ea942b89ca837d42b12fe8ee1247"
+    },
+    {
+      "bytes": 3660,
+      "path": "results/certificates/DRMacIver__shrinkray-7-ec6247fb.json",
+      "sha256": "5a8fb1b54ba97a0bb9d601e5a4987ecc68c75b35efc57b93865c3bae17da559d"
+    },
+    {
+      "bytes": 139666,
+      "path": "results/certificates/DataBiosphere__toil-4805-9feebf72.json",
+      "sha256": "2ad62c1e57f9322b5560feb1b75bf02b9068768bac36868a8b09177c93000de4"
+    },
+    {
+      "bytes": 16496,
+      "path": "results/certificates/Dorthu__openapi3-75-0b23bc7c.json",
+      "sha256": "c202b74f9aeebe38d5128234256b188fa7a103b0912ca0e5a5eaf4db2a39ce0f"
+    },
+    {
+      "bytes": 2067,
+      "path": "results/confirmations.json",
+      "sha256": "c15d07162342f7e40cc310fce623db7180c2c4a30dfdf832b590a43b132450d4"
+    },
+    {
+      "bytes": 1353,
+      "path": "results/control/Dorthu__openapi3-75-retrieval-control.json",
+      "sha256": "4b90e5ea1bf5a077276b00c9806890f6928cfb3c87cc4ff3e83e8268de91ec7f"
+    },
+    {
+      "bytes": 4394,
+      "path": "results/evidence/348-causal.md",
+      "sha256": "6b28e3b6ade59adb0a1c71d875612047a18804fed4bcd7c18a4c1f4770d8f606"
+    },
+    {
+      "bytes": 1975,
+      "path": "results/exposure/12rambau__sepal_ui-518.json",
+      "sha256": "ac4259477c32e049960ac45ca99ccdc948df82890a47c601de302d78c8598881"
+    },
+    {
+      "bytes": 1174,
+      "path": "results/exposure/Alexei-Kornienko__schematics_to_swagger-7-1dacb11f.json",
+      "sha256": "b36b4aca37f6300545a2e4919be02d4f9560b3c1dc8e6200c6a3c69602101a7e"
+    },
+    {
+      "bytes": 1025,
+      "path": "results/exposure/ArkEcosystem__python-crypto-116-cb6ec271.json",
+      "sha256": "96a831ff0d9b3b4991a147f50ff38e88b1f92bc9efe14c4dca57895d92a03a61"
+    },
+    {
+      "bytes": 1772,
+      "path": "results/exposure/Azure__autorest.python-475-4e06cdae.json",
+      "sha256": "0a62fcd79155d7a0216941d154bfdff79c6c8ff4853ce7daaaf9ca9bf01c02b8"
+    },
+    {
+      "bytes": 1025,
+      "path": "results/exposure/Azure__azure-cli-1876-b9eae45c.json",
+      "sha256": "28d926ba56972480a7c9af952175ca96dc258bc14fd534f382be8112fdd9a7c0"
+    },
+    {
+      "bytes": 987,
+      "path": "results/exposure/Azure__msrest-for-python-167-8d0346f8.json",
+      "sha256": "479516257f3990df10c90c57694e922760b59030a7db80ecaad5f3281015eca5"
+    },
+    {
+      "bytes": 1310,
+      "path": "results/exposure/Azure__msrest-for-python-55-50e2ebc6.json",
+      "sha256": "9d756a48ecc7a60841d5fe9d5acb738074cfa7249001fd557bdfc2d4877b29b0"
+    },
+    {
+      "bytes": 1872,
+      "path": "results/exposure/BQSKit__bqskit-134-c0052df1.json",
+      "sha256": "b8e781de797a83082633b3eef0848ea028baf88d45e43a43b132253d1541fe4a"
+    },
+    {
+      "bytes": 990,
+      "path": "results/exposure/BQSKit__bqskit-267-7ebb7eb1.json",
+      "sha256": "148082f0870246348a9c9e3554ef0729721834ea43d109cc0c447c33fb09a052"
+    },
+    {
+      "bytes": 1348,
+      "path": "results/exposure/CycloneDX__cyclonedx-python-348-93d44b30.json",
+      "sha256": "676e539cb65b656cbbea50fb4fc5ed83218020c0c2c5e9cdee2001cc0a7d6e86"
+    },
+    {
+      "bytes": 1193,
+      "path": "results/exposure/CycloneDX__cyclonedx-python-367-90b317c4.json",
+      "sha256": "f411897c626ad6f6c9bcda6ad6e4b9f090d0519b2285f2db3094e3304743147b"
+    },
+    {
+      "bytes": 1422,
+      "path": "results/exposure/DataBiosphere__toil-4805-9feebf72.json",
+      "sha256": "3a5efcc47302f70fe1504e7bf30d57f3253a5344091d1c697cbfc01d07bc6d2c"
+    },
+    {
+      "bytes": 1093,
+      "path": "results/exposure/Dorthu__openapi3-75-0b23bc7c.json",
+      "sha256": "6187a533f5df63c4012fccfa151f0d0df70e37f70aac92b5db813a782cdf46a9"
+    },
+    {
+      "bytes": 1042,
+      "path": "results/exposure/_run.json",
+      "sha256": "8c33486cb62af43ce4fd432e1c4839230927dd61e6c2defbd9fcf0a5813c38ce"
+    },
+    {
+      "bytes": 19236,
+      "path": "results/replications/ArkEcosystem__python-crypto-116-rep1.json",
+      "sha256": "59f6e2504a21c1b7c0d512524074d4492a0799d8e3cd2486a1aac1101401c23f"
+    },
+    {
+      "bytes": 34906,
+      "path": "results/replications/CycloneDX__cyclonedx-python-348-rep1.json",
+      "sha256": "94f6a77daec99404398f0ec36eb84f6bef510c296c38f4c9d4558a4649417691"
+    },
+    {
+      "bytes": 22069,
+      "path": "results/replications/CycloneDX__cyclonedx-python-348-rep2.json",
+      "sha256": "f02d0ee87204f27541c5c8ddfed2e859cee104998bcac204f619ba711139511a"
+    },
+    {
+      "bytes": 35061,
+      "path": "results/replications/CycloneDX__cyclonedx-python-348-rep3.json",
+      "sha256": "1ac10ab7b4e24b2a0d1a53d8c212a222e065f1deb27111dad2ece1adf1b01827"
+    },
+    {
+      "bytes": 22338,
+      "path": "results/replications/CycloneDX__cyclonedx-python-348-rep4.json",
+      "sha256": "285d9804d8409911a943d751771bdcef32c9df49995c8410a07fa40b54b31569"
+    },
+    {
+      "bytes": 23043,
+      "path": "results/replications/CycloneDX__cyclonedx-python-348-run1.json",
+      "sha256": "9db0d87d66f5e7d2bccaec9a21c819eb5f6e855524d1e28e8d69ccc2fa8daf0a"
+    },
+    {
+      "bytes": 23025,
+      "path": "results/replications/CycloneDX__cyclonedx-python-348-run2.json",
+      "sha256": "677ae7bf562a2f3ed8f74e1103c7e646257125c23341806873c26bc16af6b1b3"
+    },
+    {
+      "bytes": 23035,
+      "path": "results/replications/CycloneDX__cyclonedx-python-348-run3.json",
+      "sha256": "c91d3680c358af4974c371700f7e2669c4959dc056c1ebbd1c18013c1dcb1dd1"
+    },
+    {
+      "bytes": 21494,
+      "path": "results/replications/CycloneDX__cyclonedx-python-348-run4.json",
+      "sha256": "4a123bf441bcc87e16972f913e92d990719815a6a428ba0d5edbe55a0e64c470"
+    },
+    {
+      "bytes": 116,
+      "path": "results/ultra/CycloneDX__cyclonedx-python-348-ultra.after.diff.json",
+      "sha256": "8442c4ee98efd7618ffecec9099159eb5f576c1b224b5343b63f5e7b9b8e57b4"
+    },
+    {
+      "bytes": 119,
+      "path": "results/ultra/CycloneDX__cyclonedx-python-348-ultra.before.diff.json",
+      "sha256": "841ffea7641bc58cdab5853f32c7e23b89e1164183c8fa12a3feabe09b1fa4d8"
+    },
+    {
+      "bytes": 29135,
+      "path": "results/ultra/CycloneDX__cyclonedx-python-348-ultra.json",
+      "sha256": "14eac67277bd1b360eeaa39203840dad1c00dc30d6b3fa672fd755a3cadb74aa"
+    }
+  ],
+  "generated_utc": "2026-10-29T06:44:16.991616+00:00",
+  "repo_sha": "5672ecc963f72c5cb257389eb6df296e68ce5f5a",
+  "schema": "rewardseal.evidence-manifest",
+  "schema_version": 1,
+  "totals": {
+    "M": 13,
+    "N_closed": 12,
+    "N_fix": 12,
+    "N_fix_closed": 11,
+    "N_full_overlap": 12,
+    "N_future": 13,
+    "certified": 4,
+    "exposure_source": "audit",
+    "n": 14
+  }
+}
