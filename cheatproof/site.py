@@ -144,6 +144,8 @@ a { color: var(--link); overflow-wrap: anywhere; }
 .banner, .empty { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
 .banner { border-left: 4px solid var(--link); }
 .headline { font-size: 2rem; font-weight: 700; line-height: 1.2; margin: 0.25rem 0; }
+.exposure-audit.lead { font-size: 1.25rem; font-weight: 600; line-height: 1.35; margin: 0.25rem 0 1rem; }
+.finding-label { margin: 1rem 0 0; font-weight: 600; }
 .label { border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; color: var(--muted); font-size: 0.875rem; }
 .table-wrap { max-width: 100%; overflow-x: auto; margin: 0.5rem 0 1rem; }
 table { width: 100%; border-collapse: collapse; }
@@ -770,15 +772,25 @@ def _hero_section(
             "counts only."
         )
     lead_ids = confirmation["lead_ids"]
-    parts = [
+    parts = []
+    audit_first = exposure is not None and exposure.get("source") == "audit"
+    exposure_html = ""
+    if (
+        exposure is not None
+    ):  # T57: one paragraph; a real audit leads, the labelled fallback follows the counts
+        from cheatproof.audit import summary_line
+
+        css = "exposure-audit lead" if audit_first else "exposure-audit"
+        exposure_html = f'<p class="{css}">{_cell(summary_line(exposure))}</p>'
+    if audit_first:
+        parts += [exposure_html, '<p class="finding-label">Attacker finding (one attacker, recon on):</p>']
+    parts += [
         f'<p class="headline">{_cell(_hero_headline(confirmation))}</p>',
         f"<p>{_cell(scope)}</p>",
         f"<p>{_cell(confirm.counts_line(confirmation))}</p>",
     ]
-    if exposure is not None:  # T57: one additive paragraph; the T54 hero above and below it is unchanged
-        from cheatproof.audit import summary_line
-
-        parts.append(f'<p class="exposure-audit">{_cell(summary_line(exposure))}</p>')
+    if exposure_html and not audit_first:
+        parts.append(exposure_html)
     if lead_ids:
         links = " ".join(
             _link_html(f"env/{entry.name}.html", entry.cert["task"]["instance_id"])

@@ -798,6 +798,30 @@ def test_the_site_hero_gets_one_new_paragraph(tmp_path):
     assert "not an audit" not in html
 
 
+def test_the_site_hero_leads_with_the_audit_when_records_exist(tmp_path):
+    certs_src = Path(__file__).resolve().parents[1] / "results" / "certificates"
+    certs = tmp_path / "results" / "certificates"
+    certs.mkdir(parents=True)
+    for name in ("12rambau__sepal_ui-518.json", "CycloneDX__cyclonedx-python-348-93d44b30.json"):
+        shutil.copy(certs_src / name, certs / name)
+    out = tmp_path / "site"
+    site.build_site(certs, out)
+    html = (out / "index.html").read_text(encoding="utf-8")
+    assert html.index('class="headline"') < html.index(
+        'class="exposure-audit"'
+    )  # fallback: attacker headline first
+    assert "finding-label" not in html.split("</style>", 1)[1]
+    write_all(tmp_path / "results" / "exposure", synthetic("a__a-1", fix=True, before=4))
+    site.build_site(certs, out)
+    html = (out / "index.html").read_text(encoding="utf-8")
+    body = html.split("</style>", 1)[1]
+    assert (
+        body.index('class="exposure-audit lead"')
+        < body.index('class="finding-label"')
+        < body.index('class="headline"')
+    )
+
+
 def test_the_site_lists_a_malformed_record_and_shows_no_number(tmp_path):
     certs_src = Path(__file__).resolve().parents[1] / "results" / "certificates"
     certs = tmp_path / "results" / "certificates"
