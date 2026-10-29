@@ -144,7 +144,10 @@ def test_index_links_and_workflow_comparison(records):
         < index.index('id="workflow-comparison"')
         < index.index('id="start-here"')
     )
-    assert not (out / "verify.html").exists()
+    stub = (
+        out / "verify.html"
+    ).read_text()  # local placeholder; the Pages workflow replaces it with the verifier
+    assert "<script" not in stub and "placeholder" in stub
 
 
 def test_controls_gallery_uses_correct_cases_and_record_links(records):
@@ -282,3 +285,14 @@ def test_replay_card_states_nothing_without_the_record(records):
     card = section(page, "same-recon-348")
     assert "not exercised" not in card.lower() or "no not-exercised statement" in card
     assert "No matching record committed." in card
+
+
+def test_cold_read_wording_fixes(records):
+    out = build(records)
+    page = (out / "env" / "ArkEcosystem__python-crypto-116-cb6ec271.html").read_text()
+    assert "unconfirmed lead, not a confirmed cause" in page
+    assert "hole still found" not in page
+    page348 = (out / "env" / "CycloneDX__cyclonedx-python-348-93d44b30.html").read_text()
+    assert "Certified is not release-approved; same-recon re-attack not exercised." in page348
+    assert "Certified is not release-approved" not in page
+    assert "Recorded counts, not a score" in (out / "index.html").read_text()

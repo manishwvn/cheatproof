@@ -229,7 +229,7 @@ def test_two_builds_give_identical_bytes(tmp_path):
     build_site(cert_dir, first, traces_dir=traces)
     build_site(cert_dir, second, traces_dir=traces)
     files = sorted(path.relative_to(first) for path in first.rglob("*") if path.is_file())
-    assert len(files) == 5 + len(NAMES) + len(MARKER_FILES)
+    assert len(files) == 6 + len(NAMES) + len(MARKER_FILES)
     for relative in files:
         assert (first / relative).read_bytes() == (second / relative).read_bytes()
     before = (first / "index.html").read_bytes()
@@ -251,7 +251,9 @@ def test_no_script_element_outside_explorer(tmp_path):
     out = tmp_path / "site"
     build_site(cert_dir, out, traces_dir=traces)
     outputs = [path for path in out.rglob("*") if path.is_file()]
-    assert len(outputs) == 7 + len(MARKER_FILES)  # index, two env pages, four extras, marker files
+    assert len(outputs) == 8 + len(
+        MARKER_FILES
+    )  # index, two env pages, five extras (incl. verify stub), marker files
     for path in outputs:
         if path.name != "explorer.html":
             assert "<script" not in read(path).lower()

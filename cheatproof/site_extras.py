@@ -452,6 +452,20 @@ def gallery(
     return BACK + EXTRAS_STYLE + '<h1>Controls gallery</h1><div class="gallery">' + "".join(cards) + "</div>"
 
 
+def _is_not_exercised(record: Mapping[str, Any]) -> bool:
+    return (
+        record["instance_id"] == "CycloneDX__cyclonedx-python-348"
+        and not _map(_map(record.get("harden")).get("after"))
+        and not record.get("patches_applied")
+    )
+
+
+def not_exercised_ids(results: Path) -> set[str]:
+    """Task ids whose committed same-recon re-attack attempt never reached the re-attack path."""
+    records = _records(results / "replay-attempt", _certificate_record, [])
+    return {r["instance_id"] for _, r in records if _is_not_exercised(r)}
+
+
 def environment_change(cert: Mapping[str, Any], evidence: Path) -> str:
     """Certificate allowlist only: never render raw diff fields."""
     harden = _map(cert.get("harden"))
