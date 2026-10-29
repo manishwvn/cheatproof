@@ -25,7 +25,7 @@ Limits (all in code):
   redacted whole), and each word is checked on its own. Result titles, urls and snippets get the same cleaning. The trace shows the cleaned query
   (`tool: web_search`, `args.query` in `traces/<stem>.jsonl`). The key is never in a query, result, trace or error.
 
-## Harness recon search (T52)
+## Harness recon search
 
 On the live run the attacker (Nemotron Super) never chose to call `web_search`, so Tavily usage stayed 0 and no trace
 held a real Tavily runtime call. With `--network-fetch` the harness now makes one search itself, and says so everywhere.
@@ -76,4 +76,24 @@ Run one task (not before the owner clears it):
 
 Cost: attacker tokens only, about $0.06 per task: `docs/results.md`, per-task table, Token Factory cost column
 (Azure__msrest-for-python-55 0.0616, Azure__autorest.python-475 0.0606), plus the usual sandbox runs. The cost of one
-Tavily search call is unknown. It uses free credits, so check the Tavily dashboard before the run and after it.
+Tavily search call is unknown. Searches (local counter) record calls, not provider billing; check the Tavily dashboard before the run and after it. The dashboard lags at first: on 2026-10-29 it read 1 of 1000 after the first call, then 45 of 1000 (around 17:00 CDT), matching the local counter of 45 searches.
+
+## audit-web
+
+`audit-web` is a host-side web-exposure audit, separate from the harness recon search: no model or sandbox calls.
+It makes 2 basic Tavily queries per task: a query built from the public issue title plus owner/repo (repository name
+alone when no usable title is available), and a labelled oracle query containing the task's PR URL.
+No gold-patch or test-patch text is sent in queries. Returned raw content is checked locally against counted gold-line
+digests; no page text is stored. Records contain queries, timestamps, result URLs and ranks, page types, content hashes,
+line counts and matched digest prefixes. The audit stops on HTTP 401, 402 or 429.
+
+The 13-task records are in `results/web-exposure/`: 26 searches (local counter), 130 results, 0 of 13 with a counted
+gold-line match. The separate random-sample records are in `results/web-exposure-sample/`: 18 searches (local counter),
+90 results, 0 of 9 with a counted gold-line match, run 2026-10-29 21:31:48Z–21:32:26Z UTC.
+Each query returned 5 results. Report these audits apart, never as a combined count or rate.
+For numkit-8 the title was unusable, so its Q1 used the repository name alone.
+Four random-sample tasks have n=1 counted gold line (Azure__pykusto-159, Becksteinlab__numkit-8,
+CS-SI__eodag-249, Colin-b__keepachangelog-8), so their nulls are weak.
+Neither audit returned a pull, commit or compare page of the task's repository.
+Search counts are searches (local counter), not provider billing.
+A null measures findability for one tool on one day; it does not establish that the web lacks the fix or that a model used web content.

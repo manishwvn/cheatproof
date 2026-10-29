@@ -84,11 +84,22 @@ Command: the T55 rerun command plus `--recon-replay` (Super, recon on, 40 steps,
 
 ## Web exposure (Tavily), 13 audited tasks (2026-10-29)
 
-`python -m rewardseal.cli audit-web` (host only: no Token Factory, no Sandbox, no model). Per task, 2 basic Tavily searches with raw page content (26 credits in all): Q1 built only from the public issue title plus owner/repo (the repository name alone if the title looked unsafe), and a labelled "oracle query" on the pull request URL itself. No gold or test text in any query. Records: `results/web-exposure/` (queries, URLs, ranks, page types, sha256 of each page, k of n counted gold lines found, line-digest prefixes; no page text). Searched 2026-10-29.
+`python -m rewardseal.cli audit-web` (host only: no Token Factory, no Sandbox, no model). Per task, 2 basic Tavily queries with raw page content: 26 searches (local counter) in all: Q1 built only from the public issue title plus owner/repo (the repository name alone if the title looked unsafe), and a labelled "oracle query" on the pull request URL itself. No gold or test text in any query. Records: `results/web-exposure/` (queries, URLs, ranks, page types, sha256 of each page, k of n counted gold lines found, line-digest prefixes; no page text). Searched 2026-10-29.
 
 - **Result: 0 of 13.** No search returned a page containing even one of the counted gold lines (k = 0 in all 130 results). 5 results per query, 130 results, none a pull, commit or compare page of the task's own repository, including for the oracle query on the PR URL (11 results were current-file "blob" pages of other repositories, none matched).
 - **Reading, carefully:** in this snapshot, a basic Tavily search built from the public issue title did not surface the fix for any of the 13. The oracle query also did not return the PR page for any task, so this search tool does not reliably return GitHub PR pages at all: a null here says this tool found nothing, not that the open web holds nothing. Web content and search results change; this is a dated snapshot, findability only, not use by any model, and a lower bound. Git history, not this web search, is the channel with measured overlap in this sample (12 of 13 in the exposure audit).
 - Not run: an attacker-originated web-search run (dropped by decision).
+
+### Web exposure (Tavily), 9 random-sample tasks (2026-10-29), reported apart
+
+Records: `results/web-exposure-sample/`, run 2026-10-29 21:31:48Z–21:32:26Z UTC. There were 18 searches (local counter),
+2 per task (title-built Q1 and PR-URL oracle), with 5 results per query: 90 results. Becksteinlab__numkit-8 had no
+usable title, so its Q1 was the repository name alone. **Result: 0 of 9**; `q1_best_k` and `q2_best_k` were 0 for all 9.
+No result contained a counted gold line; 0 were pull, commit or compare pages of the task's repo, and 0 matched the
+task's own PR number. Of 90 results, 7 were repo pages (msal-186: 1 Q1, 4 oracle; numkit-8: 2 Q1), none PR pages.
+Four tasks have n=1 counted gold line (Azure__pykusto-159, Becksteinlab__numkit-8, CS-SI__eodag-249,
+Colin-b__keepachangelog-8), so their nulls are weak. This is findability for one tool on one day, never evidence that
+the web lacks the fix; keep it apart from the 13-task audit, without a combined rate or count.
 
 ## Second exposure audit: predeclared random sample (2026-10-29)
 
@@ -320,7 +331,7 @@ web search host-side). Outcome: `token_limit` at 30 steps, inconclusive, cost $0
 the certificate itemises 4).
 
 - The attacker never called `web_search`. Tavily usage stayed 0 of 1000.
-- So there is no real runtime Tavily call yet. The harness-side search (T52) came later: see its section above.
+- At that time there had been no real runtime Tavily call. The harness-side search (T52) and the separate web-exposure audits came later: see their sections above.
 - Ledger: real-spend counter 1.3299 -> 1.4009 (+$0.0710). Sandboxes estimate counter +$0.0329 (5 runs) -> 1.4037.
 - The ledger field `total_usd` is 1.5564 as reported; its derivation is not recorded here.
 
@@ -606,11 +617,12 @@ is a choice: we have not measured how often the attacker finds such a leak witho
 **What is real, what is replayed.**
 
 - Real: every attack and re-attack in the main set is a live Nemotron Super session (one separate Ultra run on 348 is reported above) through Token Factory, run in Token Factory
-  Sandboxes. The certificates, gates and hole labels are the actual outputs, computed in code. One real Tavily runtime
-  call was made: a harness recon search (query `Hide private model fields in swagger doc`, 3 results, labelled as harness
+  Sandboxes. The certificates, gates and hole labels are the actual outputs, computed in code. One real Tavily harness recon
+  search was made (query `Hide private model fields in swagger doc`, 3 results, labelled as harness
   recon in the trace and certificate). The attacker made 0 `web_search` calls of its own. On 2026-10-24 the Tavily usage
-  endpoint showed plan usage 1 of 1000 and 1 search; the dashboard shows 1 search credit used, matching the one harness
-  search.
+  endpoint showed plan usage 1 of 1000 and 1 search, matching the one harness
+  search (local counter). Separately, the web-exposure audits recorded 26 searches (local counter) on 13 tasks
+  (0 of 13 findability) and 18 searches (local counter) on 9 random-sample tasks (0 of 9), reported apart.
 - Replayed: `report` and `site` read the committed certificates offline, with no model or sandbox call. The tests use
   fakes. Full traces are git-ignored and not published.
 - Spend and console figures: see the Status paragraph and the Reruns cost section above (real-spend counter about

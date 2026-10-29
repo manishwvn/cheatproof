@@ -29,3 +29,11 @@ On 2026-10-29 an automated reader used a fresh public clone at `e678776`, withou
 ## Web exposure on the random sample (pre-run note, written before the run)
 
 Written and pushed before the run so git shows the order. After the 13-task web-exposure audit (`results/web-exposure/`, 0 of 13), the same `audit-web` command will be run once on the 9 audited tasks of the random-sample audit: `uv run python -m rewardseal.cli audit-web --exposure-dir results/exposure-sample --out results/web-exposure-sample` (a separate output folder, so the 13-task run record is untouched). The dry run reports 9 tasks, 18 searches (2 per task: a title-built query and the PR-URL query), unchanged query construction. One of the 9 (`Becksteinlab__numkit-8`) has no usable issue title, so its first query is the repository name alone. Four of the 9 have a single counted gold line (`Azure__pykusto-159`, `Becksteinlab__numkit-8`, `CS-SI__eodag-249`, `Colin-b__keepachangelog-8`), so their nulls are weak. Results will be reported apart from the 13, with no combined rate or count. A null is a dated findability result for one search tool, not evidence that the web lacks the fix. Search counts are from the local counter, not provider billing.
+
+**Result.** `results/web-exposure-sample/` records the run on 2026-10-29 21:31:48Z–21:32:26Z UTC:
+18 searches (local counter), 2 per task (title-built Q1 and PR-URL oracle; numkit-8 used only the repo name for Q1),
+90 results (5 per query), 0 of 9 with a counted gold-line match (`q1_best_k` and `q2_best_k` all 0).
+There were 0 task-repo pull, commit or compare pages and 0 own-PR-number matches; 7 of 90 were repo pages
+(msal-186: 1 Q1, 4 oracle; numkit-8: 2 Q1), none PR pages.
+The 4 n=1 tasks named above have weak nulls. Report this sample apart from `results/web-exposure/` (0 of 13),
+never as a combined count or rate: it measures findability for one tool on one day, not whether the web lacks the fix.

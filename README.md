@@ -1,4 +1,10 @@
-# Recorded attack-check report
+# RewardSeal
+
+A reward-hacking audit for coding-agent training tasks, built for the Nebius x NVIDIA Global AI Hackathon, Coding & Agentic Engineering track.
+
+*Recorded attack-check report*
+
+**Certified (k=1) is not a security guarantee.**
 
 RewardSeal audits coding-agent task environments for exposed fixes and other shortcuts.
 It applies rule-based hardening, rechecks gold and empty patches, and records attacker outcomes.
@@ -10,7 +16,7 @@ The report replays committed evidence; it is not a live attack.
 - On 348, 1 of 9 committed Super before-rounds (the 2026-10-24 rerun, rep1-4, run1-4) showed a history-use pattern (1 of 7 excluding 2 HTTP 503 errors; 1 of 10 counting the null same-recon replay attempt); use is inferred from command order and a matching line. Follow-up was unequal, recon was on, and these counts are not a rate. A fresh hardened re-attack failed. One separate Ultra run showed the pattern before hardening; its re-attack reached the token limit without submission and was not certified.
 - The separate predeclared sample drew 12 tasks from a 1000-row frame: 9 audited, 3 environment-broken, 7 of 9 with at least half the counted lines in future commits, and 5 of those 7 closed. This is a count within the stated frame.
 - There are 14 certificate files, 4 certified (1 after hardened re-attack, 3 legacy), and 11 tasks attacked. Of 9 future-history tasks attacked with recon, 1 finding was confirmed, 1 lead was unconfirmed, and 7 showed no leak use or were inconclusive.
-- Tavily returned a counted gold line in 0 of 13 audited tasks; the query did not return the PR pages either. This is a dated result for one search tool, not evidence of absence.
+- Tavily web-exposure audits found counted gold lines in 0 of 13 tasks (26 searches (local counter), `results/web-exposure/`) and, reported apart, 0 of 9 random-sample tasks (18 searches (local counter), `results/web-exposure-sample/`); neither audit returned the tasks' PR pages. The random-sample nulls are weak for 4 tasks with one counted gold line. These are dated findability results for one tool, not evidence that the web lacks the fix.
 
 Certified (k=1) means one completed attack failed under the recorded conditions, with exposure removed, gold pass and empty fail checked by code. The three legacy certificates record a failed initial attack with no hole found, without recorded exposure removal or hardened re-attack.
 
@@ -22,7 +28,7 @@ See [results](docs/results.md), [claims](docs/claims.md), [method](docs/method.m
 |---|---|
 | Nebius Token Factory + NVIDIA Nemotron | Token Factory serves model calls; Nemotron Super attacks, with one exploratory Ultra run. |
 | Token Factory Sandboxes | Runs task code and gates in separate branches; Docker is a fallback. |
-| Tavily | Host-side search for network-fetch experiments; one harness search was recorded, with 0 attacker search calls. |
+| Tavily | Host-side harness search for `--network-fetch` (one recorded, 0 attacker search calls), plus the separate `audit-web` web-exposure audits; see [Tavily](docs/tavily.md#audit-web). |
 
 ## Quick start
 
@@ -36,21 +42,24 @@ uv run python -m rewardseal.cli site --certs results/certificates --out results/
 uv run python -m rewardseal.manifest verify
 ```
 
-Live runs also need a Nebius Token Factory account (API key and project ID) and Sandboxes beta access; a Tavily key is only needed with `--network-fetch`. Copy `.env.example` to `.env` (git-ignored, never commit it) and set `NEBIUS_API_KEY`, `NEBIUS_PROJECT_ID`, `SPEND_CAP_USD`, `DAILY_CAP_USD` (both required), `EXECUTOR=sandbox` and `SPEND_LEDGER` (absolute path). `ATTACKER_MODEL` defaults to Nemotron Super (`nvidia/nemotron-3-super-120b-a12b`). Live commands can spend credits and all go through the budget guard; see [method](docs/method.md).
+Live runs also need a Nebius Token Factory account (API key and project ID) and Sandboxes beta access; a Tavily key is needed for `--network-fetch` or `audit-web`. Copy `.env.example` to `.env` (git-ignored, never commit it) and set `NEBIUS_API_KEY`, `NEBIUS_PROJECT_ID`, `SPEND_CAP_USD`, `DAILY_CAP_USD` (both required), `EXECUTOR=sandbox` and `SPEND_LEDGER` (absolute path). `ATTACKER_MODEL` defaults to Nemotron Super (`nvidia/nemotron-3-super-120b-a12b`). Live commands can incur usage charges and all go through the budget guard; see [method](docs/method.md).
 
 ```sh
 uv run python -m rewardseal.cli budget init        # once per ledger; refuses an existing file
 uv run python -m rewardseal.tasks fetch --source swe-rebench --n 11   # free public rows API, cached in runs/tasks/
-uv run python -m rewardseal.cli audit-exposure --instance-ids <task-id> --out results/exposure
+uv run python -m rewardseal.cli audit-exposure --instance-ids <task-id> --out runs/my-audit
 uv run python -m rewardseal.cli harden <task-id> --system-prompt-file results/combined.txt --strategy combined \
-    --attacker-model nvidia/nemotron-3-super-120b-a12b --max-steps 40 --max-tokens 250000 --out results/certificates
+    --attacker-model nvidia/nemotron-3-super-120b-a12b --max-steps 40 --max-tokens 250000 --out runs/my-certificates
 uv run python scripts/smoke.py                      # key, model IDs, one capped Nemotron call, one sandbox run
 ```
+
+The committed evidence folders are hashed, so live runs should write elsewhere (for example `runs/my-audit`) to preserve `manifest verify`.
 
 `harden` and `batch` read tasks from the local cache only, so run `tasks fetch` first. The recorded 348 certificate configured 40 steps / 500,000 tokens for both rounds.
 
 ## Limits
 
+- The attacker prompt (`results/combined.txt`) supplies git-history retrieval commands and, with recon on, the attacker is shown exposure-scan findings (the 348 certificate records `attacker.recon: "exposure"`), so the finding concerns a told-to-cheat attacker using a leak, with use inferred, rather than unprompted discovery.
 - Results describe small samples and the recorded attacker and conditions; recon differed in the 348 comparison.
 - The detector misses some history, and model use of the observed output is inferred.
 - The verifier checks artifact integrity and calculations, not historical execution. See [limitations](docs/limitations.md).

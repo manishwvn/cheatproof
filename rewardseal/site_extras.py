@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from rewardseal import audit, webaudit
 from rewardseal.certify import load_certificate
@@ -153,12 +154,18 @@ def write_pages(
     groups = {exposure_path.name, "exposure-sample"}
     groups_loaded = not any(name.split("/", 1)[0] in groups for name, _ in errors)
     web = _records(results / "web-exposure", webaudit.load_record, errors)
+    sample_web = _records(results / "web-exposure-sample", webaudit.load_record, errors)
     controls = _records(results / "control", _json_record, errors)
     replay = _records(results / "replay-attempt", _certificate_record, errors)
     audits = [(FIRST, p, r) for p, r in first] + [(SAMPLE, p, r) for p, r in sample]
     _write(
         out / "explorer.html",
-        _document("Results explorer", explorer(audits, web, entries, groups_loaded), blob, csp=EXPLORER_CSP),
+        _document(
+            "Results explorer",
+            explorer(audits, web + sample_web, entries, groups_loaded, sample_web),
+            blob,
+            csp=EXPLORER_CSP,
+        ),
     )
     _write(out / "explorer.js", EXPLORER_JS)
     _write(
@@ -192,6 +199,7 @@ def explorer(
     web: Sequence[tuple[Path, dict]],
     entries: Sequence[_Entry],
     complete: bool = True,
+    sample_web: Sequence[tuple[Path, dict]] = (),
 ) -> str:
     certs = {e.cert["task"]["instance_id"]: e for e in entries}
     searches = {r["instance_id"]: r for _, r in web}
@@ -254,6 +262,7 @@ def explorer(
             '<div id="explorer-filters"></div><p id="explorer-message" role="status" '
             f'data-complete="{"yes" if complete else "no"}"></p>'
         )
+        + _sample_web_note(sample_web)
         + _table(
             "Audited tasks and certificates",
             (
@@ -269,6 +278,36 @@ def explorer(
             rows,
         )
         + '<script src="explorer.js" defer></script>'
+    )
+
+
+def _sample_web_note(records: Sequence[tuple[Path, dict]]) -> str:
+    if not records:
+        return ""
+    searches = sum(len(record["queries"]) for _, record in records)
+    results = [
+        (record, result)
+        for _, record in records
+        for query in record["queries"]
+        for result in query["results"]
+    ]
+    gold = sum(result["k"] > 0 for _, result in results)
+    matching_pr = sum(
+        bool(
+            re.search(
+                r"/pull/" + re.escape(record["instance_id"].rsplit("-", 1)[-1]) + r"(?:/|$)",
+                urlsplit(result["url"]).path,
+            )
+        )
+        for record, result in results
+    )
+    single = sum(record["n"] == 1 for _, record in records)
+    return (
+        f"<p>Random-sample web exposure (reported apart from the 13): {len(records)} tasks, "
+        f"{searches} searches, {len(results)} results, {gold} with a counted gold line, "
+        f"{matching_pr} matching the task&#x27;s own PR number (match the PR number in the URL path /pull/&lt;N&gt;), "
+        f"{single} of {len(records)} tasks have a single counted gold line so their nulls are weak; "
+        "findability for one tool on one day, not proof of absence; searches are the local counter.</p>"
     )
 
 
@@ -374,7 +413,7 @@ def gallery(
         "attribution-116",
         "116 attribution",
         "The recorded write preceded history commands, so the label stays a lead. "
-        "PR #88 added the timing rule: a matching write at or before the earliest successful history read cannot establish a history exploit.",
+        "A timing rule added after review states: a matching write at or before the earliest successful history read cannot establish a history exploit.",
         "Command order and line overlap do not directly observe use of git show output; the committed certificate is unchanged.",
         [(path, {"instance_id": task})] if attribution else [],
         _kv_table(
