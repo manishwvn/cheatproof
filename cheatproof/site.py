@@ -58,6 +58,15 @@ NO_ATTACK_DIFF = "attack diff not recorded in certificate"
 UNREADABLE_LINE = "unreadable line"
 RUN_COMMAND = "python -m cheatproof.cli harden <instance id> ..."
 DEFAULT_CERT_DIR = "results/certificates"
+GITHUB_BLOB = "https://github.com/manishwvn/cheatproof/blob/main/"
+# Evidence files committed beside the certificates: task id -> path in the repo.
+EVIDENCE_FILES = {"CycloneDX__cyclonedx-python-348": "results/evidence/348-causal.md"}
+REPLICATION_NOTE_348 = (
+    "The site's replication line counts only runs that finished a judged before attack under the T54 rule; the four "
+    "T55 replication runs are excluded as unfinished or inconclusive, so it reads 0/3. Counting every later "
+    "before-round of this task (docs/results.md, Replication under T55), the history-use pattern appeared in 1 of 10; "
+    "2 of the 10 ended in HTTP 503."
+)
 DIFFS_DIR = "diffs"  # read from the sibling of the certificates directory, where cli harden writes them
 ROUNDS = ("before", "after")
 BATCH_FILE = "batch.json"  # the selection record cli batch writes beside the certificates directory
@@ -282,6 +291,7 @@ def build_site(
             _transcript_body(traces_dir, entry),
             diffs,
             statuses[entry.cert["task"]["instance_id"]],
+            entry.stem,
         )
         _write(page, _document(f"RewardSeal: {entry.cert['task']['instance_id']}", body))
         pages.append(page)
@@ -631,7 +641,9 @@ def _rate_text(rate: Mapping[str, Any]) -> str:
         return f"{rate['count']} of {rate['n']}, no conclusive certificates"
     bounds = confirm.interval_bounds(rate)  # T54: no interval below n = 10
     if bounds is None:
-        return f"{rate['count']} of {rate['n']} = {rate['rate']:.1%} ({confirm.INTERVAL_TOO_SMALL})"
+        if rate["n"] < confirm.MIN_INTERVAL_N:  # a percentage of a handful reads as a rate
+            return f"{rate['count']} of {rate['n']} (no rate shown: {confirm.INTERVAL_TOO_SMALL})"
+        return f"{rate['count']} of {rate['n']} = {rate['rate']:.1%}"
     low, high = bounds
     return f"{rate['count']} of {rate['n']} = {rate['rate']:.1%} (95% CI {low:.1%} to {high:.1%})"
 
@@ -852,6 +864,7 @@ def _hero_confirmed(
                             ("Replication", confirm.replication_text(task, replications, manifest)),
                         ],
                     ),
+                    *([f"<p>{_cell(REPLICATION_NOTE_348)}</p>"] if task in EVIDENCE_FILES else []),
                     panel or "<p>No hardening round was recorded for this environment.</p>",
                 ]
             )
@@ -1132,8 +1145,19 @@ def _env_body(
     transcript: str,
     diffs: Mapping[str, str | None] | None = None,
     status: confirm.HoleStatus | None = None,
+    stem: str | None = None,
 ) -> str:
     task = cert["task"]
+    links = []
+    if stem:
+        links.append(_link_html(f"{GITHUB_BLOB}{DEFAULT_CERT_DIR}/{stem}.json", "raw certificate on GitHub"))
+    if task["instance_id"] in EVIDENCE_FILES:
+        links.append(
+            _link_html(
+                GITHUB_BLOB + EVIDENCE_FILES[task["instance_id"]], "evidence file (full outputs not retained)"
+            )
+        )
+    link_row = [f"<p>{' | '.join(links)}</p>"] if links else []
     return "\n".join(
         [
             '<p><a href="../index.html">Back to the index</a></p>',
@@ -1142,7 +1166,9 @@ def _env_body(
                 '<p><span class="label">recorded</span> This page replays a committed certificate. '
                 "No live calls were made.</p>"
             ),
+            *link_row,
             _result_section(cert, status),
+            *([f"<p>{_cell(REPLICATION_NOTE_348)}</p>"] if task["instance_id"] in EVIDENCE_FILES else []),
             _before_after_section(cert),
             _task_section(cert),
             _attacker_section(cert["attacker"]),

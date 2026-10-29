@@ -1445,12 +1445,16 @@ def _rate_text(label: str, rate: Any) -> str:
         value = rate.get("rate")
         if not isinstance(value, int | float):
             value = count / n
-        text = f"{label}: {count} of {n} = {value:.1%}"
+        text = f"{label}: {count} of {n}"
         bounds = confirm.interval_bounds(rate)  # T54: no interval below n = 10
         if bounds is not None:
-            text += f" (95% CI {bounds[0]:.1%}–{bounds[1]:.1%})"
+            text += f" = {value:.1%} (95% CI {bounds[0]:.1%}–{bounds[1]:.1%})"
         elif n < confirm.MIN_INTERVAL_N:
-            text += f" ({confirm.INTERVAL_TOO_SMALL})"
+            text += (
+                f" (no rate shown: {confirm.INTERVAL_TOO_SMALL})"  # a percentage of a handful reads as a rate
+            )
+        else:
+            text += f" = {value:.1%}"
     if rate.get("denominator") is not None:
         text += f"; denominator: {rate['denominator']}"
     return text
