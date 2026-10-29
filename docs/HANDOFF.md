@@ -21,7 +21,7 @@ reward hacking, and certifies each environment.
   attacker, report raw counts.
 - **Fallback if Sandboxes access is denied or slow:** local Docker for the environments plus Token Factory for every
   model call. This satisfies the rules ("runtime call to the Token Factory inference API").
-- Prior art to cite honestly: arXiv "Auditing Reward Hackability in Code RL Training" (Jun 2026: 28.5% on a 49-task
+- Historical, unverified (do not cite these figures; not re-checked): prior art noted at the time: arXiv "Auditing Reward Hackability in Code RL Training" (Jun 2026: 28.5% on a 49-task
   SWE-bench Verified sample), ImpossibleBench, RHB (ICML 2026), Cursor (Jun 2026), Poolside, Vals.ai MiMo (Oct 2026).
 
 Full research is in `/Users/manish/Documents/Nebius_X_Nvidia/research/` (outside the repo; owner-private):
