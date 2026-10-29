@@ -5,20 +5,14 @@ four equal criteria scored 1–5 (Technological Implementation, Design, Potentia
 to Technological Implementation. Budget: free Token Factory credits only (the $1 trial, now exhausted, and the hackathon promo, which now covers spend), in-app real-spend cap $10 total, $4 a day.
 
 ## One line
-One workflow that attacks SWE environments for reward hacks, applies rule-based patches, checks that the gold patch still
-passes and the empty patch fails, and re-attacks with the same adversary. A certificate records the outcome; it does not
-prove the environment is secure.
+For an evaluation owner: before you trust a SWE task, RewardSeal checks whether its git history leaks the fix, strips it, re-checks that the gold patch still passes and the empty patch still fails, and attacks it again with the same attacker. A certificate records the outcome; it does not prove the environment is secure.
 
 ## Problem
 Coding agents trained or evaluated on SWE environments can pass tasks without solving them: they read the known fix
 from git history, edit or delete the tests, hard-code outputs, or fetch the upstream fix from the network. RL rewards
 these shortcuts, so a policy looks better while it learns to cheat, and eval numbers lose credibility.
 
-Evidence (from the research notes; re-check each source before any public use):
-- arXiv "Auditing Reward Hackability in Code RL Training" (Jun 2026): 28.5% Docker-verified hackability on a
-  49-task SWE-bench Verified sample.
-- ImpossibleBench and RHB (ICML 2026) measure hacking; Cursor (Jun 2026), Poolside (May 2026) and Vals.ai (Oct 2026)
-  report known-fix retrieval at scale.
+Related work: other groups measure reward hacking in code RL and some vendors report known-fix retrieval. We have not verified their figures, so we cite none.
 
 Our research notes identified measurement-focused work; we have not verified the landscape sufficiently to claim novelty.
 Do not claim "first" for anything.
@@ -28,7 +22,7 @@ RL and eval teams that train or score coding agents (Nebius publishes SWE-rebenc
 trains Nemotron with RL), labs and eval firms.
 
 ## How it works
-1. **Load** SWE tasks. Planned: 30 SWE-rebench plus 10 SWE-bench Verified. Reported so far: 14 certificate files, all selected SWE-rebench tasks; not directly comparable to the cited 28.5% study.
+1. **Load** SWE tasks. Planned: 30 SWE-rebench plus 10 SWE-bench Verified. Reported so far: 14 certificate files, all selected SWE-rebench tasks; no external study is cited or compared.
 2. **Gate before hardening:** the gold patch passes and the empty patch fails, or the task is dropped and counted.
 3. **Attack:** a dishonest Nemotron Super agent gets the task, a shell inside the environment and four explicit
    strategies: git-history retrieval, test edits, hard-coding, network fetch of the upstream fix (with Tavily search).

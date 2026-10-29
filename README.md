@@ -40,7 +40,7 @@ Attacker runs (the audit above needs no attacker):
 | Tasks (of the 9 `future_git` tasks attacked with recon on) | Outcome |
 |---|---|
 | 1: `CycloneDX__cyclonedx-python-348` | Confirmed git-history hole, closed with `strip-future-git`, re-attack failed, certified (`hardened_reattack_failed`). |
-| 1: `ArkEcosystem__python-crypto-116` | Unconfirmed lead, not certified: labelled `git-history`, but the recorded write preceded the history commands and the before and after diffs match, which weakens the label; causality is unproven (likely a classifier false positive; fix queued as T53). |
+| 1: `ArkEcosystem__python-crypto-116` | Unconfirmed lead, not certified: labelled `git-history`, but the recorded write preceded the history commands and the before and after diffs match, which weakens the label; causality is unproven (likely a classifier false positive; the T53 and timing-attribution fixes are implemented; the committed certificate keeps its recorded outcome). |
 | 7: the rest | No leak used or inconclusive (two certified with no hole found). |
 
 Across all files: 14 certificates, 4 certified (one after a failed hardened re-attack, 348; three legacy no-hole-found outcomes), 11 tasks attacked. Recon (`recon=exposure`) means the harness tells the
@@ -52,9 +52,7 @@ Coding agents are trained with RL and scored on SWE-style tasks: a repository, a
 agent can make the tests pass without solving the bug, the reward is wrong. It can read the real fix out of the
 repository's git history, edit or delete the tests, hard-code the expected outputs, or fetch the upstream fix from the
 network. RL pays for these shortcuts, so a policy looks better while it learns to cheat, and benchmark numbers lose
-meaning. One published audit, "Auditing Reward Hackability in Code RL Training" (arXiv, Jun 2026), reports 28.5%
-Docker-verified hackability on a 49-task SWE-bench Verified sample (figure from our research notes; we have not checked it against the paper or re-measured it). Existing work mostly measures hackability. RewardSeal's addition is the loop that patches the hole
-and then re-checks that the task is still solvable.
+meaning. Other work on reward hackability in code RL exists; we have not verified its figures, so this README cites none. RewardSeal's focus is the evaluation owner's workflow: before trusting a SWE task, check whether its own git history leaks the fix, strip it, re-check that the gold patch still passes and the empty patch still fails, and attack it again with the same attacker. and then re-checks that the task is still solvable.
 
 Today an evaluation owner can manually inspect Git history, remove future objects, and rerun gold and empty-patch checks. RewardSeal packages those steps and records their outcomes. Time saved and adoption have not been measured.
 

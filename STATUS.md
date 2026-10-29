@@ -18,9 +18,9 @@ Demo: https://manishwvn.github.io/cheatproof/ (GitHub Pages, built from the comm
 - Core: spend caps, executor on Token Factory Sandboxes, attacker loop, hole classifier, patches and re-attack,
   certificates and score, report site, GitHub Pages workflow (#4 to #52).
 - Honesty fixes: confirmed holes vs leads (T54), `git-history` needs a shared future-commit line (T53), targeted
-  post-attack scan (T55), bounded LLM retry (T56), `max_steps` rule (T41/T44), `legit_fix` downgrade (T49/T50).
+  post-attack scan (T55), bounded LLM retry (T56), `max_steps` rule (T41/T44), `legit_fix` downgrade (T49/T50), timing attribution for `git-history` (#88).
 - Eval tooling: batch chunks and reruns (T38), exposure recon and nudges (T47), harness Tavily search (T37/T52),
-  `audit-exposure` (T57, #78), audit results (#79).
+  `audit-exposure` (T57, #78), audit results (#79), Start here recorded path on the site (#87), Terra and Opus wording fixes (#84 to #86).
 - Batches 1 to 3 and the replications of cyclonedx-348 are in `docs/results.md`.
 
 ## Budget (`~/.cheatproof-autopilot/ledger.json`)
