@@ -19,6 +19,8 @@ diff is byte-identical before and after; likely a classifier false positive, T53
 or "2 of 9 exploited". 348 and 116 got repeated targeted reruns. All runs: Nemotron Super (one exploratory Ultra run on 348, not certified), Token Factory
 Sandboxes. "Not hackable" means the recorded qualifying attack by this attacker did not succeed, not proof. Recon exposure before and none after is disclosed on screen.
 
+Route replay (no model): the same three commands re-run in the 348 image reproduce the recorded output hashes (3 of 3); after the strip the commit is unreachable; the model's use of the output stays inferred ([`348-route-replay.json`](../../results/evidence/348-route-replay.json)).
+
 Evidence pair: [`348-causal.md`](../../results/evidence/348-causal.md) records the model's history-use pattern;
 [`Dorthu__openapi3-75-retrieval-control.json`](../../results/control/Dorthu__openapi3-75-retrieval-control.json) is an
 **oracle-assisted scripted control, not autonomous discovery**. The script uses gold-line overlap to rank 7 readable
