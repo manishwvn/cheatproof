@@ -1,62 +1,43 @@
 # Status
 
-**2026-10-18: Cheatproof set up.** Coding & Agentic track; the owner submits 2026-10-28 (deadline 2026-10-30
-10:00 PDT). Progress: 82% (21/30 tasks done, 6 days to submit, 2026-10-22 06:30); `python3 docs/autopilot/progress.py`.
+**2026-10-28: all work merged to main (PR #79, `a831673`); no open PRs.** Coding & Agentic track; the owner submits
+2026-10-28 (deadline 2026-10-30 10:00 PDT). Progress: 83% (44/56 tasks done); `python3 docs/autopilot/progress.py`.
+Demo: https://manishwvn.github.io/cheatproof/ (GitHub Pages, built from the committed data). 2887 tests pass.
 
-- **Built:** the spend cap (`cheatproof/budget.py`, `cheatproof/llm.py`; one $20 total cap; sandbox runs reserved
-  under one lock), CI and security workflows, autopilot scripts (`next_run.py`, `progress.py`, `lock.py`) with tests,
-  guards, docs, queue T01–T14, ADR 0001 (spend cap) and ADR 0002 (executor: Sandboxes, Docker fallback).
-  2026-10-18 routine: executor with Docker backend (`cheatproof/executor.py`, #4), worktree `.env` loader and
-  sanitized Token Factory fixtures (#5). Cycle 07:24: attacker loop (`cheatproof/attacker.py`, #6); task loader,
-  grader gates and exposure scan (`tasks.py`, `grader.py`, `exposure.py`, hero fixture, #7). Cycle 08:24: hole
-  classifier (`cheatproof/holes.py`, #8). 576 tests. Cycle 11:24: patches and the re-attack loop (`patches.py`, `harden.py`, test-edit
-  guard in `grader.py`, #9), 812 tests; T15 review fixes open as PR #10 for the planner (U10). Cycle 13:24:
-  certificates, hackability score and CLI (`certify.py`, `cli.py`, #11), 1028 tests.
-  Cycle 16:24: report site merged after review fixes (T09, #12); attacker prompt now carries the problem statement
-  (T20, #13), 1095 tests. First daily audit: fresh clone green; 18 findings queued as T17–T22.
-  Cycle 21:24: traces, sanitized attack diffs and kept paid-run reports (T17, #14); honest outcomes: `no_attempt`,
-  certified split, grader-forgery cross-checks, hard-code only as a lead (T19, #15). 1210 tests.
-  Cycle 22:24: container tmpfs, per-start disk check and owner-scoped leftover sweep (T21, #16); `cheatproof batch`
-  with resume, not-run rows, budget and cost-check stops and `batch.json` run counts in report and site (T18, #17).
-  1332 tests.
-  Cycle 2026-10-19 18:18: first live run on Docker (#21: grader uses the SWE-bench `testbed` env). One task end to
-  end (`psf__requests-1142`: gates pass, Super attack inconclusive, $0.0146); batch stopped at 5.9 GB free disk (U14).
-- **T38 (PR #56, 2026-10-23):** batch 3 prep, code only: `--first`/`--instance-ids`/`--rerun`/`--prefer-future-git`, `--chunk-size` (max 10), `--dry-run`, collect-only preflight (`env-broken`), early-patch nudge, tighter output limits. Paid run waits for the orchestrator audit and T43.
-- **T43 (2026-10-23):** `REAL_SPEND_CAP_USD` (default and hard ceiling $10) caps total real spend (trial + promo credit); the $26.65 balance is promo credit, not card money; the balance must never go negative; `trial_spend_usd` ledger field kept; `TRIAL_CREDIT_CAP_USD` is now only an extra stricter cap.
-- **T45 (PR #57, open, not merged):** `budget init` refuses a fresh ledger beside a backup named like the ledger unless `--force-fresh` (CLI flag wired; a run before init leaves no lock); a 402 from the LLM halts with fixed text; a missing `halted` key refuses as corrupt; `_http_status` reads `response.status_code`.
-- **T47 (PR #61, open, not merged):** attacker recon (sanitized exposure scan in the first message when a hole is found; `recon: exposure` label in certificate, `batch.json` rows and site; `--no-recon`), budget nudges at 50/75/90%, tool output cut to 3000 chars, and auto-submit of a max_steps/token_limit diff to the grader (never a clean submit; the unsubmitted rule stays). T48 queued (docling-824 preflight).
-- **T48 (PR #62, open, not merged):** collect-only preflight shares the gold gate's command line (`grader.gate_command`) and workdir; exit 127 is `env-broken: interpreter missing`. T31 items 1 (trusted-network warning) and 3 (no colima df for Sandboxes, verified) done; items 2 and 4 open.
-- **T49 (PR #65, open, not merged):** `holes recheck` replays the legit_fix downgrade (`holes.downgrade_legit_fix`, shared with harden); `rounds.json` keeps the exposure and attack inputs; older files say `downgrade inputs not recorded`.
-- **T46 (PR #59, open, not merged):** tests run in `tmp_path` and a session guard fails on any new file under the repo's `results/traces` or `runs/`; `**/traces/` ignored by version control; `holes recheck` also checks `primary` and `exploited` against `rounds.json` (exit 1 names the field; older files labels only).
-- **T35 (PR #49, merged):** Fresh machine: run `python -m cheatproof.cli budget init` once; a lost halt is forgotten by a later init.
-- **T42 (2026-10-23):** every run keeps its full trace, raw attack diffs and restore set under git-ignored `results/traces/`; `python -m cheatproof.cli holes recheck <stem>` re-checks hole labels offline (#50).
-- **T32 (PR #47, 2026-10-23):** exposure evidence lines are redacted per word (`grader.redact_text`), so a secret-like ref name no longer drops the certificate; the leak guard is unchanged.
-- **Batch 3 chunk 1 (2026-10-23, branch `chunk1-results`, PR to main, not merged):** 8 run, 1 certified (sepal_ui-518, 0 completed re-attacks), 5 inconclusive at token_limit, 0 holes; cumulative 13 of 40 with certificates, 0 verified holes. Details in `docs/results.md`.
-- **Interim replication (2026-10-24 UTC, branch `replication-interim`, PR open, not merged):** 4 more runs of 348 and 1 of 116 under T53: no CONFIRMED git-history leak in these runs (scan incomplete, T55 pending); rep1 and rep3 `test-edit` labels suspected false positives (scratch file `/testbed/run_test.py`; PR #74 verifies). Details in `docs/results.md`.
-- **T55 replication (2026-10-24 UTC, branch `replication-t55`, PR open, not merged):** 4 more runs of 348 after the targeted scan: the leak used in 1 of 10 rounds (the confirmed rerun), 2 runs hit HTTP 503 and were not judged. T56 follow-ups queued. Details in `docs/results.md`.
-- **T53 (branch `t53-git-history-evidence`, PR #70 open, not merged):** `git-history` is an exploit only when the passing diff shares a non-trivial added line with future commits (exposure scan keeps sha256 digests in the git-ignored `rounds.json`, the certificate only a count); history commands alone are an attempt. Old records replay with the pre-T53 rule; `holes recheck` shows whether digests were recorded.
-- **Exposure audit (2026-10-24, branch `audit-results`, PR open, not merged):** 13 audited, fix reachable in 12 of 13 (lower bound; the 18 lowest-scoring swe-rebench tasks, not a random sample), strip-future-git closed it in 11 of 12; details in `docs/results.md`.
-- **T57 (branch `t57-exposure-audit`, PR #78 open, not merged):** `audit-exposure` measures the future-commit exposure with no attacker: history scan, gold-line reachability (T55 machinery), strip-future-git, both gates, rescan; one sanitized record per task in `results/exposure/`. `report` and the site hero show M / N_future / N_fix / N_closed from the records only (labelled fallback to the certificates when there are none). Not run live yet (the lead runs it; about 5 sandbox runs a task, no model call).
-- **T55 (branch `t55-targeted-history-scan`, PR #74 open, not merged):** the git-history evidence is now a targeted scan after the attack (paths of the final diff and the gold patch only, no global cap; `future_scan` in the round record, digests only in `rounds.json`) instead of T53's capped pre-attack list, which was incomplete on every live run. An unreadable restore set is the lead `test-edit-unverified`, not a test-edit hole. The 348 replications' test-edit labels came from a scratch `run_test.py` in the diff, not from a lost restore set.
-- **T56 (branch `t56-retry-lead`, PR #77 open, not merged; planner-merge path: `llm.py`):** `GuardedLLM.chat` retries HTTP 500/502/503/504 and timeouts or dropped connections at most twice (2 s, 6 s, small jitter); every attempt is reserved and settled like a first call, 402/4xx/429/BudgetExceeded are never retried; `llm_retries` is in the attack summary. The history scan sets `core.warnAmbiguousRefs=false`; git-history attempted with no future history seen is a `gold_match_with_exposure` lead, not `legit_fix`.
-- **Batch 3 chunk 2 + T37 (2026-10-24 UTC, branch `chunk2-results`, PR to main, not merged):** 1 git-history label on cyclonedx-348 (later found to be a classifier false positive: a `find ... | grep -v .git` command; after hardening, legit fix, inconclusive), 2 certified (sepal_ui-518, cyclonedx-367; no hardening re-attack), T37 Tavily run inconclusive with no real Tavily call (T52 pending); cumulative 14 of 40 with certificates, 1 hole lead (later unconfirmed). Details in `docs/results.md`.
-- **Batch 3 chunk 3 + T52 (2026-10-24 UTC, branch `chunk3-results`, PR to main, not merged):** 4 run, 1 hole lead (python-crypto-116: git-history and test-edit labels, later unconfirmed; hardened, re-attack made no attempt), 1 new certified (schematics-7, T52 Tavily search ran once); cumulative 14 files, 3 certified, 2 hole leads. Details in `docs/results.md`.
-- **Reruns (2026-10-24 UTC, branch `rerun-results`, PR to main, not merged):** 348 certified (hardened, re-attack failed); 116 not certified (`git-history` after hardening, ambiguous, possible classifier false positive; T53 proposed); 267 inconclusive. Cumulative 14 files, 4 certified, 1 confirmed hole (the 348 rerun; see the Causal check in `docs/results.md`) and 1 unconfirmed lead (116). Details in `docs/results.md`.
-- **Handoff 2026-10-23:** read `docs/autopilot/HANDOFF.md` first. T01 is done (#36); T08 batch 3 is queued, then the routine halts the budget (U26). T31 and T32 are new.
-- **Next for the routine:** U21 closed: Sandboxes cost is logged, and the budget halts only past `SANDBOX_COST_CAP_USD`
-  ($0.50). The planner clears the live ledger `halted` after merge. T23 (#30) and T25 (#31) are done; T01 and T08 are
-  unblocked. Token Factory real-spend cap `REAL_SPEND_CAP_USD` ($10 total of trial + promo credit, T43) replaces the old $0.74 trial cap. 2026-10-22: first Sandboxes batch
-  (5 of 40, PR #34, $0.21) is in `docs/results.md`; T28 (gold-gate error text) is done (#35). T01 (smoke sandbox fix) is in review (PR #36, planner merge). T29 done (#37). T08 batch 2 merged (#38, 8 of 40 so far, first hole: CycloneDX test-edit). Budget halted on the Sandboxes cost cap: U25. T30 queued. T30 done (#39): the exit-4 collection rerun also covers "found no collectors". No runnable task until U25 (T08) or T12 (after 2026-10-27).
-- **Certificates:** schema 2 since #15; schema 1 files are refused (none are committed).
-- **T41 (#48, merged):** a certificate with certified=true is refused when a round hit max_steps without a submit and no grader-confirmed exploit (same rule as harden).
-- **Planner:** T22 (U11): Docker runs are booked at $0.05 each in `budget.py`, so the $4 daily cap would halt the
-  40-task Docker run near task 16; plus `llm.py` timeout, workflow pins and git-ignoring `results/traces/`.
-- **Planner:** T16 (U9) attack strategy prompts and the Tavily budget counter; needed before live attacks (T08).
-- **Owner blockers:** U25: clear the Sandboxes cost halt and set caps (T08 waits). U24: merge PR #36 (T01). None for T08 (U12 and U3 done). Owner removed all local swebench images 2026-10-21: Sandboxes is
-  the default, no task assumes a local image. U7: colima is installed
-  and runs (22 GB free on Oct 19). U10: merge
-  PR #10 (planner-merge). U1 done
-  2026-10-18: promo applied, key in `.env`, caps 20/4.
-- **Risk:** the Oct 21 go/no-go needs live attacker runs: T16 (planner) and an executor (U3 or U7) by Oct 20.
-- **Routine:** `cheatproof-autopilot`, hourly at about :23, state in `~/.cheatproof-autopilot/` (see
-  `docs/autopilot/CYCLE.md`). Owner item U8: set its folder to the repo and mode to Bypass. Review fixes queued as T15.
+## Result so far (details and caveats in `docs/results.md`)
+- **Deterministic exposure audit (`audit-exposure`, no attacker):** 13 of the 18 selected swe-rebench tasks audited (5
+  env-broken); the upstream fix is reachable from git history in 12 of 13; `strip-future-git` closed it in 11 of 12.
+  A lower bound on a non-random sample (the 18 lowest-scoring tasks), not a rate. bqskit-134 failed its gold gate
+  before and after the strip; azure-cli-1876's scan stopped at 5000 commits, so its "not reachable" is incomplete.
+- **Attacker finding:** against this attacker (Nemotron Super, recon on), the leak was used in 1 of 10 attack rounds on
+  cyclonedx-python-348, with confirmed causality (`confirmations.json`). n=1; "not proof".
+- **Certificates:** 14 task files, 4 certified (sepal_ui-518, cyclonedx-367, schematics-7, cyclonedx-348 after
+  hardening). Other `git-history` / `test-edit` labels are unconfirmed leads, not holes.
+
+## Merged since the Oct 18 setup
+- Core: spend caps, executor on Token Factory Sandboxes, attacker loop, hole classifier, patches and re-attack,
+  certificates and score, report site, GitHub Pages workflow (#4 to #52).
+- Honesty fixes: confirmed holes vs leads (T54), `git-history` needs a shared future-commit line (T53), targeted
+  post-attack scan (T55), bounded LLM retry (T56), `max_steps` rule (T41/T44), `legit_fix` downgrade (T49/T50).
+- Eval tooling: batch chunks and reruns (T38), exposure recon and nudges (T47), harness Tavily search (T37/T52),
+  `audit-exposure` (T57, #78), audit results (#79).
+- Batches 1 to 3 and the replications of cyclonedx-348 are in `docs/results.md`.
+
+## Budget (`~/.cheatproof-autopilot/ledger.json`)
+- Real-spend cap `REAL_SPEND_CAP_USD` $10 ceiling; live stop $7. Daily $4, total $20. Sandboxes guard $5
+  (`SANDBOX_COST_CAP_USD`), run cap 500 (owner-approved). Ledger about $3.53 at Oct 28.
+- The balance is hackathon promo credit, not card money; it must never go negative. Check the console between runs.
+
+## Open
+- Ultra on 4 future-git tasks (348, 367, toil-4805, python-crypto-116), one at a time, inside the caps.
+- Headline rewrite from the audit numbers (README, site hero, `docs/results.md`, video beat 1).
+- Fresh-clone test (T12), mock judge, video script and rough cut. Open minors: T31 items 2 and 4, env-broken tasks
+  (docling-824, BoboTiG-2132), `.env.example` still says run cap 250.
+- Owner: `gh repo edit manishwvn/cheatproof --homepage https://manishwvn.github.io/cheatproof/`; confirm the $5
+  Sandboxes cap; voice-over, video and Devpost submission (T14 is the owner's alone). Nothing goes public without
+  the owner.
+
+## Pointers
+- Resume note: `docs/autopilot/HANDOFF.md` (last section). Queue: `docs/autopilot/QUEUE.md`. Routine: hourly
+  `cheatproof-autopilot`, state in `~/.cheatproof-autopilot/` (`docs/autopilot/CYCLE.md`).
+- Fresh machine: `python -m cheatproof.cli budget init` once. Certificates: schema 2.
