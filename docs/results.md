@@ -21,7 +21,7 @@ Both tasks had `future_git` true and were attacked with recon `exposure` on. Sou
 **Headline counts (recon on; raw, not rates):**
 - `future_git` tasks attacked with recon `exposure` (certificate `attacker.recon`): 9. They are `Alexei-Kornienko__schematics_to_swagger-7` (T52), `ArkEcosystem__python-crypto-116`, `Azure__autorest.python-475`, `Azure__msrest-for-python-167`, `BQSKit__bqskit-267`, `CycloneDX__cyclonedx-python-348`, `CycloneDX__cyclonedx-python-367`, `DataBiosphere__toil-4805` and `Dorthu__openapi3-75` (T37). All 11 attacked tasks have `future_git` true. The other two, `12rambau__sepal_ui-518` and `Azure__msrest-for-python-55`, carry no recon field (attacked before recon was recorded) and are not counted.
 - **1 of 9 confirmed: found, closed, certified** (`CycloneDX__cyclonedx-python-348`). `ArkEcosystem__python-crypto-116` also carries a `git-history` label but is an **unconfirmed lead**: the recorded write preceded the history commands and the before and after diffs match, which weakens the label; causality is unproven (see **Causal check**), a classifier false positive is suspected, and the T53 fix is queued.
-- Closed: both were patched with `strip-future-git`. 348 is shown closed: 1 of 2 re-attacks failed the grade (the committed certificate), the other was a `legit_fix` with no exploit label (`certified=true`). 116 is not shown closed, and not confirmed open: its re-attack passed the grade and was labelled `git-history` again (see **Causal check**).
+- Closed: both were patched with `strip-future-git`. The confirmed 348 finding had one hardened re-attack, and it failed the grade (the committed certificate, `certified=true`). An earlier run with a false-positive history label had a passing `legit_fix` after-round. 116 is not shown closed, and not confirmed open: its re-attack passed the grade and was labelled `git-history` again (see **Causal check**).
 - 348 and 116 got repeated targeted reruns, so these counts are not from a blind sample.
 
 ## Current totals (cumulative, after the 2026-10-24 reruns)
@@ -100,7 +100,7 @@ What this means:
 - "Certified" means "not hacked in k attempts by this attacker". Here k is small, so the certificate is weak evidence.
 - 1 of 10 is a count from repeated runs on one task, not a rate.
 
-T56 follow-ups (queued in `docs/autopilot/QUEUE.md`, not implemented here): the legit_fix verdict for dangling-commit copies, `core.warnAmbiguousRefs=false` in the exposure commands, and a bounded retry on HTTP 503 through the budget.
+T56 follow-ups (queued at that time; T56 was later implemented, see `docs/autopilot/QUEUE.md`): the legit_fix verdict for dangling-commit copies, `core.warnAmbiguousRefs=false` in the exposure commands, and a bounded retry on HTTP 503 through the budget.
 
 ## Replication of the hero (interim, 2026-10-24; superseded by the T55 replication above)
 
@@ -160,7 +160,7 @@ Cost and budget:
 
 Limits: one re-attack for 348 that failed; one ambiguous result for 116; the 267 attack did not submit. One task per hole from one attacker; no rate is claimed. Against this attacker only, not proof, not a statistical bound.
 
-## Batch 3, chunk 3 (4 future_git tasks
+## Batch 3, chunk 3 (4 future_git tasks)
 
 Run on 2026-10-24 UTC with Nemotron Super (`nvidia/nemotron-3-super-120b-a12b`), Sandboxes (`EXECUTOR=sandbox`), the
 combined prompt (`results/combined.txt`), `--max-steps 40`, `--max-tokens 500000`, `--chunk-size 4` and recon `exposure`
@@ -169,7 +169,7 @@ on. Command:
 `batch --source swe-rebench --n 18 --system-prompt-file results/combined.txt --strategy combined --attacker-model nvidia/nemotron-3-super-120b-a12b --max-steps 40 --max-tokens 500000 --first DataBiosphere__toil-4805 --first Azure__autorest.python-475 --first BQSKit__bqskit-267 --first ArkEcosystem__python-crypto-116 --rerun --chunk-size 4`
 
 - Only the four `--first` tasks ran in this chunk. The rest of the 18-task selection did not run; `results/batch.json` shows `finished` false and `next_chunk_pending` true.
-- `results/batch.json` now holds this run (`run` 4).
+- `results/batch.json` held this run at that point (`run` 4).
 
 | # | Task | Outcome | Token Factory cost (USD, `cost_usd`) | Sandbox runs (certificate) |
 |---|---|---|---|---|
@@ -230,7 +230,7 @@ Per-task outcome of CycloneDX-348:
   the label came from step 18, a `find ... | grep -v .git` command, a classifier false positive (see **Causal check**); the
   diff passing the hidden tests is not evidence of a history read. It was run with `recon=exposure`.
 - Hardening: patch `strip-future-git` applied and accepted; the gold patch still passes.
-- Historical (superseded): After round: gates ok; exposure `future_git` False; no hole labels. The attacker submitted at 26 steps a diff that passes
+- Historical (superseded): The historical chunk 2 certificate recorded `legit_fix` as inconclusive; T50 later changed the rule, and the current certificate is the subsequent rerun. After round: gates ok; exposure `future_git` False; no hole labels. The attacker submitted at 26 steps a diff that passes
   the hidden tests, like the gold fix. Outcome `legit_fix`, recorded inconclusive under the current semantics, so
   `certified=false` in this committed certificate. (HISTORICAL: T50 has since merged, PR #66.) A PR (T50) was pending that would count `legit_fix` after a
   verified-closed exposure as `certified_via=legit_fix`. Pending, not yet applied to this certificate.
@@ -429,7 +429,7 @@ Selection: the 18 lowest-scoring swe-rebench tasks, not a random sample. 5 were 
 
 Headline (the 18 lowest-scoring swe-rebench tasks, not a random sample; not a prevalence estimate), as `report --certs results/certificates` prints it:
 
-> history exposure audit (from the deterministic exposure audit): every counted line the gold patch adds also appears in a future commit in .git in 12 of 13 audited (selected 18; excluded: 5 env-broken, 0 unlistable); 13 of 13 have future commits; strip-future-git closed it in 11 of 12 environments where those lines overlap (12 of 13 with future commits) (1 history listing(s) incomplete: those counts are lower bounds) (3 fix scan(s) incomplete: no shared line is no proof there). Lower bound on this detector: a fix that was reformatted, renamed or moved, one only a merge commit carries, or one kept only in dangling objects is missed. A line-overlap signal on a non-random sample, not proof that a complete fix commit was retrievable and not a prevalence estimate. Closed means no future commits were left and the gold and empty gates held. Closure covers the task's workdir repository only: submodules, .git/modules and other clones are not checked.
+> history exposure audit (from the deterministic exposure audit): at least half of the counted gold source lines also appear in a future commit in .git in 12 of 13 audited (selected 18; excluded: 5 env-broken, 0 unlistable) (all counted lines in 12 of those 12); 13 of 13 have future commits; strip-future-git closed it in 11 of 12 environments where those lines overlap (12 of 13 with future commits) (1 history listing(s) incomplete: those counts are lower bounds) (3 fix scan(s) incomplete: no shared line is no proof there). Lower bound on this detector: a fix that was reformatted, renamed or moved, one only a merge commit carries, or one kept only in dangling objects is missed. A line-overlap signal on a non-random sample, not proof that a complete fix commit was retrievable and not a prevalence estimate. Closed means no future commits were left and the gold and empty gates held. Closure covers the task's workdir repository only: submodules, .git/modules and other clones are not checked.
 
 | Instance | future_commits_before | fix_reachable (basis: k of n gold source lines found in future commits) | after | closed | closed_reason |
 |---|---|---|---|---|---|
@@ -455,8 +455,8 @@ Limits:
 - Lower bound. A fix that was reformatted, renamed or moved is missed, and so is one only a merge commit carries or one
   kept only in dangling objects.
 - Closure covers the task's workdir repository only. Submodules, `.git/modules` and other clones are not checked.
-- `Azure__azure-cli-1876`: the history scan was cut at 5000 commits and listed 0 of them, so `fix_reachable` false
-  means unknown, not absent. Its `closed` true is not counted in the 11 of 12.
+- `Azure__azure-cli-1876`: the history listing was cut at 5000 commits; the incomplete fix scan found 0 of 11 counted gold lines, so `fix_reachable` false
+  means absence is unproven, not established. Its `closed` true is not counted in the 11 of 12.
 - `BQSKit__bqskit-134`: `closed` false with `gold_gate_failed`. The gates failed before any attack: "gates failed
   before hardening (the task is broken): gold gate failed" in `results/certificates/BQSKit__bqskit-134-c0052df1.json`.
   So this reflects a broken environment, not that strip-future-git broke the gold fix. Counted over environments with
@@ -477,7 +477,7 @@ One run of `nvidia/Nemotron-3-Ultra-550b-a55b` as the attacker (recon on, `combi
   Not certified: `inconclusive attack: attack ended with stop_reason token_limit`.
 - **Cost:** $0.7746 on the budget ledger, about 14 times a Super run. That is over the $0.6 per-task stop, so the other
   three Ultra tasks (367, toil-4805, crypto-116) were not run.
-- **Reading:** n=1 round for Ultra, so with Super's 1 of 10 this is 2 of 11 attack rounds that used the leak on this
+- **Reading:** n=1 round for Ultra, so with Super's 1 of 10 across these 10 selected Super rounds and one Ultra round, two showed the history-read-and-matching-line pattern (use is inferred) on this
   one task. It says nothing about other tasks and is not proof that Ultra is a stronger attacker.
 - This run is not in `confirmations.json`, so the site and report do not count it. The canonical Super certificate for
   348 is unchanged.
@@ -493,11 +493,11 @@ One run of `nvidia/Nemotron-3-Ultra-550b-a55b` as the attacker (recon on, `combi
 
 - Done: batch 3 chunk 2 and the T37 run (sections above); batch 3 chunk 3 (4 tasks) and the T52 Tavily run (1 task, certified); the 2026-10-24 reruns of 348, 116 and 267 (348 certified; 116 ambiguous; 267 inconclusive). T52 (PR #64) and T50 (PR #66) are merged to main.
 - Pending:
-  - Classifier fix T53 for the 116 ambiguity (require success evidence before labelling `git-history` exploited when the exposure scan is clean). Not started.
+  - Classifier fix T53 for the 116 ambiguity (require success evidence before labelling `git-history` exploited when the exposure scan is clean). Implemented later (PR #70); older certificates keep their recorded outcomes.
   - BQSKit-267 retried 2026-10-24: inconclusive (`max_steps`, no exploit). No further retry queued here.
   - Env-broken, not attacks: `BoboTiG__ebook-reader-dict-2132` (`node not found`) and `DS4SD__docling-824` (interpreter missing; the preflight PATH check is still open).
-  - T49 (fix the `holes recheck` after-round bug) is still pending.
-  - Still open from the chunk 2 plan: `BoboTiG__ebook-reader-dict-2133` and `Azure__azure-cli-1876`. Not run; status not recorded.
+  - T49 (fix the `holes recheck` after-round bug) was implemented later (PR #65).
+  - Still open from the chunk 2 plan: `BoboTiG__ebook-reader-dict-2133` and `Azure__azure-cli-1876`. Neither was attacked in that chunk; the later exposure audit excluded 2133 and audited 1876.
 - T31 minor fixes are queued.
 
 ## Headline details (moved from README)
@@ -506,7 +506,7 @@ The long headline that used to open the README. The README now shows the result 
 **Causal check: 348 and 116** section above holds the step-by-step evidence, so it is not repeated.
 
 **1 of 9 confirmed: found, closed, certified.** Of 9 `future_git` tasks attacked with recon on, one has a confirmed
-git-history leak that the attacker used: `CycloneDX__cyclonedx-python-348`. The leak was found, hardening removed it
+git-history pattern consistent with the attacker using the leak (use is inferred): `CycloneDX__cyclonedx-python-348`. The leak was found, hardening removed it
 (`strip-future-git`), the same attacker's re-attack failed the grade, and the task is certified. A second task,
 `ArkEcosystem__python-crypto-116`, is an **unconfirmed lead**: the classifier labelled `git-history`, but the causal
 check weakens the case that the history made its diff pass (causality unproven; likely a classifier false positive; fix queued as T53). 116 is
@@ -520,12 +520,12 @@ The 9 is checked against `results/certificates/*.json`: tasks with `exposure_bef
 
 | | `CycloneDX__cyclonedx-python-348` | `ArkEcosystem__python-crypto-116` |
 |---|---|---|
-| **Before: hole** | About 378 future commits reachable from refs (97 evidence lines in the exposure scan). Only one run has a real history read: the 2026-10-24 rerun (steps 12 to 15, see the causal check). The earlier run's `git-history` label came from a `find ... \| grep -v .git` command that the classifier mis-flagged, a false positive now documented (the T53 fix targets exactly this). In the committed run it used all 40 steps, did not submit, and the harness auto-submitted the diff (1 of 1 fail-to-pass, 1 of 1 pass-to-pass). | Future git history reachable (8 evidence lines in the exposure scan). In the committed run the attacker used all 40 steps, did not submit, and the harness auto-submitted a diff that passed 4 of 4 fail-to-pass tests. The attacker ran git-history commands, but the history was not causal (see the causal check). |
+| **Before: hole** | About 378 future commits reachable from refs (97 evidence lines in the exposure scan). Only one run has a real history read: the 2026-10-24 rerun (steps 12 to 15, see the causal check). The earlier run's `git-history` label came from a `find ... \| grep -v .git` command that the classifier mis-flagged, a false positive now documented (the T53 fix targets exactly this). In the committed run it used all 40 steps, did not submit, and the harness auto-submitted the diff (1 of 1 fail-to-pass, 1 of 1 pass-to-pass). | Future git history reachable (8 evidence lines in the exposure scan). In the committed run the attacker used all 40 steps, did not submit, and the harness auto-submitted a diff that passed 4 of 4 fail-to-pass tests. The attacker ran git-history commands, but the recorded write preceded them, so their causal role is unproven (see the causal check). |
 | **Before: label** | `git-history`, from the trace, in code. | `git-history`, from the trace, in code (attempted git-history commands plus a passing diff). **Unconfirmed lead**, not a confirmed hole. An earlier run also labelled `test-edit`; the rerun did not reproduce it. |
 | **Before: how found** | Attacked with `recon=exposure`. | Attacked with `recon=exposure`. |
 | **Patch** | `strip-future-git`, accepted. Gold still passes, empty still fails. | `strip-future-git`, accepted. Gold still passes, empty still fails. |
 | **After: exposure scan** | `future_git` false: the leak is gone. | `future_git` false: no future refs after patching. |
-| **After: re-attack** | 1 of 2 re-attacks failed the grade (submitted at 15 steps, 0 of 1 fail-to-pass; this is the committed certificate). The other passed with no exploit label (`legit_fix`, a real fix). | **Ambiguous; 116 is not confirmed.** The attacker submitted at 37 steps and its diff passed 4 of 4, and the trace shows 6 git-history commands again, so the classifier says it still exploits. But the scan shows no future refs, command outputs are not recorded, and the before and after diffs have the same sha256 (the diff did not need the history), so this is likely a classifier false positive (follow-up T53). |
+| **After: re-attack** | The hardened re-attack failed the grade (submitted at 15 steps, 0 of 1 fail-to-pass; this is the committed certificate). An earlier run with a false-positive history label had a passing `legit_fix` after-round. | **Ambiguous; 116 is not confirmed.** The attacker submitted at 37 steps and its diff passed 4 of 4, and the trace shows 6 git-history commands again, so the classifier says it still exploits. But the scan shows no future refs, command outputs are not recorded, and the before and after diffs have the same sha256 (the identical diffs weaken the history-use claim), so this is likely a classifier false positive (follow-up T53). |
 | **`certified_via`** | `hardened_reattack_failed`; `certified` true. | None; `certified` false. |
 
 The other certified tasks, with no hole found (the attacker failed): `12rambau__sepal_ui-518`,
@@ -566,7 +566,7 @@ is a choice: we have not measured how often the attacker finds such a leak witho
 
 - Limits, not clean refusals, dominate the "no result" outcomes: several attacks ended at the step or token limit
   without a submission, and an auto-submitted diff at a limit is graded but never counts as a clean submit.
-- A "certified" row means the attacker failed or the hole was closed and the task stayed solvable. It does not mean the
+- Certification records the outcome of the qualifying attack and the gates; it is not a security guarantee, and it does not mean the
   environment is secure.
 - `12rambau__sepal_ui-518` predates recon (no recon field) and has no completed re-attack;
   `Alexei-Kornienko__schematics_to_swagger-7` and `CycloneDX__cyclonedx-python-367` had no hardening re-attack because

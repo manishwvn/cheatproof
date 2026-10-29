@@ -1115,8 +1115,8 @@ def _environments_section(entries: Sequence[_Entry], statuses: Mapping[str, conf
         "environments",
         "Environments",
         _table(
-            "One row per environment. Certified means no hole left that this attacker could use (via: how it was "
-            "certified). It is not a claim that the task is secure.",
+            "One row per environment. Certified means the recorded qualifying attack failed; it does not establish that "
+            "no usable hole remains (via: how it was certified). It is not a claim that the task is secure.",
             headers,
             rows,
         ),
@@ -1184,8 +1184,8 @@ def _env_body(
 
 VIA_PLAIN = {
     "no_hole_found": "no hole found: the attacker failed before any patch",
-    "hardened_reattack_failed": "hole closed: the attacker failed after hardening",
-    "legit_fix": "hole closed, task still solvable: the attacker submitted a real fix after hardening",
+    "hardened_reattack_failed": "the recorded hardened re-attack failed",
+    "legit_fix": "the recorded checks did not find the earlier exposure: the attacker submitted a real fix after hardening",
 }
 
 

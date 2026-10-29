@@ -369,10 +369,7 @@ def test_the_summary_is_computed_strictly_from_the_records(tmp_path):
     assert s["fix_ids"] == ["a__a-1", "b__b-2"] and s["not_closed_ids"] == ["b__b-2", "e__e-5"]
     line = audit.summary_line(s)
     assert s["N_fix_closed"] == 1 and s["fix_not_closed_ids"] == ["b__b-2"]
-    assert (
-        "appears in a future commit in .git in 2 of 5 audited" in line
-        and "4 of 5 have future commits" in line
-    )
+    assert "in a future commit in .git in 2 of 5 audited" in line and "4 of 5 have future commits" in line
     assert "closed it in 1 of 2 environments where those lines overlap (2 of 4 with future commits)" in line
     assert "Lower bound" in line and "workdir repository only" in line
     assert "not an audit" not in line
@@ -394,6 +391,25 @@ def test_a_malformed_or_renamed_or_repeated_record_refuses_every_number(tmp_path
     (d / "wrong-name.json").write_text(json.dumps(synthetic("c__c-3")), encoding="utf-8")
     with pytest.raises(audit.ExposureAuditError, match="file name"):
         audit.exposure_summary(d)
+
+
+def test_a_partial_overlap_counts_as_reachable_but_not_as_full_overlap(tmp_path):
+    d = tmp_path / "results" / "exposure"
+    half = synthetic("a__a-1", fix=True)
+    half["future_scan"]["gold_lines_in_future"] = (
+        1  # 1 of 2: meets the at-least-half rule, is not all of them
+    )
+    half["fix_reachable_basis"] = audit.basis_text(1, 2)
+    below = synthetic("b__b-1", fix=False)
+    below["future_scan"]["gold_lines_in_future"] = 0
+    write_all(d, half, synthetic("c__c-1", fix=True), below)
+    summary = audit.exposure_summary(d)
+    assert (summary["M"], summary["N_fix"], summary["N_full_overlap"]) == (3, 2, 1)
+    line = audit.summary_line(summary)
+    assert (
+        "at least half of the counted gold source lines" in line
+        and "all counted lines in 1 of those 2" in line
+    )
 
 
 def test_without_records_the_summary_falls_back_to_the_certificates_and_says_so(tmp_path):
@@ -630,7 +646,7 @@ def test_the_command_writes_one_record_per_task_through_the_budget(capsys):
     )
     printed = capsys.readouterr().out
     assert "a__a-1: audited" in printed and "audit: audited 1" in printed
-    assert "appears in a future commit in .git in 1 of 1 audited" in printed
+    assert "in a future commit in .git in 1 of 1 audited" in printed
 
 
 def test_a_task_with_a_record_is_skipped_unless_rerun(capsys):
