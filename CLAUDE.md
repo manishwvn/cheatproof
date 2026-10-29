@@ -5,18 +5,8 @@ reward hacking. A dishonest Nemotron agent tries to pass each task **without sol
 Rule-based patches close the hole, and the same attacker attacks again. Each environment gets a certificate only if
 three gates hold: the gold patch passes, an empty patch fails, and the attacker fails.
 
-Entry for the **Nebius x NVIDIA Global AI Hackathon**, Coding & Agentic Engineering track.
-Deadline **Fri 2026-10-30 10:00 PDT**. The owner submits on 2026-10-28. Rules summary: `docs/prize-fit.md`.
-Pitch and claims: `docs/pitches.md`. Execution model: `docs/adr/0002-execution-model.md`.
-
-## Prizes
-Overall $20K / $10K / $6K, **or** a track award (Jetson Orin Nano) plus one bonus award (Best Use of Tavily $3K).
-Most Valuable Feedback: $100 (10 winners).
-
-## Hard requirements
-- Runtime call to the Token Factory inference API, and at least one NVIDIA open model (Nemotron).
-- Public repo with MIT license at submission (private until then). README with setup and how Nebius/NVIDIA are used.
-- YouTube video under 3 min. Demo free and working through Dec 15 2026. Feedback section in the submission.
+Entry for the Nebius x NVIDIA Global AI Hackathon, Coding & Agentic Engineering track. Pitch and claims:
+`docs/pitches.md`, `docs/claims.md`. Execution model: `docs/adr/0002-execution-model.md`.
 
 ## Rules that never bend
 1. **No card money.** Free credits only: the $1 trial and the hackathon promo credit (about $26.65, "AI Builder Program
@@ -40,12 +30,10 @@ Most Valuable Feedback: $100 (10 winners).
     Keep the owner's personal details out of the repo.
 
 ## Layout
-- `rewardseal/`: package. `budget.py` (spend cap) and `llm.py` (capped Token Factory client) exist; executor,
-  task loader, attacker, holes, patches and certificates follow the queue.
+- `rewardseal/`: package (budget, Token Factory client, executor, task loader, attacker, holes, patches, certificates, audit, site).
 - `tests/`: pytest, no network.
-- `scripts/smoke.py`: live check of key, model IDs and one sandbox run (costs cents, goes through the budget).
-- `docs/autopilot/`: QUEUE, CYCLE, LOG, SKILLS, `next_run.py`, `progress.py`, `lock.py`.
-- `docs/adr/`: decision records.
+- `scripts/`: `smoke.py` (live check, costs cents, goes through the budget), `retrieval_control.py`, `route_replay.py`, `draw_sample.py`.
+- `docs/`: results, claims, limitations, ADRs. `results/`: committed evidence and certificates.
 
 ## Commands
 ```bash
@@ -53,8 +41,7 @@ uv sync
 uv run pytest -q
 uv run ruff check . && uv run ruff format --check .
 uv run python scripts/smoke.py          # live, needs .env
-python3 docs/autopilot/progress.py
 ```
 
 ## Session start
-Read `STATUS.md`, then `docs/autopilot/QUEUE.md`. Update `STATUS.md` at the end of every task.
+Read `STATUS.md`. Update it at the end of every task.

@@ -23,7 +23,7 @@ recorded conditions: say "against this attacker", "line overlap", "inferred". Do
 | Tasks attacked | 11 (9 with recon `exposure` and `future_git` true) | `docs/results.md` (Headline details), certificates |
 | Attacker model | `nvidia/nemotron-3-super-120b-a12b` via Nebius Token Factory (one exploratory Ultra run on 348) | certificates (`attacker.model`) |
 | Tavily | one harness-initiated search (schematics-7); the attacker made 0 search calls; no effect on any outcome shown | `results/certificates/Alexei-Kornienko__schematics_to_swagger-7-*.json`, `docs/tavily.md` |
-| Real Token Factory spend | about $4.15 at Oct 29 (ledger counter, an overestimate against the console); promo credit, no card | `~/.rewardseal-autopilot/ledger.json` (local, not committed), `docs/results.md` (Console) |
+| Real Token Factory spend | about $4.15 at Oct 29 (ledger counter, an overestimate against the console); promo credit, no card | the local spend ledger (not committed), `docs/results.md` (Console) |
 | Tests | see `STATUS.md` (CI runs them on every PR) | `.github/workflows/ci.yml` |
 | Second audit: random sample within the A-E frame | 9 audited of 12 drawn (3 env-broken); at least half of counted lines in a future commit in 7 of 9; closed in 5 of those 7 (2 not closed: gold gate failed after strip; strip patch did not apply). Counts only, no rate | `results/exposure-sample/`, `docs/sample-protocol.md`, `docs/results.md` |
 | Web exposure (Tavily), 13 audited | 0 of 13: no result (130) contained a counted gold line; no result was a pull/commit/compare page of the task's repo, even for the oracle PR-URL query; searched 2026-10-29, findability only, dated snapshot, this tool only | `results/web-exposure/`, `docs/results.md` |

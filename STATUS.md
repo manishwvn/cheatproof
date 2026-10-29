@@ -1,8 +1,8 @@
 # Status
 
 **2026-10-28: all work merged to main (PR #79, `a831673`); no open PRs.** Coding & Agentic track; the owner submits
-2026-10-28 (deadline 2026-10-30 10:00 PDT). Progress: 83% (44/56 tasks done); `python3 docs/autopilot/progress.py`.
-Demo: https://manishwvn.github.io/rewardseal/ (GitHub Pages, built from the committed data). 3056 tests pass (1 skipped). Report site extras (explorer, controls gallery, limitations) merged in PR #104; links pinned via results/PINNED_SHA.
+2026-10-28 (deadline 2026-10-30 10:00 PDT).
+Demo: https://manishwvn.github.io/rewardseal/ (GitHub Pages, built from the committed data). 2989 tests pass (1 skipped). Report site extras (explorer, controls gallery, limitations) merged in PR #104; links pinned via results/PINNED_SHA.
 
 ## Result so far (details and caveats in `docs/results.md`)
 - **Deterministic exposure audit (`audit-exposure`, no attacker):** 13 of the 18 selected swe-rebench tasks audited (5
@@ -23,7 +23,7 @@ Demo: https://manishwvn.github.io/rewardseal/ (GitHub Pages, built from the comm
   `audit-exposure` (T57, #78), audit results (#79), Start here recorded path on the site (#87), Terra and Opus wording fixes (#84 to #86).
 - Batches 1 to 3 and the replications of cyclonedx-348 are in `docs/results.md`.
 
-## Budget (`~/.rewardseal-autopilot/ledger.json`)
+## Budget (local spend ledger, not committed)
 - Real-spend cap `REAL_SPEND_CAP_USD` $10 ceiling; live stop $7. Daily $4, total $20. Sandboxes guard $5
   (`SANDBOX_COST_CAP_USD`), run cap 500 (owner-approved). Ledger about $3.53 at Oct 28.
 - The balance is hackathon promo credit, not card money; it must never go negative. Check the console between runs.
@@ -40,6 +40,4 @@ Demo: https://manishwvn.github.io/rewardseal/ (GitHub Pages, built from the comm
   the owner.
 
 ## Pointers
-- Resume note: `docs/autopilot/HANDOFF.md` (last section). Queue: `docs/autopilot/QUEUE.md`. Routine: hourly
-  `rewardseal-autopilot`, state in `~/.rewardseal-autopilot/` (`docs/autopilot/CYCLE.md`).
 - Fresh machine: `python -m rewardseal.cli budget init` once. Certificates: schema 2.
