@@ -204,7 +204,7 @@ says so.
   `usage` does not split it (Token Factory 3).
 - **Suggested fix.** Guidance for agentic tool use: expected tokens per step, how to cap reasoning, and examples of
   loops with shell tools.
-- **Not tested.** We did not run Nemotron 3 Ultra, so we have no feedback on it.
+- **Barely tested.** We ran Nemotron 3 Ultra once (one task, 40 steps, cost $0.77, about 14 times a Super run), so we have little feedback on it.
 
 ### 4. No post-training for Nemotron on Token Factory
 - **What happened.** The hackathon rules state post-training does not support Nemotron models. RewardSeal hardens

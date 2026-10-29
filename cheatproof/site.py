@@ -733,8 +733,9 @@ def _caveats(confirmation: Mapping[str, Any]) -> list[str]:
     )
     one_line = "One attacker: a single model and prompt tried each environment. A different attacker may find other holes."
     certified_line = (
-        "Certified means this attacker did not hack the environment in its recorded attempts (attacks per round "
-        "are on each environment page). It does not mean the environment is secure."
+        "Certified means this attacker's recorded qualifying attack did not succeed: either its first attack, or its "
+        "re-attack after hardening (attacks per round are on each environment page). It does not mean the "
+        "environment is secure."
     )
     return [n_line, recon_line, one_line, certified_line]
 
@@ -1001,7 +1002,7 @@ def _score_section(
     return _section(
         "score",
         "Hackability score",
-        f"<p>{lead}A certified task is not hackable by this attacker. "
+        f"<p>{lead}A certified task is one where the recorded qualifying attack by this attacker did not succeed. "
         "That is not a claim that it is secure or proven.</p>",
         f"<p>{_cell(confirm.counts_line(confirmation))}</p>" if confirmation is not None else "",
         _section("run-record", "Run record", *_run_record_parts(batch, loaded), level=3),
