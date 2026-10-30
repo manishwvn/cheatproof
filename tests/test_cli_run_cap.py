@@ -12,6 +12,8 @@ from rewardseal.budget import Budget, create_ledger
 def _in_tmp_path(tmp_path, monkeypatch):
     # The CLI defaults are relative (results/exposure): no test writes under the repo's results/.
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("EXECUTOR", raising=False)
+    monkeypatch.delenv("MIN_FREE_DISK_GB", raising=False)
     monkeypatch.setattr(cli, "_env_file_values", dict)  # never read the owner's .env
 
 
