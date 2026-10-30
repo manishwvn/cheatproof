@@ -3,7 +3,7 @@ const rawBase = "https://raw.githubusercontent.com/manishwvn/rewardseal/main/";
 const elements = Object.fromEntries(["verify", "tamper", "status", "totals", "files"].map(id => [id, document.getElementById(id)]));
 let manifest = null;
 let fetched = [];
-const covered = /^(?:results\/(?:certificates|exposure|exposure-sample|replications|ultra|web-exposure)\/[^/\\]+\.json|results\/evidence\/[^/\\]+\.md|results\/(?:confirmations|batch)\.json|docs\/claims\.md)$/;
+const covered = /^(?:results\/(?:certificates|exposure|exposure-sample|replications|ultra|control|web-exposure|web-exposure-sample)\/[^/\\]+\.json|results\/evidence\/[^/\\]+\.(?:md|json)|results\/(?:confirmations|batch)\.json|docs\/claims\.md)$/;
 
 function validateManifest(value) {
   if (!value || value.schema !== "rewardseal.evidence-manifest" || value.schema_version !== 1 ||

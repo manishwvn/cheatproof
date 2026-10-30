@@ -40,9 +40,9 @@ recorded conditions: say "against this attacker", "line overlap", "inferred". Do
 
 ## Verify the recorded artifacts
 
-In the browser: open the [Verify page](https://manishwvn.github.io/rewardseal/verify/) of the published report and press Verify (it compares the committed files on GitHub main with the frozen manifest; it checks artifact integrity and recomputed totals, not historical execution). Locally: `python -m rewardseal.manifest verify`.
+In the browser: open the [Verify page](https://manishwvn.github.io/rewardseal/verify.html) of the published report and press Verify (it compares the committed files on GitHub main with the frozen manifest; it checks artifact integrity and recomputed totals, not historical execution). Locally: `python -m rewardseal.manifest verify`.
 
-The published page, built by `.github/workflows/pages.yml` from `docs/verify/`, fetches `manifest.json` and its listed committed files from `raw.githubusercontent.com/manishwvn/rewardseal/main`, compares SHA-256 hashes, and recomputes totals. The local `site` build writes only a placeholder page; the manifest is a snapshot, not a signature.
+The published page, built by `.github/workflows/pages.yml` from `docs/verify/`, loads the frozen `manifest.json` from the published site and fetches its listed committed files from `raw.githubusercontent.com/manishwvn/rewardseal/main`, compares SHA-256 hashes, and recomputes totals. The local `site` build writes only a placeholder page; the manifest is a snapshot, not a signature.
 
 ## Qualifiers that must travel with the numbers
 - The 13 is a selected sample of the lowest-scoring tasks. It is not a prevalence estimate.

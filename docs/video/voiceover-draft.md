@@ -2,8 +2,8 @@
 
 This track matches the 13 beats in [script.md](script.md). The owner records the final voice.
 All claims and caveats from the earlier draft remain in the narration or its matching on-screen evidence.
-The 385-word count expands spoken numerals, the commit ID and hyphenated terms conservatively;
-at 2.5 words/s it takes 154 seconds. Slots total 159 seconds, including rounding pauses, under 2:45.
+The 386-word count expands spoken numerals (for example 1/1 as "one of one"), the commit ID and hyphenated terms conservatively;
+at 2.5 words/s it takes about 155 seconds. Slots total 159 seconds, including rounding pauses, under 2:45.
 These are computed narration durations, not a measured recording; keep each take within its slot.
 Every evidence number is in `docs/results.md` or `docs/claims.md`.
 
