@@ -92,7 +92,9 @@ def test_explorer_lists_every_audit_and_certificate_with_recorded_values(records
     assert set(actual) == expected
     for href in re.findall(r'href="(env/[^"]+)"', page):
         assert (out / href).is_file()
-    assert "certified yes" in page and "certified no" in page and "inconclusive" in page
+    assert (
+        "Certified (k=1), not release-approved" in page and "not certified" in page and "inconclusive" in page
+    )
     assert "not attacked, not in an exposure audit" in page
 
 
@@ -307,6 +309,27 @@ def test_cold_read_wording_fixes(records):
     assert "Certified is not release-approved; same-recon re-attack not exercised." in page348
     assert "Certified is not release-approved" not in page
     assert "Recorded counts, not a score" in (out / "index.html").read_text()
+
+
+def test_report_scope_and_local_verifier_wording(records):
+    out = build(records)
+    index = (out / "index.html").read_text()
+    assert '<h2 id="score">Recorded counts (not a score)</h2>' in index
+    assert "It checks artifact integrity and recomputed totals, not historical execution." in index
+    assert site.CERTIFIED_MEANING in index and site.LEGACY_CAVEAT in index
+    assert "clean in the workdir repo" in index
+    assert "2 tasks, no model" in section((out / "controls.html").read_text(), "retrieval-control")
+    stub = (out / "verify.html").read_text()
+    assert "local-build placeholder" in stub and "published report has the working browser verifier" in stub
+    assert "<script" not in stub
+    for path in (out / "env").glob("*.html"):
+        page = path.read_text()
+        assert "One attacker, one prompt family, recorded conditions" in page
+        assert 'href="../limitations.html"' in page
+        assert site.CERTIFIED_MEANING not in page and site.LEGACY_CAVEAT not in page
+        assert "not hackable by this attacker" not in page and "patches held" not in page
+    page348 = (out / "env" / "CycloneDX__cyclonedx-python-348-93d44b30.html").read_text()
+    assert "the recorded hardened re-attack did not pass; same-recon re-attack not exercised" in page348
 
 
 def test_random_sample_web_exposure_and_refusal(records):

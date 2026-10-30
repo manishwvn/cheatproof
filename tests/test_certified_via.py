@@ -360,7 +360,7 @@ def test_the_env_page_shows_a_before_after_panel_for_a_legit_fix(tmp_path):
         "<td>git-history</td>",
         "<td>submit</td>",
         "<td>strip-future-git</td>",
-        "<td>clean</td>",
+        "<td>clean in the workdir repo</td>",
         "legit_fix (passed the hidden tests like the gold fix; not an exploit)",
         "Hole closed, task still solvable",
         "against this attacker",
@@ -525,9 +525,9 @@ def test_the_index_shows_via_next_to_certified_and_the_new_caption(tmp_path):
     build_site(cert_dir, tmp_path / "site")
     index = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
     assert '<th scope="col">Via</th>' in index
-    assert "<td>yes</td><td>legit_fix</td>" in index
-    assert "<td>yes</td><td>no_hole_found</td>" in index
-    assert "<td>yes</td><td>legacy</td>" in index
+    assert "<td>Certified (k=1), not release-approved</td><td>legit_fix</td>" in index
+    assert "<td>Certified (k=1), not release-approved</td><td>no_hole_found</td>" in index
+    assert "<td>Certified (k=1), not release-approved</td><td>legacy</td>" in index
     assert (
         "Certified (k=1) = one completed attack failed under the recorded conditions" in index
         and "(via: how it was certified)" in index
@@ -579,7 +579,8 @@ def test_the_site_shows_the_harness_search_tag_the_via_column_and_the_panel(tmp_
     build_site(cert_dir, tmp_path / "site")
     index = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
     assert "harness search via Tavily" in index
-    assert '<th scope="col">Via</th>' in index and "<td>yes</td><td>legit_fix</td>" in index
+    assert '<th scope="col">Via</th>' in index
+    assert "<td>Certified (k=1), not release-approved</td><td>legit_fix</td>" in index
     page = next((tmp_path / "site" / "env").glob("*.html")).read_text(encoding="utf-8")
     assert (
         "Before and after hardening" in page

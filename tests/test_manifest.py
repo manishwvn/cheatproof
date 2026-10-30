@@ -418,3 +418,14 @@ def test_pages_copy_step_keeps_frozen_manifest():
     assert "cp docs/verify/verify.js results/site/verify.js" in copy["run"]
     assert "cp docs/verify/verify.css results/site/verify.css" in copy["run"]
     assert "manifest build" not in copy["run"]
+
+
+def test_browser_verifier_accepts_every_path_in_the_committed_manifest():
+    import re as _re
+
+    script = (ROOT / "docs/verify/verify.js").read_text()
+    pattern = _re.search(r"const covered = /(.*)/;", script).group(1).replace("\\/", "/")
+    regex = _re.compile(pattern)
+    manifest_files = json.loads((ROOT / "results/manifest.json").read_text())["files"]
+    rejected = [f["path"] for f in manifest_files if not regex.fullmatch(f["path"])]
+    assert rejected == []
