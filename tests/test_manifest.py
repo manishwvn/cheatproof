@@ -1,5 +1,6 @@
 """Frozen evidence and offline browser/action proofs using small fixture copies only."""
 
+import hashlib
 import json
 import re
 import shutil
@@ -203,6 +204,56 @@ def test_repo_sha_is_null_when_covered_files_differ_from_head(evidence):
     assert freeze(evidence)["repo_sha"] is None
 
 
+@pytest.fixture
+def committed(evidence):
+    """A git checkout of the evidence with the ignore rules a dev checkout has, HEAD matching every covered file."""
+    (evidence / ".gitignore").write_text(
+        "results/ultra/\nresults/control/*.json\n.venv/\nruns/\n**/traces/\n*.old\n"
+    )
+    git(evidence, "init", "-q")
+    git(evidence, "add", "-A")
+    git(evidence, "commit", "-q", "-m", "evidence")
+    return evidence
+
+
+def test_repo_sha_counts_untracked_covered_file_whatever_the_user_config(committed):
+    sha = freeze(committed)["repo_sha"]
+    assert sha and re.fullmatch(r"[0-9a-f]{40,64}", sha)
+    # This setting hides untracked files from a plain git status.
+    git(committed, "config", "status.showUntrackedFiles", "no")
+    new = committed / "results/replay-attempt/new.json"
+    new.parent.mkdir(parents=True)
+    new.write_text("{}\n")
+    assert freeze(committed)["repo_sha"] is None
+
+
+@pytest.mark.parametrize("name", ["results/ultra/new.json", "results/control/new.json"])
+def test_repo_sha_counts_ignored_covered_file(committed, name):
+    sha = freeze(committed)["repo_sha"]
+    assert sha
+    new = committed / name  # gitignored, so HEAD does not hold these bytes, yet build() hashes them
+    new.parent.mkdir(parents=True, exist_ok=True)
+    new.write_text("{}\n")
+    assert name in {file["path"] for file in freeze(committed)["files"]}
+    assert freeze(committed)["repo_sha"] is None
+
+
+def test_repo_sha_ignores_local_folders_outside_coverage(committed):
+    sha = freeze(committed)["repo_sha"]
+    assert sha
+    for name in (
+        ".venv/lib/module.py",
+        "runs/ledger.json",
+        "results/traces/run.json",
+        "results/exposure/traces/run.json",  # **/traces/ is ignored under a covered folder too
+        "results/certificates/stale.old",
+    ):
+        local = committed / name
+        local.parent.mkdir(parents=True, exist_ok=True)
+        local.write_text("local only\n")
+    assert freeze(committed)["repo_sha"] == sha
+
+
 def test_git_unavailable_leaves_null(evidence, monkeypatch):
     def unavailable(*args, **kwargs):
         raise FileNotFoundError("git")
@@ -354,6 +405,25 @@ def test_browser_verification_and_memory_only_tamper(evidence, found, gold):
     data = freeze(evidence)
     run_browser(evidence, data)
     assert manifest.verify(evidence, MANIFEST) == []  # the real fixture bytes never changed
+
+
+def test_missing_empty_gate_error_is_refused_by_python_and_not_counted_by_the_browser(evidence):
+    certified = ROOT / "results/certificates/12rambau__sepal_ui-518.json"
+    shutil.copyfile(certified, evidence / CERT)
+    data = freeze(evidence)
+    assert data["totals"]["certified"] == 1
+    path = evidence / CERT
+    cert = json.loads(path.read_text())
+    for gates in (cert["harden"]["before"]["gates"], cert["gates"]["before"]):
+        del gates["empty"]["error"]
+    with pytest.raises(ValueError, match="gates.ok is true but"):
+        certify.validate_certificate(cert)
+    path.write_text(json.dumps(cert))
+    entry = next(file for file in data["files"] if file["path"] == CERT)
+    entry.update(sha256=hashlib.sha256(path.read_bytes()).hexdigest(), bytes=len(path.read_bytes()))
+    # The bytes now match the manifest, so only the stored certified count (1) disagrees with the browser's count.
+    (evidence / MANIFEST).write_text(json.dumps(data))
+    run_browser(evidence, data, expected_failure="certified")
 
 
 @pytest.mark.parametrize("key", [*manifest.EXPOSURE_KEYS, "n", "certified", "exposure_source"])
