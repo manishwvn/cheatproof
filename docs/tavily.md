@@ -19,11 +19,13 @@ Limits (all in code):
   `--instance-ids` are refused. `harden --network-fetch` has no persisted task cap (one task per call, no record): only `TAVILY_CALL_CAP`
   bounds repeated `harden` runs.
 - Refused with exit 2 when `TAVILY_API_KEY` is absent (the message names the variable, never a value).
-- The query is cleaned before it leaves the host and before it is traced: the `TAVILY_API_KEY` value, `Bearer <token>`
+- The query is cleaned before it leaves the host and before it is traced: the `TAVILY_API_KEY` value and each configured
+  secret of 4 or more chars are replaced verbatim (a shorter configured secret is not replaced verbatim), `Bearer <token>`
   and `name=value` credentials (`password=`, `api_key:`, `access_token=`; a bare `key=` or `auth:` only with a value of 8
-  chars or more) are replaced, the text is cut to 300 chars before any regex runs (linear time, a word over 512 chars is
-  redacted whole), and each word is checked on its own. Result titles, urls and snippets get the same cleaning. The trace shows the cleaned query
-  (`tool: web_search`, `args.query` in `traces/<stem>.jsonl`). The key is never in a query, result, trace or error.
+  chars or more) are replaced, the text is cut to 8 times the limit (2,400 chars for the 300-char query) before any regex
+  runs (linear time, a word over 512 chars is redacted whole), and each word is checked on its own. Result titles, urls
+  and snippets get the same cleaning. The trace shows the cleaned query (`tool: web_search`, `args.query` in
+  `traces/<stem>.jsonl`). Cleaning reduces exposure; it is not a guarantee that every secret is removed.
 
 ## Harness recon search
 
@@ -61,7 +63,7 @@ Records:
   `harness search via Tavily` tag next to the strategy (`(failed)` when `ok` is false).
 
 How to verify (the live run is the lead's; these are checks, not calls):
-1. The trace has a harness_search record: `grep '"type": "harness_search"' results/traces/<stem>.jsonl` shows the label,
+1. The trace has a harness_search record. Traces are git-ignored, so use the locally retained trace from that run: set `TRACE` to its path under `results/traces/`, then run `grep '"type": "harness_search"' "$TRACE"`, which shows the label,
    the cleaned query and `"ok": true`. Pick the trace from the run you mean; a rotated earlier trace has its own copy.
 2. The certificate says so: `python -c "import json;print(json.load(open('<cert>.json'))['attacker']['harness_search'])"`.
 3. Tavily usage is a manual step: compare the Tavily dashboard usage before and after the run (the ledger's

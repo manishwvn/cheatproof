@@ -293,7 +293,7 @@ def test_new_data_surfaces_escape_markup_and_bidi(records):
     index, _ = build(records)
     assert "<script>" not in index and "\u202e" not in index
     assert "&lt;script&gt;&quot;bad&quot;&lt;/script&gt;[U+202E]" in index
-    assert "Content-Security-Policy" not in index
+    assert site.CSP_META in index
 
 
 def test_bad_pin_is_refused_instead_of_becoming_a_link(records):

@@ -3,7 +3,7 @@ const rawBase = "https://raw.githubusercontent.com/manishwvn/rewardseal/main/";
 const elements = Object.fromEntries(["verify", "tamper", "status", "totals", "files"].map(id => [id, document.getElementById(id)]));
 let manifest = null;
 let fetched = [];
-const covered = /^(?:results\/(?:certificates|exposure|exposure-sample|replications|ultra|control|web-exposure|web-exposure-sample)\/[^/\\]+\.json|results\/evidence\/[^/\\]+\.(?:md|json)|results\/(?:confirmations|batch)\.json|docs\/claims\.md)$/;
+const covered = /^(?:results\/(?:certificates|exposure|exposure-sample|replications|ultra|control|web-exposure|web-exposure-sample)\/[^/\\]+\.json|results\/evidence\/[^/\\]+\.(?:md|json)|results\/(?:confirmations|batch)\.json|results\/replay-attempt\/[^/\\]+\.json|results\/diffs\/[^/\\]+\.diff\.json|results\/combined\.txt|docs\/claims\.md)$/;
 
 function validateManifest(value) {
   if (!value || value.schema !== "rewardseal.evidence-manifest" || value.schema_version !== 1 ||
@@ -39,6 +39,12 @@ function jsonOf(file) {
   return JSON.parse(new TextDecoder("utf-8", {fatal: true}).decode(file.bytes));
 }
 
+// The stored gates.ok is not trusted alone: it must agree with the gold and empty grades it summarises.
+function gatesHold(gates) {
+  return Boolean(gates) && gates.ok === true && gates.gold?.passed === true && gates.empty?.passed === false &&
+    gates.empty.applied === true && gates.empty.error === null;
+}
+
 function recomputeTotals() {
   const certs = fetched.filter(file => /^results\/certificates\/[^/]+\.json$/.test(file.entry.path)).map(jsonOf);
   let certified = 0;
@@ -51,8 +57,11 @@ function recomputeTotals() {
     }
     // Match certify.score's outcome precedence: gate failure, inconclusive, no attempt, certified.
     const rounds = [before, after].filter(round => round !== null);
-    if (before.gates?.ok === true && before.error === null &&
-        rounds.every(round => round.error === null && round.inconclusive === null && round.no_attempt === null) &&
+    // Match certify._check_certified: gates hold on every round, and no after round needs an unexploited before.
+    if (gatesHold(before.gates) && before.error === null &&
+        rounds.every(round => round.error === null && round.inconclusive === null && round.no_attempt === null &&
+          gatesHold(round.gates)) &&
+        (after !== null || before.holes?.exploited === false) &&
         cert.certified) certified += 1;
   }
   const totals = {M: 0, N_future: 0, N_fix: 0, N_full_overlap: 0, N_closed: 0, N_fix_closed: 0,

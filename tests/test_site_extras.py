@@ -124,10 +124,7 @@ def test_scripts_and_csp_are_scoped_to_explorer(records):
         if path.name == "explorer.html":
             continue
         assert "<script" not in text
-        if path.name == "index.html":
-            assert "Content-Security-Policy" not in text
-        else:
-            assert site.CSP_META in text
+        assert site.CSP_META in text
 
 
 def test_index_links_and_workflow_comparison(records):

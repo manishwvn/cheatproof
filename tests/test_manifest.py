@@ -157,6 +157,9 @@ def test_coverage_optional_artifacts_old_and_page_text(evidence):
         "results/replications/run.json",
         "results/ultra/run.json",
         "results/web-exposure/run.json",
+        "results/replay-attempt/run.json",
+        "results/diffs/task.before.diff.json",
+        "results/combined.txt",
     )
     for name in added:
         path = evidence / name
@@ -164,10 +167,40 @@ def test_coverage_optional_artifacts_old_and_page_text(evidence):
         path.write_text("{}\n")
     (evidence / "results/web-exposure/page.txt").write_text("never cover page text")
     (evidence / "results/certificates/previous.json.old").write_text("old")
+    (evidence / "results/diffs/task.before.diff.json.old").write_text("old")
+    (evidence / "results/diffs/plain.json").write_text("not a .diff.json file")
     data = freeze(evidence)
     paths = {entry["path"] for entry in data["files"]}
     assert paths == {CERT, RECORD, "docs/claims.md", *added}
     assert manifest.verify(evidence, MANIFEST) == []
+
+
+def git(root, *args):
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_repo_sha_is_null_when_covered_files_differ_from_head(evidence):
+    git(evidence, "init", "-q")
+    git(evidence, "add", "-A")
+    git(evidence, "commit", "-q", "-m", "evidence")
+    sha = freeze(evidence)["repo_sha"]
+    assert sha and re.fullmatch(r"[0-9a-f]{40,64}", sha)
+    (evidence / "README.md").write_text("not covered")  # untracked, outside coverage: HEAD still matches
+    assert freeze(evidence)["repo_sha"] == sha
+    claims = evidence / "docs/claims.md"
+    claims.write_bytes(claims.read_bytes() + b"x")  # tracked covered file modified
+    assert freeze(evidence)["repo_sha"] is None
+    git(evidence, "checkout", "--", "docs/claims.md")
+    assert freeze(evidence)["repo_sha"] == sha
+    new = evidence / "results/replay-attempt/new.json"  # untracked covered file
+    new.parent.mkdir(parents=True)
+    new.write_text("{}\n")
+    assert freeze(evidence)["repo_sha"] is None
 
 
 def test_git_unavailable_leaves_null(evidence, monkeypatch):
@@ -390,13 +423,15 @@ def test_action_and_example_contract():
     assert action["inputs"]["records-dir"]["default"] == "results/exposure"
     assert action["inputs"]["certs-dir"]["default"] == "results/certificates"
     steps = action["runs"]["steps"]
-    assert any(step.get("uses") == "astral-sh/setup-uv@v5" for step in steps)
-    assert any(step.get("uses") == "actions/upload-artifact@v4" for step in steps)
+    uses = [step["uses"] for step in steps if "uses" in step]
+    assert any(item.startswith("astral-sh/setup-uv@") for item in uses)
+    assert any(item.startswith("actions/upload-artifact@") for item in uses)
     for name in (".github/actions/rewardseal-gate/action.yml", ".github/workflows/gate-example.yml"):
-        lines = (ROOT / name).read_text().splitlines()
-        for index, line in enumerate(lines):
-            if "uses:" in line and "@v" in line:
-                assert lines[index - 1].strip() == "# pin to a commit SHA before production use"
+        for line in (ROOT / name).read_text().splitlines():
+            if "uses:" in line and "./" not in line:
+                assert re.search(r"@[0-9a-f]{40}\b", line), (
+                    f"{name}: action not pinned to a commit SHA: {line}"
+                )
     for step in steps:
         if "run" in step:
             assert step["shell"] == "bash"
@@ -429,3 +464,29 @@ def test_browser_verifier_accepts_every_path_in_the_committed_manifest():
     manifest_files = json.loads((ROOT / "results/manifest.json").read_text())["files"]
     rejected = [f["path"] for f in manifest_files if not regex.fullmatch(f["path"])]
     assert rejected == []
+
+
+def test_browser_verifier_allow_list_matches_python_coverage():
+    script = (ROOT / "docs/verify/verify.js").read_text()
+    pattern = re.search(r"const covered = /(.*)/;", script).group(1).replace("\\/", "/")
+    regex = re.compile(pattern)
+    paths = [
+        "results/replay-attempt/CycloneDX__cyclonedx-python-348-replay1.json",
+        "results/diffs/12rambau__sepal_ui-518.before.diff.json",
+        "results/combined.txt",
+    ]
+    for name in paths:
+        assert regex.fullmatch(name) and manifest._covered(name), name
+    for name in (
+        "results/PINNED_SHA",
+        "results/diffs/plain.json",
+        "results/diffs/a.diff.json.old",
+        "results/diffs/../batch.json",
+        "results/replay-attempt/nested/x.json",
+        "results/combined.txt.old",
+    ):
+        assert not regex.fullmatch(name) and not manifest._covered(name), name
+    live = manifest.evidence_files(ROOT, ROOT / "results/manifest.json")
+    names = [path.relative_to(ROOT).as_posix() for path in live]
+    assert set(paths) <= set(names)
+    assert [name for name in names if not regex.fullmatch(name)] == []

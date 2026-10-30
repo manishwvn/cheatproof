@@ -892,6 +892,65 @@ def test_certified_is_refused_when_before_gates_are_missing():
         validate_certificate(cert)
 
 
+def set_gates(cert, side, mutate):
+    """Apply mutate to a round's gates in both places the certificate stores them."""
+    mutate(cert["harden"][side]["gates"])
+    mutate(cert["gates"][side])
+
+
+def test_a_stored_ok_flag_with_a_failed_gold_gate_is_refused():
+    cert = valid_cert()
+    set_gates(cert, "before", lambda gates: gates["gold"].update(passed=False))
+    assert cert["harden"]["before"]["gates"]["ok"] is True and cert["certified"] is True
+    with pytest.raises(ValueError, match=re.escape("harden.before.gates.ok is true but")):
+        validate_certificate(cert)
+
+
+def test_a_stored_ok_flag_with_a_passing_empty_gate_is_refused():
+    cert = valid_cert()
+    set_gates(cert, "after", lambda gates: gates["empty"].update(passed=True))
+    with pytest.raises(ValueError, match=re.escape("harden.after.gates.ok is true but")):
+        validate_certificate(cert)
+
+
+@pytest.mark.parametrize("missing", [{"gold"}, {"empty"}, {"gold", "empty"}])
+def test_gates_with_only_an_ok_flag_are_refused(missing):
+    cert = valid_cert()
+
+    def strip(gates):
+        for key in missing:
+            del gates[key]
+
+    set_gates(cert, "before", strip)
+    with pytest.raises(ValueError, match="harden.before.gates.(gold|empty) must be an object"):
+        validate_certificate(cert)
+    cert = valid_cert()
+    set_gates(cert, "before", lambda gates: [gates.pop(key) for key in ("gold", "empty", "reason")])
+    assert set(cert["harden"]["before"]["gates"]) == {"ok"}
+    with pytest.raises(ValueError, match="harden.before.gates"):
+        validate_certificate(cert)
+
+
+def test_a_gate_failed_round_with_a_false_ok_flag_is_still_valid():
+    cert = cert_for(clean_report())
+    set_gates(cert, "before", lambda gates: gates.update(ok=False))
+    cert["certified"] = False
+    cert["harden"]["certified"] = False
+    cert["certified_via"] = cert["harden"]["certified_via"] = None
+    cert["reason"] = cert["harden"]["reason"] = "gold gate failed"
+    validate_certificate(cert)
+    assert only_outcome(cert) == {"gate_failed": 1}
+
+
+def test_certified_without_an_after_round_is_refused_when_the_before_hole_was_exploited():
+    cert = cert_for(clean_report())
+    assert cert["harden"]["after"] is None and cert["certified"] is True
+    cert["harden"]["before"]["holes"]["exploited"] = True
+    assert cert["harden"]["before"]["holes"]["labels"] == []
+    with pytest.raises(ValueError, match=re.escape("harden.before.holes.exploited to be false")):
+        validate_certificate(cert)
+
+
 def test_certified_is_refused_when_before_is_inconclusive():
     cert = valid_cert()
     cert["harden"]["before"]["inconclusive"] = "attack ended with stop_reason token_limit"
