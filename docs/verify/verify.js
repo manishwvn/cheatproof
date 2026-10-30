@@ -40,7 +40,8 @@ function jsonOf(file) {
 }
 
 // The stored gates.ok is not trusted alone: it must agree with the gold and empty grades it summarises. Same rule as
-// certify._gates_hold, including the empty grade's error key being present and null.
+// certify._gate_ok (stored ok true plus certify._gates_hold), including the empty grade's error key being present
+// and null.
 function gatesHold(gates) {
   return Boolean(gates) && gates.ok === true && gates.gold?.passed === true && gates.empty?.passed === false &&
     gates.empty.applied === true && gates.empty.error === null;
@@ -59,9 +60,10 @@ function recomputeTotals() {
     // A narrower mirror of certify._outcome: a certificate counts as certified when its stored certified flag is true
     // and no round is gate-failed, errored, inconclusive or without an attempt.
     const rounds = [before, after].filter(round => round !== null);
-    // Of certify._check_certified it repeats only the gate rule and the rule that a certificate without an after round
-    // needs an unexploited before round. The attack-field, unsubmitted, hole-label, unpatched, certified_via and
-    // schema checks are not repeated here; Python enforces them when manifest build and verify load each certificate.
+    // Of certify._check_certified it repeats the gate rule, the error, inconclusive and no_attempt rules, and the rule
+    // that a certificate without an after round needs an unexploited before round. The attack-field, unsubmitted,
+    // hole-label, unpatched, patches_rejected, certified_via and schema checks are not repeated here; Python enforces
+    // them when manifest build and verify load each certificate.
     if (gatesHold(before.gates) && before.error === null &&
         rounds.every(round => round.error === null && round.inconclusive === null && round.no_attempt === null &&
           gatesHold(round.gates)) &&
