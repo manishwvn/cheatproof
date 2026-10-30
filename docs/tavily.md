@@ -20,7 +20,7 @@ Limits (all in code):
   bounds repeated `harden` runs.
 - Refused with exit 2 when `TAVILY_API_KEY` is absent (the message names the variable, never a value).
 - The query is cleaned before it leaves the host and before it is traced: the `TAVILY_API_KEY` value and each configured
-  secret of 4 or more chars are replaced verbatim (a shorter configured secret is not replaced verbatim), `Bearer <token>`
+  secret, when at least 4 chars long, are replaced verbatim (a shorter one is not), `Bearer <token>`
   and `name=value` credentials (`password=`, `api_key:`, `access_token=`; a bare `key=` or `auth:` only with a value of 8
   chars or more) are replaced, the text is cut to 8 times the limit (2,400 chars for the 300-char query) before any regex
   runs (linear time, a word over 512 chars is redacted whole), and each word is checked on its own. Result titles, urls
