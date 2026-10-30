@@ -13,6 +13,7 @@ from rewardseal import audit, webaudit
 from rewardseal.certify import load_certificate
 from rewardseal.site import (
     _cell,
+    _certified_label,
     _document,
     _Entry,
     _gates_text,
@@ -184,14 +185,14 @@ def _certificate_status(cert: Mapping[str, Any] | None) -> str:
     if cert is None:
         return "none"
     if cert.get("certified"):
-        return "certified yes"
+        return _certified_label(True)
     harden = _map(cert.get("harden"))
     if any(
         _map(harden.get(r)).get("inconclusive") or _map(harden.get(r)).get("error")
         for r in ("before", "after")
     ):
         return "inconclusive"
-    return "certified no"
+    return _certified_label(False)
 
 
 def explorer(
@@ -458,7 +459,8 @@ def gallery(
         "retrieval-control",
         "Retrieval control",
         "Oracle-assisted scripted control, not autonomous discovery: a script tests a retrieved future change.",
-        "One task, no model; does not prove model causality: usable leakage for this control only, not why any model acted.",
+        f"{len(controls)} {'task' if len(controls) == 1 else 'tasks'}, no model; does not prove model causality: "
+        "the recorded controls test usable leakage, not why any model acted.",
         controls,
         _table(
             "Retrieval outcomes",

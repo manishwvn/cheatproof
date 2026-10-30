@@ -139,7 +139,7 @@ def test_clean_environment_shows_no_after_round(tmp_path):
     page = read(out / "env" / "owner__repo-2.html")
     assert "No after round was run." in page
     assert "<td>After hardening</td><td>not run</td>" in page
-    assert '<th scope="row">Certified</th><td>yes</td>' in page  # clean_report is certified
+    assert '<th scope="row">Certified</th><td>Certified (k=1), not release-approved</td>' in page
 
 
 def test_empty_directory_shows_the_empty_state(tmp_path):
@@ -756,7 +756,7 @@ RUN_RECORD_HEAD = '<h3 id="run-record">Run record</h3>'
 BATCH_OK_RUN = "Run by this batch: 3 of 4 selected (already had a certificate: 0; not run: 1)."
 BATCH_LOADED = "certificates loaded: 3 (scored on this page"
 CERTIFIED_UNHARDENED = "Certified, attacker never succeeded before patching (certified_unhardened)"
-CERTIFIED_HARDENED = "Certified, attacker succeeded before patching and the patches held (certified_hardened)"
+CERTIFIED_HARDENED = "Certified, attacker succeeded before patching; the recorded hardened re-attack did not pass (certified_hardened)"
 NO_ATTEMPT = "No attempt, attacker never tried (no_attempt, also counted in the outcomes)"
 
 

@@ -327,10 +327,7 @@ def build_site(
         _document(
             "Evidence verifier",
             '<p><a href="index.html">Back to the index</a></p><h1>Evidence verifier</h1>'
-            "<p>The browser verifier is added by the Pages workflow, next to manifest.json. In a local build this is a "
-            "placeholder: open docs/verify/index.html from the repository, or run "
-            "<code>python -m rewardseal.manifest verify</code>.</p>"
-            f'<p><a href="{_cell(blob)}docs/verify/index.html">docs/verify/index.html on GitHub</a></p>',
+            "<p>This is a local-build placeholder. The published report has the working browser verifier.</p>",
             blob,
         ),
     )
@@ -861,6 +858,7 @@ def _reading_guide(blob: str) -> str:
         "<p>RewardSeal checks whether a coding task leaks its own fix, strips the leak, re-checks, and attacks again.</p>"
         '<p>Start with the <a href="#numbers-key">Numbers key</a>.</p>'
         '<p><a href="explorer.html">Explore every audited task and certificate</a>.</p>'
+        '<p>Verify in your browser: open the <a href="verify.html">Verify page</a> (published report) and press Verify; it compares the committed files on GitHub main with the frozen manifest. It checks artifact integrity and recomputed totals, not historical execution.</p>'
         "<p>Release a task only if (a) gold passes and empty fails, (b) the exposure scan after hardening shows no "
         "future commits, and (c) a re-attack under the same conditions failed; otherwise withhold.</p>"
         f"<p>{CERTIFIED_MEANING} {LEGACY_CAVEAT} This is not a security bound.</p>"
@@ -936,7 +934,7 @@ def _numbers_key(
             ),
             _row(
                 f"{exposure['N_fix_closed']} of {exposure['N_fix']}",
-                "closed after strip-future-git: no future commits and gates held; workdir repo only",
+                "closed after strip-future-git: no future commits in the workdir repo and gates held",
                 "results/exposure/ records",
                 "NOT closure of other repositories or routes",
             ),
@@ -1084,7 +1082,10 @@ def _reconciliation(entries: Sequence[_Entry], batch: _Batch, exposure_path: Pat
                 if any(_map(rounds.get(r)).get("inconclusive") for r in ROUNDS)
                 else "no"
             )
-            cert_text = f"{entry.stem}.json (certified {verdict})"
+            label = (
+                _certified_label(verdict == "yes") if verdict != "inconclusive" else "certified inconclusive"
+            )
+            cert_text = f"{entry.stem}.json ({label})"
         rows.append(_head_row(task, cert_text, attacked, audit_state, _fate(cert, audit_state)))
     outside = sum(1 for e in entries if e.cert["task"]["instance_id"] not in selected)
     text = (
@@ -1347,7 +1348,10 @@ def _hero_section(
         from rewardseal.audit import summary_line
 
         css = "exposure-audit lead" if audit_first else "exposure-audit"
-        exposure_html = f'<p class="{css}">{_cell(summary_line(exposure))}</p>'
+        text = summary_line(exposure).replace(
+            "closed it in", "closed it (no future commits in the workdir repo and gates held) in"
+        )
+        exposure_html = f'<p class="{css}">{_cell(text)}</p>'
     if audit_first:
         parts += [exposure_html, '<p class="finding-label">Attacker finding (one attacker, recon on):</p>']
     parts += [
@@ -1413,7 +1417,7 @@ def _hero_confirmed(
                         [
                             ("Confirmed by", status.source if status else NOT_RECORDED),
                             *([("Note", status.note)] if status and status.note else []),
-                            ("Certified", cert["certified"]),
+                            ("Certified", _certified_label(cert["certified"])),
                             ("Certified via", _via_text(cert)),
                             ("Replication", confirm.replication_text(task, replications, manifest)),
                         ],
@@ -1576,7 +1580,7 @@ def _score_section(
         ]
     return _section(
         "score",
-        "Hackability score",
+        "Recorded counts (not a score)",
         "<p><small>Recorded counts, not a score: the numbers below come from mixed, selected samples.</small></p>"
         f"<p>{lead}{CERTIFIED_MEANING} {LEGACY_CAVEAT} This is not a security guarantee.</p>",
         f"<p>{_cell(confirm.counts_line(confirmation))}</p>" if confirmation is not None else "",
@@ -1596,7 +1600,7 @@ def _score_section(
                     summary.get("certified_unhardened"),
                 ),
                 (
-                    "Certified, attacker succeeded before patching and the patches held (certified_hardened)",
+                    "Certified, attacker succeeded before patching; the recorded hardened re-attack did not pass (certified_hardened)",
                     summary.get("certified_hardened"),
                 ),
                 *_via_rows(summary.get("certified_via")),
@@ -1653,7 +1657,7 @@ def _environments_section(entries: Sequence[_Entry], statuses: Mapping[str, conf
                 cert["patches_applied"],
                 _gates_text(gates["before"]),
                 _gates_text(gates["after"]),
-                cert["certified"],
+                _certified_label(cert["certified"]),
                 _via_cell(cert),
                 _money(cert["cost_usd"]),
             )
@@ -1733,7 +1737,7 @@ def _env_body(
                 "No live calls were made.</p>"
             ),
             *link_row,
-            _result_section(cert, status),
+            _result_section(cert, status, not_exercised),
             *([_what_means(NOT_RELEASE_APPROVED)] if not_exercised and cert.get("certified") else []),
             *([f"<p>{_cell(REPLICATION_NOTE_348)}</p>"] if task["instance_id"] in EVIDENCE_FILES else []),
             _exposure_section(cert["exposure_before"]),
@@ -1952,7 +1956,7 @@ def _before_after_section(
         _kv_table(
             "After: the same attacker, hardened task",
             [
-                ("Exposure scan", exposure),
+                ("Exposure scan", "clean in the workdir repo" if exposure == "clean" else exposure),
                 ("Gates held", gates_ok),
                 ("Recon", after_attack.get("recon") or "none"),
                 ("Steps used", _steps_used(after_attack, attacker)),
@@ -1990,7 +1994,26 @@ def _status_pairs(status: confirm.HoleStatus | None) -> list[tuple[str, Any]]:
     return pairs
 
 
-def _result_section(cert: Mapping[str, Any], status: confirm.HoleStatus | None = None) -> str:
+def _certified_label(certified: bool) -> str:
+    return "Certified (k=1), not release-approved" if certified else "not certified"
+
+
+def _display_reason(cert: Mapping[str, Any], not_exercised: bool) -> str:
+    reason = cert["reason"]
+    if "not hackable by this attacker" not in reason:
+        return reason
+    if (
+        cert["task"]["instance_id"] == "CycloneDX__cyclonedx-python-348"
+        and "failed after hardening" in reason
+    ):
+        text = "the recorded hardened re-attack did not pass"
+        return text + "; same-recon re-attack not exercised" if not_exercised else text
+    return "the recorded attack did not pass"
+
+
+def _result_section(
+    cert: Mapping[str, Any], status: confirm.HoleStatus | None = None, not_exercised: bool = False
+) -> str:
     notes = _items(cert["notes"])
     notes_html = (
         "<p>none</p>" if not notes else "<ul>" + "".join(f"<li>{_cell(n)}</li>" for n in notes) + "</ul>"
@@ -1998,14 +2021,15 @@ def _result_section(cert: Mapping[str, Any], status: confirm.HoleStatus | None =
     return _section(
         "result",
         "Result",
-        f"<p>{CERTIFIED_MEANING} {LEGACY_CAVEAT} This is not a security bound.</p>",
+        "<p>One attacker, one prompt family, recorded conditions; certified means the recorded attack did not pass, not that no hole remains.<br>"
+        '<a href="../limitations.html">Read the limitations</a>.</p>',
         _kv_table(
             "Certificate summary",
             [
-                ("Certified", cert["certified"]),
+                ("Certified", _certified_label(cert["certified"])),
                 ("Certified via", _via_text(cert)),
                 *_status_pairs(status),
-                ("Reason", cert["reason"]),
+                ("Reason", _display_reason(cert, not_exercised)),
                 ("Cost (USD)", _money_basis(cert["cost_usd"], cert.get("cost_basis"))),
                 ("Timestamp", cert["timestamp"]),
                 ("Sandbox runs", cert["sandbox_runs"]),
