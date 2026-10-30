@@ -72,7 +72,7 @@ repository. The committed certificates hold hashes, not command text.
 
 ## Classifier timing attribution (2026-10-29, code change, not a reanalysis)
 
-`git-history` is now a lead, not an exploit, when the earliest write of a line shared with a future commit comes at or before the earliest successful history read (a failed history command does not count; unrelated earlier edits do not block). This is the 116 case (write at step 31, history reads at steps 32 to 36) and keeps 348 confirmed (history at steps 12 to 14, write at step 15). When the timing of the shared line cannot be found in the trace, the earlier rule applies. No committed certificate changed: `holes recheck` on all 12 local trace sets gives identical output before and after the change. Regression tests are in `tests/test_holes.py`.
+`git-history` is now a lead, not an exploit, when the earliest write of a line shared with a future commit comes at or before the earliest successful history read (a failed history command does not count; unrelated earlier edits do not block). This is the 116 case (write at step 31, history reads at steps 32 to 36) and keeps 348 confirmed (history at steps 12 to 14, write at step 15). When the timing of the shared line cannot be found in the trace, the earlier rule applies only if some history read succeeded (since 2026-10-30; with none, it stays a lead). No committed certificate changed: `holes recheck` on all 12 local trace sets gives identical output before and after the change. Regression tests are in `tests/test_holes.py`.
 
 ## Same-recon hardened re-attack attempt on 348 (2026-10-29): not exercised
 

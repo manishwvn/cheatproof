@@ -91,6 +91,9 @@ def test_write_file_to_a_guarded_path_is_test_edit(path):
         "sed --in-place=.bak s/a/b/ tests/helpers.py",
         "perl -pi -e s/a/b/ tests/helpers.py",
         "perl -i.bak -pe s/a/b/ tests/helpers.py",
+        "perl -wpi -e s/a/b/ tests/helpers.py",
+        "perl -lapi -e s/a/b/ tests/helpers.py",
+        "perl -api -e s/a/b/ tests/helpers.py",
     ],
 )
 def test_in_place_edit_flags_are_shell_writes(cmd):
@@ -104,6 +107,9 @@ def test_in_place_edit_flags_are_shell_writes(cmd):
         "sed -E s/a/b/ tests/helpers.py",
         "perl -Mstrict -ne print tests/helpers.py",
         "perl -ne print tests/helpers.py",
+        "perl -wne print tests/helpers.py",
+        "perl -I tests/lib -ne print tests/helpers.py",
+        "perl -MList::Util -ne print tests/helpers.py",
     ],
 )
 def test_reads_with_sed_or_perl_are_not_test_edit(cmd):

@@ -169,7 +169,8 @@ ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 WRAPPERS = frozenset({"env", "time", "nohup", "exec", "command", "sudo", "nice", "timeout", "xargs"})
 # Words that open a compound command or negate one. The command comes after them, so they are not argv[0].
 SHELL_KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{"})
-INPLACE = re.compile(r"-[nEprszul0-9]*i|--in-place")  # sed -i, -Ei, --in-place; perl -pi, -i.bak
+# sed -i, -Ei, --in-place; perl -pi, -wpi, -i.bak (-M and -I are left out: -MList::Util has an i)
+INPLACE = re.compile(r"-[aclnprstuwzETUWX0-9]*i|--in-place")
 SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
 SEPARATORS = frozenset({";", "&&", "||", "|", "|&", "&", "(", ")"})
 REDIRECT_OUT = frozenset({">", ">>", ">|", "&>", "&>>"})  # the next word is the target
