@@ -26,7 +26,7 @@ Entry for the Nebius x NVIDIA Global AI Hackathon, Coding & Agentic Engineering 
 8. **Tests never call a model or paid API.** Fakes only. Mocks carry `VERIFY` notes until a recorded real response
    confirms them.
 9. **Honest numbers.** Report n and raw counts. "Not hackable" means "not hackable by this attacker", never proof.
-10. Never delete pre-existing files; prefer `trash`. Never reasoning effort `max`. `LEARNING.md` is never committed.
+10. Never delete pre-existing files; prefer `trash`. Never reasoning effort `max`. `LEARNINGS.md` is never committed.
     Keep the owner's personal details out of the repo.
 
 ## Layout

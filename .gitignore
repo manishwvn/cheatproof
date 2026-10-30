@@ -3,7 +3,7 @@
 .env.*
 !.env.example
 .claude/settings.local.json
-LEARNING.md
+LEARNINGS.md
 # Runtime state (spend ledger, run traces)
 runs/
 # Raw attacker step args: never committed unsanitized
