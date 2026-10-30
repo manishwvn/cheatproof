@@ -312,3 +312,13 @@ def test_holes_note_is_generated_from_the_recorded_labels():
     assert "After hardening: no known shortcut found" in text
     assert "no known shortcut in these rounds" not in text
     assert site._holes_summary({"before": {}, "after": {}}).startswith("Before hardening: not run; After")
+
+
+def test_error_only_certificate_is_inconclusive_in_every_view():
+    from rewardseal import site_extras
+
+    rounds = {"before": {"error": "boom"}, "after": {}}
+    assert site._cert_inconclusive(rounds) is True
+    assert site._cert_inconclusive({"before": {}, "after": {}}) is False
+    cert = {"certified": False, "harden": rounds}
+    assert site_extras._certificate_status(cert) == "not certified (inconclusive)"

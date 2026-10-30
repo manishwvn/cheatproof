@@ -1076,13 +1076,7 @@ def _reconciliation(entries: Sequence[_Entry], batch: _Batch, exposure_path: Pat
         if cert is not None:
             rounds = _map(cert.get("harden"))
             attacked = any(isinstance(_map(rounds.get(r)).get("attack"), Mapping) for r in ROUNDS)
-            verdict = (
-                "yes"
-                if cert["certified"]
-                else "inconclusive"
-                if any(_map(rounds.get(r)).get("inconclusive") for r in ROUNDS)
-                else "no"
-            )
+            verdict = "yes" if cert["certified"] else "inconclusive" if _cert_inconclusive(rounds) else "no"
             label = (
                 _certified_label(verdict == "yes")
                 if verdict != "inconclusive"
@@ -2148,6 +2142,11 @@ def _holes_row(label: str, rnd: Any) -> str:
     counts = _map(holes.get("evidence_counts"))
     evidence = ", ".join(f"{hole}: {count}" for hole, count in counts.items()) or "none"
     return _row(label, holes.get("labels"), holes.get("attempted"), evidence)
+
+
+def _cert_inconclusive(rounds: Mapping[str, Any]) -> bool:
+    """A round that ended inconclusive or in an error leaves the certificate undecided, in every view."""
+    return any(_map(rounds.get(r)).get("inconclusive") or _map(rounds.get(r)).get("error") for r in ROUNDS)
 
 
 def _holes_summary(harden: Mapping[str, Any]) -> str:
