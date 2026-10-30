@@ -95,6 +95,14 @@ def test_write_file_to_a_guarded_path_is_test_edit(path):
         "perl -lapi -e s/a/b/ tests/helpers.py",
         "perl -api -e s/a/b/ tests/helpers.py",
         "perl -wpi.bak -e s/a/b/ tests/helpers.py",
+        "gsed --in s/a/b/ tests/helpers.py",
+        "gsed --in-pl s/a/b/ tests/helpers.py",
+        "gsed --i s/a/b/ tests/helpers.py",
+        "sed -I '' s/a/b/ tests/helpers.py",
+        "perl -Spi -e s/a/b/ tests/helpers.py",
+        "sed -ie s/a/b/ tests/helpers.py",
+        "sed -ibak s/a/b/ tests/helpers.py",
+        "sed -ai '' s/a/b/ tests/helpers.py",
     ],
 )
 def test_in_place_edit_flags_are_shell_writes(cmd):
@@ -115,6 +123,10 @@ def test_in_place_edit_flags_are_shell_writes(cmd):
         "perl -ne print tests/helpers.py -wait",
         "perl tests/run.pl -lib tests/helpers.py",
         "perl -ci tests/helpers.py",
+        "sed -e s/-i// tests/helpers.py",
+        "gsed -n p tests/helpers.py",
+        "gsed --inx s/a/b/ tests/helpers.py",
+        "perl -Sne print tests/helpers.py",
     ],
 )
 def test_reads_with_sed_or_perl_are_not_test_edit(cmd):

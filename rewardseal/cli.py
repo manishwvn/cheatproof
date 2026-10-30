@@ -1768,22 +1768,35 @@ def _audit_plan_lines(todo: list[TaskSpec], skipped: list[str]) -> list[str]:
     from rewardseal import audit
     from rewardseal import plan as batch_plan
 
+    env_file = _env_file_values()
     runs = len(todo) * audit.SANDBOX_RUNS_PER_TASK
-    sandbox = runs * audit.SANDBOX_COST_PER_RUN
-    caps = batch_plan.read_caps(os.environ, _env_file_values())
+    caps = batch_plan.read_caps(os.environ, env_file)
+    # A dry run has not loaded .env into os.environ, so the executor and the local cap are looked up there too.
+    docker = (os.environ.get("EXECUTOR") or env_file.get("EXECUTOR") or "sandbox").strip().lower() == "docker"
+    sandbox = 0.0 if docker else runs * audit.SANDBOX_COST_PER_RUN
     lines = [
         f"audit plan (dry run, no calls made): {len(todo) + len(skipped)} selected, {len(todo)} to audit"
     ]
     lines += [f"  audit  {task.instance_id}" for task in todo]
     lines += [f"  -      {iid}: already has a record, skipped" for iid in skipped]
-    lines.append(
-        f"estimated sandbox runs: {runs} (about {audit.SANDBOX_RUNS_PER_TASK} per task: the collect-only "
-        f"preflight start, the audit start and 3 resets); Sandboxes about ${sandbox:.2f} (an estimate: Sandboxes "
-        "are not billed, the counter is a guard). No model, attacker or Tavily call: $0 of trial credit"
-    )
-    lines.append(
-        f"caps (ledger not read): SANDBOX_COST_CAP_USD ${caps.sandbox:g}, REAL_SPEND_CAP_USD ${caps.real:g}"
-    )
+    # Local containers count against LOCAL_RUN_CAP (default 2000, as the Budget reads it), never against Sandboxes.
+    if docker:
+        local_cap = (os.environ.get("LOCAL_RUN_CAP") or env_file.get("LOCAL_RUN_CAP") or "2000").strip()
+        lines.append(
+            f"estimated local container runs: {runs} (about {audit.SANDBOX_RUNS_PER_TASK} per task: the collect-only "
+            "preflight start, the audit start and 3 resets); local Docker runs are not billed and count against "
+            "LOCAL_RUN_CAP. No model, attacker or Tavily call: $0 of trial credit"
+        )
+        lines.append(f"caps (ledger not read): LOCAL_RUN_CAP {local_cap}, REAL_SPEND_CAP_USD ${caps.real:g}")
+    else:
+        lines.append(
+            f"estimated sandbox runs: {runs} (about {audit.SANDBOX_RUNS_PER_TASK} per task: the collect-only "
+            f"preflight start, the audit start and 3 resets); Sandboxes about ${sandbox:.2f} (an estimate: Sandboxes "
+            "are not billed, the counter is a guard). No model, attacker or Tavily call: $0 of trial credit"
+        )
+        lines.append(
+            f"caps (ledger not read): SANDBOX_COST_CAP_USD ${caps.sandbox:g}, REAL_SPEND_CAP_USD ${caps.real:g}"
+        )
     lines += batch_plan.cap_warnings(0.0, sandbox, caps)
     return lines
 

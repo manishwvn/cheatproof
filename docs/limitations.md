@@ -9,6 +9,7 @@ This report replays committed records. It does not run a live attack or establis
 - Incomplete history listings and incomplete fix scans produce lower bounds. No counted match means absence is unproven there.
 - A gold pass does not mean unchanged difficulty. Removing a shortcut can change the task; a human must review that change.
 - The first audit selected the lowest-scoring tasks. The separate random sample frame is A-E only (including repositories 0-9 in the first 1000 dataset rows). Neither supports a claim about SWE-rebench at large.
+- The classifier counts files under a testing/ directory, *.pth files and sitecustomize.py as test files, as the grader's guard does. A gold fix that edits such a path is labelled test-edit, not a legit fix.
 - The attack-trace classifier splits shell commands on newlines and does not parse heredocs, so a line inside a heredoc body can be read as a command.
 - The grader has a known residual gap. A candidate that prints a complete summary, with node lines that match it, and then exits with the matching code before pytest prints its own (for example with os._exit(0)) passes every forgery check, and the grade reads that forged summary: one that marks every required test PASSED, with exit 0, is graded as passing. Its output cannot be told from a real run's, so no forgery label is set. The code says the full fix is to read the summary from a channel the candidate cannot write.
 

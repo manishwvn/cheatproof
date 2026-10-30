@@ -90,3 +90,55 @@ def test_sandbox_ignores_an_exhausted_local_run_cap(tmp_path, capsys):
     rc, _ = audit(budget, ta.CountedExecutor(), capsys)
     assert rc == 0 and ta.records() == ["a__a-1.json"]
     assert budget.snapshot()["sandbox_runs"] == 5
+
+
+def dry_run_plan(capsys):
+    deps = ta.make_deps(ta.tasks_for("a__a-1", "b__b-2"))
+    assert cli.main(ta.audit_argv("--dry-run"), deps=deps) == 0
+    return capsys.readouterr().out
+
+
+@pytest.mark.parametrize("executor", [None, "sandbox", " Sandbox "])
+def test_sandbox_dry_run_plan_is_unchanged(monkeypatch, capsys, executor):
+    if executor is not None:
+        monkeypatch.setenv("EXECUTOR", executor)
+    assert dry_run_plan(capsys).splitlines()[3:] == [
+        (
+            "estimated sandbox runs: 10 (about 5 per task: the collect-only preflight start, the audit start and 3 "
+            "resets); Sandboxes about $0.30 (an estimate: Sandboxes are not billed, the counter is a guard). No "
+            "model, attacker or Tavily call: $0 of trial credit"
+        ),
+        "caps (ledger not read): SANDBOX_COST_CAP_USD $0.5, REAL_SPEND_CAP_USD $10",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("executor", "cap", "shown"),
+    [(" Docker ", "1234", "1234"), ("docker", None, "2000")],
+)
+def test_docker_dry_run_plan_counts_local_container_runs_not_sandboxes(
+    monkeypatch, capsys, executor, cap, shown
+):
+    monkeypatch.setenv("EXECUTOR", executor)
+    if cap is not None:
+        monkeypatch.setenv("LOCAL_RUN_CAP", cap)
+    else:
+        monkeypatch.delenv("LOCAL_RUN_CAP", raising=False)
+    printed = dry_run_plan(capsys)
+    assert printed.splitlines()[3:] == [
+        (
+            "estimated local container runs: 10 (about 5 per task: the collect-only preflight start, the audit "
+            "start and 3 resets); local Docker runs are not billed and count against LOCAL_RUN_CAP. No model, "
+            "attacker or Tavily call: $0 of trial credit"
+        ),
+        f"caps (ledger not read): LOCAL_RUN_CAP {shown}, REAL_SPEND_CAP_USD $10",
+    ]
+    assert "andbox" not in printed.split("audit  b__b-2")[1]
+
+
+def test_docker_dry_run_plan_reads_the_executor_and_cap_from_dot_env(monkeypatch, capsys):
+    # A dry run does not load .env into the process environment, so the plan looks there as the caps do.
+    monkeypatch.setattr(cli, "_env_file_values", lambda: {"EXECUTOR": "docker", "LOCAL_RUN_CAP": "77"})
+    printed = dry_run_plan(capsys)
+    assert "estimated local container runs: 10" in printed
+    assert "caps (ledger not read): LOCAL_RUN_CAP 77," in printed

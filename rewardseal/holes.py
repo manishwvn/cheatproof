@@ -169,9 +169,13 @@ ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 WRAPPERS = frozenset({"env", "time", "nohup", "exec", "command", "sudo", "nice", "timeout", "xargs"})
 # Words that open a compound command or negate one. The command comes after them, so they are not argv[0].
 SHELL_KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{"})
-# sed -i, -Ei, --in-place; perl -pi, -wpi, -i.bak. The i must not be followed by a letter, so a script argument such as
-# -tail or -lib is not a flag cluster (-M and -I are left out of the class: -MList::Util has an i).
-INPLACE = re.compile(r"-[alnprstuwzETUWX0-9]*i(?![A-Za-z])|--in-place")
+# sed -i, -Ei, -ie, -ibak, BSD -I, --in-place and the prefixes GNU sed accepts of it (--i, --in, --in-pl); perl -pi, -wpi,
+# -Spi, -i.bak. For sed any letters after the i are its backup suffix. For perl the i must not be followed by a letter,
+# so a script argument such as -tail or -lib is not a flag cluster. -I is an in-place flag for sed only: for perl it is
+# an include dir, and -M is left out of the class (-MList::Util has an i).
+SED_INPLACE = re.compile(r"-[aEnprszul0-9]*[iI]|--i(?:n(?:-(?:p(?:l(?:a(?:ce?)?)?)?)?)?)?(?:=|$)")
+PERL_INPLACE = re.compile(r"-[alnprstuwzETUWXS0-9]*i(?![A-Za-z])")
+INPLACE = {"sed": SED_INPLACE, "gsed": SED_INPLACE, "perl": PERL_INPLACE}
 SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
 SEPARATORS = frozenset({";", "&&", "||", "|", "|&", "&", "(", ")"})
 REDIRECT_OUT = frozenset({">", ">>", ">|", "&>", "&>>"})  # the next word is the target
@@ -1306,7 +1310,7 @@ def _write_targets(commands: list[_Cmd]) -> list[str]:
                 targets += args[-1:]
             elif (
                 verb in WRITE_ANY_ARG
-                or (verb in ("sed", "perl") and any(INPLACE.match(arg) for arg in args))
+                or (verb in INPLACE and any(INPLACE[verb].match(arg) for arg in args))
                 or git_sub in ("checkout", "restore")
             ):
                 targets += args
