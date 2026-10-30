@@ -47,8 +47,9 @@ Live runs also need a Nebius Token Factory account (API key and project ID) and 
 ```sh
 uv run python -m rewardseal.cli budget init        # once per ledger; refuses an existing file
 uv run python -m rewardseal.tasks fetch --source swe-rebench --n 11   # free public rows API, cached in runs/tasks/
-uv run python -m rewardseal.cli audit-exposure --instance-ids <task-id> --out runs/my-audit
-uv run python -m rewardseal.cli harden <task-id> --system-prompt-file results/combined.txt --strategy combined \
+# Set TASK_ID to an id from the fetched cache first: TASK_ID=<an id from the fetched cache>
+uv run python -m rewardseal.cli audit-exposure --instance-ids "$TASK_ID" --out runs/my-audit
+uv run python -m rewardseal.cli harden "$TASK_ID" --system-prompt-file results/combined.txt --strategy combined \
     --attacker-model nvidia/nemotron-3-super-120b-a12b --max-steps 40 --max-tokens 250000 --out runs/my-certificates
 uv run python scripts/smoke.py                      # key, model IDs, one capped Nemotron call, one sandbox run
 ```

@@ -81,6 +81,11 @@
       "sha256": "1ca7413eab120abdb4366e0ff8192bf94dcba7b9992733d137b7a030852334f8"
     },
     {
+      "bytes": 2300,
+      "path": "results/combined.txt",
+      "sha256": "5bf2334016254d7512f2a36e9a430df07de43d0e29a97f092fac19a9817d1e92"
+    },
+    {
       "bytes": 2067,
       "path": "results/confirmations.json",
       "sha256": "c15d07162342f7e40cc310fce623db7180c2c4a30dfdf832b590a43b132450d4"
@@ -94,6 +99,71 @@
       "bytes": 1353,
       "path": "results/control/Dorthu__openapi3-75-retrieval-control.json",
       "sha256": "4b90e5ea1bf5a077276b00c9806890f6928cfb3c87cc4ff3e83e8268de91ec7f"
+    },
+    {
+      "bytes": 118,
+      "path": "results/diffs/12rambau__sepal_ui-518.before.diff.json",
+      "sha256": "dd4b5afa3864f316595e34c76b1d964005a1a1cb21a9a5a4d3487a0bea9a1f9b"
+    },
+    {
+      "bytes": 120,
+      "path": "results/diffs/Alexei-Kornienko__schematics_to_swagger-7-1dacb11f.before.diff.json",
+      "sha256": "18a0acf28e86d0c2a0b483f7dbd273c9e8123ffe883640f07cc921a8db14a10a"
+    },
+    {
+      "bytes": 119,
+      "path": "results/diffs/ArkEcosystem__python-crypto-116-cb6ec271.after.diff.json",
+      "sha256": "3d24233eda5ac8e1c157bc38ebc5ffc6f128708201b4d46864636feac5504ef7"
+    },
+    {
+      "bytes": 119,
+      "path": "results/diffs/ArkEcosystem__python-crypto-116-cb6ec271.before.diff.json",
+      "sha256": "3d24233eda5ac8e1c157bc38ebc5ffc6f128708201b4d46864636feac5504ef7"
+    },
+    {
+      "bytes": 119,
+      "path": "results/diffs/Azure__autorest.python-475-4e06cdae.before.diff.json",
+      "sha256": "d1381c50c3c029490c0170129886fa5c6f782340f21c92eebf03fce09d198ba5"
+    },
+    {
+      "bytes": 119,
+      "path": "results/diffs/Azure__msrest-for-python-167-8d0346f8.before.diff.json",
+      "sha256": "df8515e7e26c86ec8724ec8a7d23a3534b372deb3a42246ea541b852d499e602"
+    },
+    {
+      "bytes": 116,
+      "path": "results/diffs/Azure__msrest-for-python-55-50e2ebc6.before.diff.json",
+      "sha256": "8442c4ee98efd7618ffecec9099159eb5f576c1b224b5343b63f5e7b9b8e57b4"
+    },
+    {
+      "bytes": 119,
+      "path": "results/diffs/BQSKit__bqskit-267-7ebb7eb1.before.diff.json",
+      "sha256": "8695805f3c4982525e7ba135cbfab232d440f07281288d3d3038053028cc7cb5"
+    },
+    {
+      "bytes": 119,
+      "path": "results/diffs/CycloneDX__cyclonedx-python-348-93d44b30.after.diff.json",
+      "sha256": "1b2f5171e6cafaebefa6b36a483b3303bdd953c1d8647dbe5b9076f01bcccb46"
+    },
+    {
+      "bytes": 119,
+      "path": "results/diffs/CycloneDX__cyclonedx-python-348-93d44b30.before.diff.json",
+      "sha256": "a944587a2adf9eddd3f48f8c99a01d127d97b63d8e1be4ea618fa6531335aece"
+    },
+    {
+      "bytes": 119,
+      "path": "results/diffs/CycloneDX__cyclonedx-python-367-90b317c4.before.diff.json",
+      "sha256": "0b20d723e836f3edd9259e01378f9eb405bd726e55293bd51495f0ffbce54ad7"
+    },
+    {
+      "bytes": 116,
+      "path": "results/diffs/DataBiosphere__toil-4805-9feebf72.before.diff.json",
+      "sha256": "8442c4ee98efd7618ffecec9099159eb5f576c1b224b5343b63f5e7b9b8e57b4"
+    },
+    {
+      "bytes": 116,
+      "path": "results/diffs/Dorthu__openapi3-75-0b23bc7c.before.diff.json",
+      "sha256": "8442c4ee98efd7618ffecec9099159eb5f576c1b224b5343b63f5e7b9b8e57b4"
     },
     {
       "bytes": 4602,
@@ -229,6 +299,11 @@
       "bytes": 1042,
       "path": "results/exposure/_run.json",
       "sha256": "8c33486cb62af43ce4fd432e1c4839230927dd61e6c2defbd9fcf0a5813c38ce"
+    },
+    {
+      "bytes": 22968,
+      "path": "results/replay-attempt/CycloneDX__cyclonedx-python-348-replay1.json",
+      "sha256": "e8716410c1dfc086d89fd0dc3e19babb673a3622ec533ce021b1de379728e8a4"
     },
     {
       "bytes": 19236,
@@ -411,8 +486,8 @@
       "sha256": "33ca6591c194951130b6a3da50f0d08829319b13c2c1b001c76d45d35258343d"
     }
   ],
-  "generated_utc": "2026-10-30T04:59:44.319265+00:00",
-  "repo_sha": "3621dea8be7f8b2e40ce6e59d8324b8d52412127",
+  "generated_utc": "2026-10-30T05:39:03.792901+00:00",
+  "repo_sha": "8290add38864f95b4a6dc8285880e1dac22ab5a3",
   "schema": "rewardseal.evidence-manifest",
   "schema_version": 1,
   "totals": {

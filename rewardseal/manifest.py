@@ -27,6 +27,9 @@ PATTERNS = (
     "results/control/*.json",
     "results/web-exposure/*.json",
     "results/web-exposure-sample/*.json",
+    "results/replay-attempt/*.json",
+    "results/diffs/*.diff.json",
+    "results/combined.txt",
     "docs/claims.md",
 )
 EXPOSURE_KEYS = ("M", "N_future", "N_fix", "N_full_overlap", "N_closed", "N_fix_closed")
@@ -101,7 +104,17 @@ def _repo_sha(root: Path) -> str | None:
             check=True,
             timeout=10,
         ).stdout.strip()
-        return sha if re.fullmatch(r"[0-9a-f]{40,64}", sha) else None
+        if not re.fullmatch(r"[0-9a-f]{40,64}", sha):
+            return None
+        # HEAD only names the bytes when no covered file differs from it (modified, staged or untracked).
+        dirty = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "--", *(f":(glob){p}" for p in PATTERNS)],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        ).stdout.strip()
+        return None if dirty else sha
     except (OSError, subprocess.SubprocessError):
         return None
 

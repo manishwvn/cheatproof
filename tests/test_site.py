@@ -279,7 +279,7 @@ def test_pages_have_the_csp_no_javascript_and_an_english_lang(tmp_path):
     for text in (read(result.index), read(result.pages[0])):
         assert text.startswith("<!doctype html>")
         assert '<html lang="en">' in text
-        assert (CSP_META in text) == (text != read(result.index))
+        assert CSP_META in text
         assert "<script" not in text.lower()
         assert "javascript:" not in text.lower()
 

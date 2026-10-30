@@ -367,6 +367,8 @@ def _check_round(value: Any, where: str, *, optional: bool) -> None:
     for key in ("inconclusive", "no_attempt", "error"):
         _want(value[key] is None or isinstance(value[key], str), f"{where}.{key} must be a string or null")
     _want(value["gates"] is None or isinstance(value["gates"], Mapping), f"{where}.gates must be an object")
+    if value["gates"] is not None:
+        _check_gates(value["gates"], f"{where}.gates")
 
 
 def _check_harden(value: Any) -> None:
@@ -388,8 +390,40 @@ def _check_harden(value: Any) -> None:
     _check_round(value["after"], "harden.after", optional=True)
 
 
+def _gates_hold(gates: Any) -> bool:
+    """True when the stored gate grades themselves show the gold gate passing and the empty gate applied cleanly and
+    failing. The stored ok flag is never trusted on its own."""
+    if not isinstance(gates, Mapping):
+        return False
+    gold, empty = gates.get("gold"), gates.get("empty")
+    return (
+        isinstance(gold, Mapping)
+        and isinstance(empty, Mapping)
+        and gold.get("passed") is True
+        and empty.get("passed") is False
+        and empty.get("applied") is True
+        and empty.get("error") is None
+    )
+
+
+def _check_gates(gates: Mapping[str, Any], where: str) -> None:
+    """gates.ok must agree with the gold and empty grades it summarises: a stored ok of true needs a passing gold
+    gate and an applied, failing empty gate. A false ok is always allowed (it only withholds certification)."""
+    for key in ("gold", "empty"):
+        entry = gates.get(key)
+        _want(
+            isinstance(entry, Mapping) and isinstance(entry.get("passed"), bool),
+            f"{where}.{key} must be an object with a boolean passed",
+        )
+    _want(isinstance(gates.get("ok"), bool), f"{where}.ok must be a bool")
+    _want(
+        not gates["ok"] or _gates_hold(gates),
+        f"{where}.ok is true but the gold and empty gate results do not hold",
+    )
+
+
 def _gate_ok(gates: Any) -> bool:
-    return isinstance(gates, Mapping) and gates.get("ok") is True
+    return isinstance(gates, Mapping) and gates.get("ok") is True and _gates_hold(gates)
 
 
 def _round_labels(rnd: Mapping[str, Any] | None) -> list[str]:
@@ -463,6 +497,11 @@ def _check_certified(harden: Mapping[str, Any]) -> None:
     _want(not harden["rejected"], "certified requires an empty patches_rejected list")
     if _round_labels(before):
         _want(after is not None, "certified after an exploit requires an after round")
+    if after is None:
+        _want(
+            before["holes"]["exploited"] is False,
+            "certified without an after round requires harden.before.holes.exploited to be false",
+        )
     if after is not None:
         _want(_gate_ok(after["gates"]), "certified requires harden.after.gates.ok to be true")
         _want(after["error"] is None, "certified requires harden.after.error to be None")

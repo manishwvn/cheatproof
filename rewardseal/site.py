@@ -321,7 +321,7 @@ def build_site(
             errors,
         ),
     )
-    _write(index, _document("Recorded attack-check report | RewardSeal", body, blob, csp=""))
+    _write(index, _document("Recorded attack-check report | RewardSeal", body, blob))
     _write(
         out / "verify.html",
         _document(

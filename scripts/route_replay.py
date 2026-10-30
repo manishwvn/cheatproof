@@ -13,6 +13,7 @@ from typing import Any
 
 from rewardseal import attacker, audit, cli, grader, patches
 from rewardseal.budget import Budget, BudgetExceeded
+from rewardseal.envfile import load_env
 from rewardseal.executor import EnvSpec, make_executor
 
 COMMANDS = (
@@ -163,6 +164,7 @@ def run_replay(
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--trace", type=Path, default=Path("results/traces/CycloneDX__cyclonedx-python-348-93d44b30.jsonl")
@@ -189,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         args.out.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
         print(f"wrote {args.out}")
         return 0
-    except (ControlError, BudgetExceeded, OSError, ValueError) as exc:
+    except (ControlError, BudgetExceeded, OSError, ValueError, RuntimeError) as exc:
         print(f"stopped: {exc}", file=sys.stderr)
         return 1
 
