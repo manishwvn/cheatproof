@@ -100,6 +100,9 @@ def test_write_file_to_a_guarded_path_is_test_edit(path):
         "gsed --i s/a/b/ tests/helpers.py",
         "sed -I '' s/a/b/ tests/helpers.py",
         "perl -Spi -e s/a/b/ tests/helpers.py",
+        "sed -ie s/a/b/ tests/helpers.py",
+        "sed -ibak s/a/b/ tests/helpers.py",
+        "sed -ai '' s/a/b/ tests/helpers.py",
     ],
 )
 def test_in_place_edit_flags_are_shell_writes(cmd):

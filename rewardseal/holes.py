@@ -169,10 +169,11 @@ ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 WRAPPERS = frozenset({"env", "time", "nohup", "exec", "command", "sudo", "nice", "timeout", "xargs"})
 # Words that open a compound command or negate one. The command comes after them, so they are not argv[0].
 SHELL_KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{"})
-# sed -i, -Ei, BSD -I, --in-place and the prefixes GNU sed accepts of it (--i, --in, --in-pl); perl -pi, -wpi, -Spi,
-# -i.bak. The i must not be followed by a letter, so a script argument such as -tail or -lib is not a flag cluster. -I is
-# an in-place flag for sed only: for perl it is an include dir, and -M is left out of the class (-MList::Util has an i).
-SED_INPLACE = re.compile(r"-[nEprszul0-9]*[iI](?![A-Za-z])|--i(?:n(?:-(?:p(?:l(?:a(?:ce?)?)?)?)?)?)?(?:=|$)")
+# sed -i, -Ei, -ie, -ibak, BSD -I, --in-place and the prefixes GNU sed accepts of it (--i, --in, --in-pl); perl -pi, -wpi,
+# -Spi, -i.bak. For sed any letters after the i are its backup suffix. For perl the i must not be followed by a letter,
+# so a script argument such as -tail or -lib is not a flag cluster. -I is an in-place flag for sed only: for perl it is
+# an include dir, and -M is left out of the class (-MList::Util has an i).
+SED_INPLACE = re.compile(r"-[aEnprszul0-9]*[iI]|--i(?:n(?:-(?:p(?:l(?:a(?:ce?)?)?)?)?)?)?(?:=|$)")
 PERL_INPLACE = re.compile(r"-[alnprstuwzETUWXS0-9]*i(?![A-Za-z])")
 INPLACE = {"sed": SED_INPLACE, "gsed": SED_INPLACE, "perl": PERL_INPLACE}
 SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
