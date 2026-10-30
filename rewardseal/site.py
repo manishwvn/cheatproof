@@ -1076,15 +1076,11 @@ def _reconciliation(entries: Sequence[_Entry], batch: _Batch, exposure_path: Pat
         if cert is not None:
             rounds = _map(cert.get("harden"))
             attacked = any(isinstance(_map(rounds.get(r)).get("attack"), Mapping) for r in ROUNDS)
-            verdict = (
-                "yes"
-                if cert["certified"]
-                else "inconclusive"
-                if any(_map(rounds.get(r)).get("inconclusive") for r in ROUNDS)
-                else "no"
-            )
+            verdict = "yes" if cert["certified"] else "inconclusive" if _cert_inconclusive(rounds) else "no"
             label = (
-                _certified_label(verdict == "yes") if verdict != "inconclusive" else "certified inconclusive"
+                _certified_label(verdict == "yes")
+                if verdict != "inconclusive"
+                else "not certified (inconclusive)"
             )
             cert_text = f"{entry.stem}.json ({label})"
         rows.append(_head_row(task, cert_text, attacked, audit_state, _fate(cert, audit_state)))
@@ -2148,6 +2144,27 @@ def _holes_row(label: str, rnd: Any) -> str:
     return _row(label, holes.get("labels"), holes.get("attempted"), evidence)
 
 
+def _cert_inconclusive(rounds: Mapping[str, Any]) -> bool:
+    """A round that ended inconclusive or in an error leaves the certificate undecided, in every view."""
+    return any(_map(rounds.get(r)).get("inconclusive") or _map(rounds.get(r)).get("error") for r in ROUNDS)
+
+
+def _holes_summary(harden: Mapping[str, Any]) -> str:
+    """The Holes note, generated from each round's recorded labels (never a fixed 'no shortcut' claim)."""
+    parts = []
+    for title, key in (("Before hardening", "before"), ("After hardening", "after")):
+        holes = _map(_map(harden.get(key)).get("holes"))
+        if not holes:
+            parts.append(f"{title}: not run")
+            continue
+        labels = holes.get("labels")
+        found = [str(x) for x in labels] if isinstance(labels, list) else []
+        parts.append(
+            f"{title}: {', '.join(found)} hole found" if found else f"{title}: no known shortcut found"
+        )
+    return "; ".join(parts) + ". The counts are evidence lines, not the number of shortcuts."
+
+
 def _holes_section(harden: Mapping[str, Any]) -> str:
     rows = [_holes_row("Before hardening", harden["before"]), _holes_row("After hardening", harden["after"])]
     return _section(
@@ -2158,10 +2175,7 @@ def _holes_section(harden: Mapping[str, Any]) -> str:
             ("Round", "Exploited (holes found)", "Attempted", "Evidence per label"),
             rows,
         ),
-        _what_means(
-            "the classifier found no known shortcut in these rounds; the count is the number of "
-            "evidence lines, not 16 shortcuts"
-        )
+        _what_means(_holes_summary(harden))
         if any(
             "unclassified" in _map(_map(harden.get(r)).get("holes")).get("evidence_counts", {})
             for r in ROUNDS

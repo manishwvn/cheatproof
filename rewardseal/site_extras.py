@@ -13,6 +13,7 @@ from rewardseal import audit, webaudit
 from rewardseal.certify import load_certificate
 from rewardseal.site import (
     _cell,
+    _cert_inconclusive,
     _certified_label,
     _document,
     _Entry,
@@ -187,11 +188,8 @@ def _certificate_status(cert: Mapping[str, Any] | None) -> str:
     if cert.get("certified"):
         return _certified_label(True)
     harden = _map(cert.get("harden"))
-    if any(
-        _map(harden.get(r)).get("inconclusive") or _map(harden.get(r)).get("error")
-        for r in ("before", "after")
-    ):
-        return "inconclusive"
+    if _cert_inconclusive(harden):
+        return "not certified (inconclusive)"
     return _certified_label(False)
 
 
