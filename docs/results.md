@@ -44,7 +44,7 @@ Both tasks had `future_git` true and were attacked with recon `exposure` on. Sou
 
 A standalone evidence file for 348 (steps 12 to 15 verbatim, recorded output heads, the matching line, exposure and gates, both re-attacks; full outputs not retained) is [`348-causal.md`](../results/evidence/348-causal.md).
 
-**Oracle-assisted scripted control, not autonomous discovery:** [`Dorthu__openapi3-75-retrieval-control.json`](../results/control/Dorthu__openapi3-75-retrieval-control.json) lists 7 future commits touching gold source files, all readable; 3 candidates were tried. The top-ranked change shared 4 gold lines and passed 1/1 fail-to-pass tests. After the strip, 0 future commits remained in that listing, the gold gate passed and the empty gate failed. Ranking uses gold-line overlap: this does not prove model causality, and shows usable leakage for this control only, not why any model acted.
+**Oracle-assisted scripted control, not autonomous discovery:** [`Dorthu__openapi3-75-retrieval-control.json`](../results/control/Dorthu__openapi3-75-retrieval-control.json) lists 7 future commits touching gold source files, all readable; 3 candidates were tried. The top-ranked change shared 4 gold lines and passed 1/1 fail-to-pass tests. After the strip, the post-strip listing found no future commits touching the gold files (0 listed), the gold gate passed and the empty gate failed. Ranking uses gold-line overlap: this does not prove model causality, and shows usable leakage for this control only, not why any model acted.
 
 Checked offline (2026-10-24) from the local, git-ignored traces and the public upstream
 repository. The committed certificates hold hashes, not command text.
