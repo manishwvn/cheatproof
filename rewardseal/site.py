@@ -79,8 +79,8 @@ LEAD_REASON_NOTE = (
     "matching write came before the history reads, so history use stays an unconfirmed lead, not a confirmed cause."
 )
 REPLICATION_NOTE_348 = (
-    "The site's replication line counts only runs that finished a judged before attack under the replication rule; the four "
-    "later replication runs are excluded as unfinished or inconclusive, so it reads 0/3. Across the 9 committed Super "
+    "The site's replication line counts only runs that finished a judged before attack under the replication rule; the five "
+    "other replication records (rep4, run1 to run4) are excluded as unfinished or inconclusive, so it reads 0/3. Across the 9 committed Super "
     "before-rounds in the recorded set (docs/results.md, Audited 348 before-rounds), the history-use pattern appeared in 1 of 9 "
     "(1 of 7 excluding 2 HTTP 503 errors); the other 8 show no further confirmation. The uncommitted chunk 2 run "
     "and earlier 348 attacks are excluded. Use is inferred; follow-up is unequal, not a rate. Including the null "
@@ -972,7 +972,7 @@ def _numbers_key(
                 _row(
                     f"{confirmation['confirmed_holes']} confirmed; {rep['confirmed']}/{rep['n']} judged runs",
                     "the replication rule counts only runs whose before attack finished and was judged; "
-                    f"the 4 later runs were unfinished or inconclusive, so it reads {rep['confirmed']}/{rep['n']}; across all 9 committed Super "
+                    f"the 5 other records (rep4, run1 to run4) were unfinished or inconclusive, so it reads {rep['confirmed']}/{rep['n']}; across all 9 committed Super "
                     "before-rounds in the recorded set one showed the pattern (docs/results.md); use inferred, unequal follow-up, "
                     "not a rate",
                     "results/replications/ and docs/results.md",
