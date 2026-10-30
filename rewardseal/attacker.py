@@ -506,8 +506,9 @@ def attack(
 
     recon (T47) is extra text for the first user message after task_prompt (the sanitized exposure report, see
     recon.py); recon_label names it in the trace header. The caller labels the certificate.
-    Budget reminders (BUDGET_NUDGES) are added as user messages. An attempt that stops at max_steps or token_limit
-    without a submit and has a non-empty diff is marked auto_submitted (see AttackResult).
+    Budget reminders (BUDGET_NUDGES) are added as user messages and counted in the max_tokens_total check. An attempt
+    that stops at max_steps or token_limit without a submit and has a non-empty diff is marked auto_submitted (see
+    AttackResult).
 
     harness_query (T52): when config.harness_search and config.allow_network are on and a search callable and a
     harness_query are given, the harness (not the model) makes one search before the first model step. The results
@@ -629,18 +630,24 @@ def attack(
     fired: list[float] = []  # thresholds passed, so none fires twice
     sent: list[float] = []  # thresholds whose reminder was really sent
 
-    def budget_nudge(step: int) -> None:
-        """T47: send the highest reminder whose threshold the used share has reached, once per threshold."""
+    def reached_nudges(step: int) -> list[tuple[float, str]]:
+        """T47: the reminders whose threshold the used share has reached and that have not fired."""
         used = max((step - 1) / config.max_steps, (tokens_in + tokens_out) / config.max_tokens_total)
-        reached = [(t, text) for t, text in BUDGET_NUDGES if used >= t and t not in fired]
+        return [(t, text) for t, text in BUDGET_NUDGES if used >= t and t not in fired]
+
+    def with_nudge(text: str) -> list[dict]:
+        """The messages with the reminder added, as they would be sent. `messages` itself is not changed."""
+        if messages[-1]["role"] == "user":  # keep the roles alternating after a no-tool-call nudge
+            return [*messages[:-1], {**messages[-1], "content": f"{messages[-1]['content']}\n\n{text}"}]
+        return [*messages, {"role": "user", "content": text}]
+
+    def budget_nudge(step: int, reached: list[tuple[float, str]]) -> None:
+        """T47: send the highest reminder reached, once per threshold."""
         if not reached:
             return
         fired.extend(t for t, _ in reached)
         threshold, text = reached[-1]
-        if messages[-1]["role"] == "user":  # keep the roles alternating after a no-tool-call nudge
-            messages[-1] = {**messages[-1], "content": f"{messages[-1]['content']}\n\n{text}"}
-        else:
-            messages.append({"role": "user", "content": text})
+        messages[:] = with_nudge(text)
         sent.append(threshold)
         trace.write({"type": "nudge", "step": step, "threshold": threshold, "text": text})
 
@@ -699,7 +706,9 @@ def attack(
             )
 
     for step in range(1, config.max_steps + 1):
-        est_in = estimate_tokens(messages, tools)
+        reached = reached_nudges(step)
+        # The reminder is part of the request, so the cap is checked on the messages as they will be sent.
+        est_in = estimate_tokens(with_nudge(reached[-1][1]) if reached else messages, tools)
         if tokens_in + tokens_out + est_in + config.max_output_tokens > config.max_tokens_total:
             stop_reason = "token_limit"
             break
@@ -710,7 +719,7 @@ def attack(
             )
             record(step, time.monotonic(), None, {}, error, "llm_retry_ceiling", 0, 0)
             break
-        budget_nudge(step)
+        budget_nudge(step, reached)
         started = time.monotonic()
         try:
             resp, call_retries = _chat(llm, config, messages, tools)

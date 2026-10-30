@@ -106,15 +106,25 @@ def _repo_sha(root: Path) -> str | None:
         ).stdout.strip()
         if not re.fullmatch(r"[0-9a-f]{40,64}", sha):
             return None
-        # HEAD only names the bytes when no covered file differs from it (modified, staged or untracked).
-        dirty = subprocess.run(
-            ["git", "-C", str(root), "status", "--porcelain", "--", *(f":(glob){p}" for p in PATTERNS)],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=30,
-        ).stdout.strip()
-        return None if dirty else sha
+        # HEAD only names the bytes when no covered file differs from it (modified, staged, untracked or ignored).
+        # --untracked-files=all keeps the answer independent of status.showUntrackedFiles. Ignored files are listed one
+        # by one: status --ignored names a whole ignored folder (results/ultra/traces/) that holds no covered file.
+        # The pathspec keeps ignored local folders (.venv, runs/, results/traces) from counting.
+        paths = [f":(glob){p}" for p in PATTERNS]
+        for query in (
+            ["status", "--porcelain", "--untracked-files=all"],
+            ["ls-files", "--others", "--ignored", "--exclude-standard"],
+        ):
+            listed = subprocess.run(
+                ["git", "-C", str(root), *query, "--", *paths],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30,
+            ).stdout.strip()
+            if listed:
+                return None
+        return sha
     except (OSError, subprocess.SubprocessError):
         return None
 
