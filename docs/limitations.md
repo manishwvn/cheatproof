@@ -9,6 +9,7 @@ This report replays committed records. It does not run a live attack or establis
 - Incomplete history listings and incomplete fix scans produce lower bounds. No counted match means absence is unproven there.
 - A gold pass does not mean unchanged difficulty. Removing a shortcut can change the task; a human must review that change.
 - The first audit selected the lowest-scoring tasks. The separate random sample frame is A-E only (including repositories 0-9 in the first 1000 dataset rows). Neither supports a claim about SWE-rebench at large.
+- The grader has a known residual gap. A candidate that prints a complete summary, with node lines that match it, and then exits with the matching code before pytest prints its own (for example with `os._exit(0)`) passes every forgery check and is graded as passing. Its output cannot be told from a real run's, so no forgery label is set. The code says the full fix is to read the summary from a channel the candidate cannot write.
 
 ## Attacks, attribution and costs
 
