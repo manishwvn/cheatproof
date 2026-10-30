@@ -1870,7 +1870,7 @@ def cmd_audit_exposure(args: argparse.Namespace, deps: Deps) -> int:
                 f"{iid}: not audited (disk): free disk is {free:.1f} GB, below MIN_FREE_DISK_GB={min_free:g}"
             )
             continue
-        low = _run_cap_message(budget, need_runs)
+        low = _run_cap_message(budget, need_runs, executor_name)
         if low is not None:  # stop between tasks, cleanly: nothing is half-run
             print(f"stopped before {iid}: {low}")
             code = 1
@@ -1957,23 +1957,25 @@ def cmd_audit_exposure(args: argparse.Namespace, deps: Deps) -> int:
     return code
 
 
-def _run_cap_message(budget: Any, need: int) -> str | None:
-    """None when at least `need` sandbox runs remain under SANDBOX_RUN_CAP (or the budget does not say). Otherwise the
-    stop message with a resume hint. The cap is the owner's: this command only names the variable, never changes it."""
-    cap = getattr(budget, "sandbox_run_cap", None)
+def _run_cap_message(budget: Any, need: int, executor_name: str) -> str | None:
+    """None when at least `need` runs remain under the cap of the executor in use (or the budget does not say):
+    LOCAL_RUN_CAP for docker, SANDBOX_RUN_CAP for sandbox. Otherwise the stop message with a resume hint. The cap is
+    the owner's: this command only names the variable, never changes it."""
+    kind, var = ("local", "LOCAL_RUN_CAP") if executor_name == "docker" else ("sandbox", "SANDBOX_RUN_CAP")
+    cap = getattr(budget, f"{kind}_run_cap", None)
     snapshot = getattr(budget, "snapshot", None)
     if isinstance(cap, bool) or not isinstance(cap, int) or snapshot is None:
         return None
     try:
-        used = int(snapshot().get("sandbox_runs", 0))
+        used = int(snapshot().get(f"{kind}_runs", 0))
     except BudgetExceeded as exc:
         return f"{sanitize(str(exc))[:ERROR_CHARS]}; run the same command again once it is cleared"
     left = cap - used
     if left >= need:
         return None
     return (
-        f"only {left} sandbox run(s) remain under SANDBOX_RUN_CAP={cap} ({used} used) and one task needs about "
-        f"{need}. This command never changes the cap: raise SANDBOX_RUN_CAP yourself, then run the same command "
+        f"only {left} {kind} run(s) remain under {var}={cap} ({used} used) and one task needs about "
+        f"{need}. This command never changes the cap: raise {var} yourself, then run the same command "
         "again; tasks that already have a record are skipped"
     )
 

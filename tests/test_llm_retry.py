@@ -8,6 +8,7 @@ import openai
 import pytest
 
 from rewardseal import llm as llm_module
+from rewardseal.attacker import _failed_tokens
 from rewardseal.budget import Budget, BudgetExceeded, Price, create_ledger
 from rewardseal.llm import MAX_RETRIES, GuardedLLM
 
@@ -235,6 +236,28 @@ def test_a_halt_set_while_waiting_stops_the_retry_before_the_wait(tmp_path):
     with pytest.raises(BudgetExceeded, match="halted") as raised:
         llm.chat("m", MESSAGES, max_tokens=10)
     assert script.calls == 1 and sleeps == [] and raised.value.__context__ is None
+
+
+@pytest.mark.parametrize("halt_on_call", [1, 2])
+def test_a_halt_after_a_failed_attempt_still_tags_that_attempt_as_failed(tmp_path, halt_on_call):
+    # The attempt that failed was reserved and kept at its worst case, so the halt error counts it like any other
+    # transient failure does: the attacker adds llm_failed attempts to its token totals.
+    holder = {}
+
+    def halt(n):
+        if n == halt_on_call:
+            holder["budget"].halt("halted by another process")
+
+    script = Script(*[unavailable()] * halt_on_call, ok(), on_call=halt)
+    budget, llm, sleeps = make(tmp_path, script)
+    holder["budget"] = budget
+    with pytest.raises(BudgetExceeded, match="halted") as raised:
+        llm.chat("m", MESSAGES, max_tokens=10)
+    assert script.calls == halt_on_call and sleeps == [2.0, 6.0][: halt_on_call - 1]
+    assert raised.value.llm_retries == halt_on_call - 1 and raised.value.llm_failed == halt_on_call
+    assert _failed_tokens(raised.value, 7, 3) == (halt_on_call * 7, halt_on_call * 3)
+    # The money did not change: one worst-case hold per attempt, nothing refunded, nothing added.
+    assert budget.snapshot()["total_usd"] == pytest.approx(halt_on_call * one_hold_usd(10))
 
 
 def test_the_retry_limit_can_only_be_lowered(tmp_path):
