@@ -327,7 +327,8 @@ def build_site(
         _document(
             "Evidence verifier",
             '<p><a href="index.html">Back to the index</a></p><h1>Evidence verifier</h1>'
-            "<p>This is a local-build placeholder. The published report has the working browser verifier.</p>",
+            "<p>This is a local-build placeholder. The published report has the working browser verifier: "
+            '<a href="https://manishwvn.github.io/rewardseal/verify.html">Verify page</a>.</p>',
             blob,
         ),
     )
