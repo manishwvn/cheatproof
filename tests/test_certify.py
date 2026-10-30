@@ -913,6 +913,33 @@ def test_a_stored_ok_flag_with_a_passing_empty_gate_is_refused():
         validate_certificate(cert)
 
 
+def test_every_writer_built_empty_gate_carries_its_error_key():
+    for cert in (valid_cert(), cert_for(clean_report())):
+        for rnd in (cert["harden"]["before"], cert["harden"]["after"]):
+            if rnd is not None:
+                assert "error" in rnd["gates"]["empty"]
+
+
+@pytest.mark.parametrize("side", ["before", "after"])
+def test_a_stored_ok_flag_without_the_empty_gate_error_key_is_refused(side):
+    cert = valid_cert()
+    set_gates(cert, side, lambda gates: gates["empty"].pop("error"))
+    assert cert["harden"][side]["gates"]["ok"] is True and cert["certified"] is True
+    with pytest.raises(ValueError, match=re.escape(f"harden.{side}.gates.ok is true but")):
+        validate_certificate(cert)
+
+
+def test_a_false_ok_flag_without_the_empty_gate_error_key_is_still_valid():
+    cert = cert_for(clean_report())
+    set_gates(cert, "before", lambda gates: (gates.update(ok=False), gates["empty"].pop("error")))
+    cert["certified"] = False
+    cert["harden"]["certified"] = False
+    cert["certified_via"] = cert["harden"]["certified_via"] = None
+    cert["reason"] = cert["harden"]["reason"] = "gold gate failed"
+    validate_certificate(cert)
+    assert only_outcome(cert) == {"gate_failed": 1}
+
+
 @pytest.mark.parametrize("missing", [{"gold"}, {"empty"}, {"gold", "empty"}])
 def test_gates_with_only_an_ok_flag_are_refused(missing):
     cert = valid_cert()

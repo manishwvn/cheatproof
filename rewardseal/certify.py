@@ -392,7 +392,8 @@ def _check_harden(value: Any) -> None:
 
 def _gates_hold(gates: Any) -> bool:
     """True when the stored gate grades themselves show the gold gate passing and the empty gate applied cleanly and
-    failing. The stored ok flag is never trusted on its own."""
+    failing. The stored ok flag is never trusted on its own. The empty grade must carry its error key, null: every
+    writer emits it (harden._grade_dict), and docs/verify/verify.js reads a missing key as not clean."""
     if not isinstance(gates, Mapping):
         return False
     gold, empty = gates.get("gold"), gates.get("empty")
@@ -402,7 +403,8 @@ def _gates_hold(gates: Any) -> bool:
         and gold.get("passed") is True
         and empty.get("passed") is False
         and empty.get("applied") is True
-        and empty.get("error") is None
+        and "error" in empty
+        and empty["error"] is None
     )
 
 
