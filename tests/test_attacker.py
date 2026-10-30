@@ -1150,3 +1150,59 @@ def test_a_reply_cut_at_the_output_limit_is_reported_and_the_call_is_not_run(tmp
 def test_a_normal_finish_reason_still_runs_the_call():
     result, _, session = go([reply(call("run", {"cmd": "ls"})), reply(call("submit"))])
     assert result.steps[0]["error"] is None and len(session.runs) == 1
+
+
+class EchoLLM(FakeLLM):
+    """Reports as usage what the attack estimates for the messages it was sent, and no tool call in the reply."""
+
+    def chat(self, model, messages, max_tokens, **kwargs):
+        self.calls.append({"model": model, "messages": messages, "max_tokens": max_tokens, "kwargs": kwargs})
+        message = SimpleNamespace(content=None, tool_calls=[])
+        usage = SimpleNamespace(
+            prompt_tokens=estimate_tokens(messages, kwargs.get("tools")), completion_tokens=max_tokens
+        )
+        return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason="stop")], usage=usage)
+
+
+def _two_step_attack(max_tokens_total):
+    cfg = AttackConfig(model=MODEL, max_steps=2, max_tokens_total=max_tokens_total, max_output_tokens=100)
+    llm = EchoLLM([])
+    return attack(llm, FakeSession(), SYSTEM, TASK, cfg), llm
+
+
+def _estimates_of_two_steps():
+    """(estimate of step 1, step 2 before the 50% reminder, step 2 with it), all for the messages a call is sent."""
+    _, llm = _two_step_attack(10**6)
+    tools = build_tools()
+    sent = llm.calls[1]["messages"]
+    reminder = f"\n\n{attacker.BUDGET_NUDGES[0][1]}"
+    assert sent[-1]["content"].endswith(reminder)
+    bare = [*sent[:-1], {**sent[-1], "content": sent[-1]["content"].removesuffix(reminder)}]
+    return (
+        estimate_tokens(llm.calls[0]["messages"], tools),
+        estimate_tokens(bare, tools),
+        estimate_tokens(sent, tools),
+    )
+
+
+def test_the_budget_reminder_is_counted_before_the_token_cap_is_checked():
+    # Step 1 uses E1 + 100. Step 2 needs the reminder too: E2 with it, not E2 without it, must fit under the cap.
+    out = 100
+    e1, e2_bare, e2_sent = _estimates_of_two_steps()
+    assert e2_sent > e2_bare
+    cap = e1 + out + e2_bare + out  # room for step 2 as it would be without the reminder, and no more
+    result, llm = _two_step_attack(cap)
+    total = result.tokens_in + result.tokens_out
+    assert total <= cap, (total, cap)
+    assert result.stop_reason == "token_limit" and len(llm.calls) == 1
+    assert result.nudges == ()  # a reminder that was not sent is not recorded as sent
+
+
+def test_a_budget_reminder_that_fits_under_the_token_cap_is_still_sent():
+    out = 100
+    e1, _, e2_sent = _estimates_of_two_steps()
+    cap = e1 + out + e2_sent + out  # exactly enough for step 2 with the reminder
+    result, llm = _two_step_attack(cap)
+    assert result.tokens_in + result.tokens_out == cap
+    assert result.stop_reason == "max_steps" and len(llm.calls) == 2
+    assert result.nudges == (0.5,) and attacker.BUDGET_NUDGES[0][1] in llm.calls[1]["messages"][-1]["content"]

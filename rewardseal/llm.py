@@ -118,7 +118,8 @@ class GuardedLLM:
             try:
                 self.budget.check_not_halted()  # a halt set meanwhile stops the retry before it waits
             except BudgetExceeded as halted:
-                _tag(halted, attempt, attempt)
+                # The attempt that just failed was transient and kept its hold, so it counts as failed, as above.
+                _tag(halted, attempt, attempt + 1)
                 raise
             attempt += 1
             self.retries += 1
