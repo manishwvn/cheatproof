@@ -143,7 +143,10 @@ def test_numbers_key_names_every_population_and_explains_replication(records):
     ]
     replication = numbers[5][1]
     assert "counts only runs whose before attack finished and was judged" in replication
-    assert "the 4 later runs were unfinished or inconclusive, so it reads 0/3" in replication
+    assert (
+        "the 5 other records (rep4, run1 to run4) were unfinished or inconclusive, so it reads 0/3"
+        in replication
+    )
     assert (
         "across all 9 committed Super before-rounds in the recorded set one showed the pattern (docs/results.md)"
         in replication

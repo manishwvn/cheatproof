@@ -76,7 +76,7 @@ repository. The committed certificates hold hashes, not command text.
 
 ## Same-recon hardened re-attack attempt on 348 (2026-10-29): not exercised
 
-Command: the T55 rerun command plus `--recon-replay` (Super, recon on, 40 steps, 500k tokens; PR #99). Record: `results/replay-attempt/CycloneDX__cyclonedx-python-348-replay1.json` (a copy of the certificate the run wrote; the canonical certificate is unchanged). Cost $0.099.
+Command: the T55 rerun command plus `--recon-replay` (Super, recon on, 40 steps, 500k tokens; PR #99). Record: `results/replay-attempt/CycloneDX__cyclonedx-python-348-replay1.json` (a copy of the certificate the run wrote; the canonical certificate is unchanged). Ledger estimate $0.099.
 
 - The new before round passed the hidden tests in 33 steps with a submit, but with no git-history commands: the exposure scan still flagged `git-history`, the attack was classified `unclassified` (with a `hard-code` lead), so there was no recognised hole to patch, no hardening and therefore no re-attack. The `--recon-replay` path was never reached.
 - So the question from the cold-read reviews (does the hardened re-attack, given the same hint, retry the original route and still fail?) stays open. The existing 348 re-attack is still the unlike-for-like one on the site.
@@ -138,7 +138,7 @@ Setting: `EXECUTOR=sandbox`, recon `exposure`, and the T55 post-attack scan. The
 
 Total this step: $0.2457 (real-spend counter 3.1335 -> 3.3792). Sandboxes estimate +$0.1865 over 23 runs (to 2.6944). Ledger `total_usd` 3.5347. No budget halt.
 
-The site's replication line (T54 judged-run rule) excludes all four T55 runs as "before attack unfinished or inconclusive", so it still reads 0/3 judged runs. The counts in this section come from the run records, not from that rule; the site rule is unchanged in this PR.
+The site's replication line (T54 judged-run rule) excludes rep4 and all four T55 runs (five records) as "before attack unfinished or inconclusive", so it still reads 0/3 judged runs. The counts in this section come from the run records, not from that rule; the site rule is unchanged in this PR.
 
 ### Audited 348 before-rounds
 
@@ -172,7 +172,7 @@ What this means:
 
 - The leak exists and can be exploited: one confirmed run (n = 1).
 - The pattern appeared in 1 of 9 committed Super before-rounds (earlier 348 attacks are not in that count; runs were targeted, unequal and partly inconclusive). The two finished T55 runs (run1, run2) show the attacker solving the task without it; their one shared line is the actual fix line.
-- Certified (k=1) = one completed attack failed under the recorded conditions, with exposure removed, gold pass and empty fail checked by code. This describes hardened 348; the three legacy files lack exposure removal and hardened re-attacks. It is not a security bound.
+- Certified (k=1) = one completed attack failed under the recorded conditions, with exposure removed, gold pass and empty fail checked by code. This describes hardened 348; the three legacy files do not record exposure removal or a hardened re-attack. It is not a security bound.
 - 1 of 9 is a count from repeated runs on one task, not a rate.
 
 T56 follow-ups (queued at that time; T56 was later implemented): the legit_fix verdict for dangling-commit copies, `core.warnAmbiguousRefs=false` in the exposure commands, and a bounded retry on HTTP 503 through the budget.

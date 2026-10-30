@@ -76,7 +76,7 @@ Run one task (not before the owner clears it):
 
 Cost: attacker tokens only, about $0.06 per task: `docs/results.md`, per-task table, Token Factory cost column
 (Azure__msrest-for-python-55 0.0616, Azure__autorest.python-475 0.0606), plus the usual sandbox runs. The cost of one
-Tavily search call is unknown. Searches (local counter) record calls, not provider billing; check the Tavily dashboard before the run and after it. The dashboard lags at first: it read 1 of 1000 after the first call (2026-10-24), then 45 of 1000 provider credits (around 17:00 CDT, 2026-10-29). Separately the local counter recorded 45 searches; search counts are not provider billing units.
+Tavily search call is unknown. Searches (local counter) record calls, not provider billing; check the Tavily dashboard before the run and after it. The dashboard lags at first: it read 1 of 1000 after the first call (2026-10-24), then 45 of 1000 provider credits (around 17:00 CDT, 2026-10-29; a console reading, not a committed record). Separately the local counter recorded 45 searches; search counts are not provider billing units.
 
 ## audit-web
 
