@@ -254,6 +254,193 @@ def test_repo_sha_ignores_local_folders_outside_coverage(committed):
     assert freeze(committed)["repo_sha"] == sha
 
 
+@pytest.fixture
+def plain(evidence):
+    """The evidence committed with no ignore rules at all."""
+    git(evidence, "init", "-q")
+    git(evidence, "add", "-A")
+    git(evidence, "commit", "-q", "-m", "evidence")
+    return evidence
+
+
+def append(path, data=b"x"):
+    path.write_bytes(path.read_bytes() + data)
+
+
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_repo_sha_counts_covered_file_that_an_index_flag_hides_from_status(plain, flag):
+    sha = freeze(plain)["repo_sha"]
+    assert sha and re.fullmatch(r"[0-9a-f]{40,64}", sha)
+    git(plain, "update-index", flag, "docs/claims.md")
+    append(plain / "docs/claims.md")  # git status and diff no longer look at this file
+    assert freeze(plain)["repo_sha"] is None
+
+
+def test_repo_sha_counts_covered_file_inside_a_submodule(plain, tmp_path_factory):
+    sub = tmp_path_factory.mktemp("sub")
+    git(sub, "init", "-q")
+    (sub / "run.json").write_text("{}\n")
+    git(sub, "add", "-A")
+    git(sub, "commit", "-q", "-m", "sub")
+    git(plain, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "results/ultra")
+    git(plain, "commit", "-q", "-m", "submodule")
+    append(plain / "results/ultra/run.json")  # the parent commit holds only the submodule pointer
+    assert "results/ultra/run.json" in {file["path"] for file in freeze(plain)["files"]}
+    assert freeze(plain)["repo_sha"] is None
+
+
+def test_repo_sha_counts_covered_file_inside_a_nested_repository(plain):
+    nested = plain / "results/ultra"
+    nested.mkdir()
+    (nested / "run.json").write_text("{}\n")
+    git(nested, "init", "-q")
+    git(nested, "add", "-A")
+    git(nested, "commit", "-q", "-m", "nested")
+    append(nested / "run.json")  # the nested repository, not this one, tracks the file
+    assert "results/ultra/run.json" in {file["path"] for file in freeze(plain)["files"]}
+    assert freeze(plain)["repo_sha"] is None
+
+
+def edit(root):
+    append(root / "docs/claims.md")
+
+
+def stage(root):
+    edit(root)
+    git(root, "add", "docs/claims.md")
+
+
+def delete(root):
+    (root / "docs/claims.md").unlink()
+
+
+def stage_delete(root):
+    git(root, "rm", "-q", "docs/claims.md")
+
+
+def rename(root):
+    (root / CERT).rename(root / "results/certificates/renamed.json")
+
+
+def stage_rename(root):
+    git(root, "mv", CERT, "results/certificates/renamed.json")
+
+
+def stage_new(root):
+    (root / "results/replay-attempt").mkdir()
+    (root / "results/replay-attempt/new.json").write_text("{}\n")
+    git(root, "add", "results/replay-attempt/new.json")
+
+
+@pytest.mark.parametrize("change", [edit, stage, delete, stage_delete, rename, stage_rename, stage_new])
+def test_repo_sha_counts_every_way_a_covered_file_can_differ_from_head(committed, change):
+    sha = freeze(committed)["repo_sha"]
+    assert sha
+    change(committed)
+    assert freeze(committed)["repo_sha"] is None
+
+
+@pytest.mark.parametrize("quote_path", ["true", "false"])
+def test_repo_sha_counts_untracked_covered_file_with_a_unicode_name(committed, quote_path):
+    git(committed, "config", "core.quotePath", quote_path)
+    assert freeze(committed)["repo_sha"]
+    (committed / "results/evidence").mkdir()
+    (committed / "results/evidence/café.md").write_text("new\n")
+    assert freeze(committed)["repo_sha"] is None
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "results/evidence/a b.md",
+        "results/evidence/café.md",
+        'results/evidence/q"uote\\back.md',
+        "results/evidence/two\nlines.md",
+        "results/evidence/tab\there.md",
+    ],
+)
+def test_repo_sha_handles_unusual_covered_file_names(committed, name):
+    path = committed / name
+    path.parent.mkdir(exist_ok=True)
+    path.write_text("x\n")
+    git(committed, "add", "-A")
+    git(committed, "commit", "-q", "-m", "name")
+    assert name in {file["path"] for file in freeze(committed)["files"]}
+    assert freeze(committed)["repo_sha"]
+    append(path)
+    assert freeze(committed)["repo_sha"] is None
+
+
+@pytest.mark.parametrize("rules", ["gitignore", "info-exclude", "excludes-file"])
+def test_repo_sha_keeps_tracked_covered_files_the_user_also_ignores(committed, rules):
+    kept = committed / "results/control/kept.json"  # ignored by the dev .gitignore, yet committed
+    kept.parent.mkdir()
+    kept.write_text("{}\n")
+    git(committed, "add", "-f", "results/control/kept.json")
+    git(committed, "commit", "-q", "-m", "tracked and ignored")
+    sha = freeze(committed)["repo_sha"]
+    assert sha
+    ignored = "docs/claims.md\nresults/certificates/*.json\nresults/exposure/*.json\nresults/control/*.json\n"
+    if rules == "gitignore":
+        (committed / ".gitignore").write_text(ignored)
+    elif rules == "info-exclude":
+        (committed / ".git/info/exclude").write_text(ignored)
+    else:
+        (committed / "global-ignore").write_text(ignored)
+        git(committed, "config", "core.excludesFile", str(committed / "global-ignore"))
+    assert freeze(committed)["repo_sha"] == sha  # equal to HEAD, so ignoring them hides nothing
+
+
+def test_repo_sha_compares_raw_bytes_not_filtered_ones(plain):
+    (plain / ".gitattributes").write_text("*.md text eol=lf\n")  # git add turns CRLF back into the stored LF
+    git(plain, "add", ".gitattributes")
+    git(plain, "commit", "-q", "-m", "attributes")
+    assert freeze(plain)["repo_sha"]
+    claims = plain / "docs/claims.md"
+    original = claims.read_bytes()
+    claims.write_bytes(original.replace(b"\n", b"\r\n"))  # same blob id when filtered, other bytes
+    assert claims.read_bytes() != original
+    assert freeze(plain)["repo_sha"] is None
+
+
+def test_repo_sha_handles_a_sha256_repository(evidence):
+    try:
+        git(evidence, "init", "-q", "--object-format=sha256")
+    except subprocess.CalledProcessError:
+        pytest.skip("this git cannot make sha256 repositories")
+    git(evidence, "add", "-A")
+    git(evidence, "commit", "-q", "-m", "evidence")
+    sha = freeze(evidence)["repo_sha"]
+    assert sha and len(sha) == 64
+    append(evidence / "docs/claims.md")
+    assert freeze(evidence)["repo_sha"] is None
+
+
+def test_repo_sha_ignores_noise_beside_covered_files(committed):
+    deep = committed / "results/exposure/sub/deep.json"  # tracked, but a subfolder is outside coverage
+    deep.parent.mkdir()
+    deep.write_text("{}\n")
+    git(committed, "add", "-A")
+    git(committed, "commit", "-q", "-m", "deep")
+    sha = freeze(committed)["repo_sha"]
+    assert sha
+    append(deep)
+    for name in (
+        "results/diffs/task.before.diff",
+        "results/certificates/stale.json.bak",
+        "results/evidence/notes.txt",
+        "results/exposure/untracked-sub/other.json",
+    ):
+        local = committed / name
+        local.parent.mkdir(parents=True, exist_ok=True)
+        local.write_text("local only\n")
+    vendored = committed / "vendor/lib"  # a nested repository outside coverage
+    vendored.mkdir(parents=True)
+    git(vendored, "init", "-q")
+    (vendored / "mod.py").write_text("x = 1\n")
+    assert freeze(committed)["repo_sha"] == sha
+
+
 def test_git_unavailable_leaves_null(evidence, monkeypatch):
     def unavailable(*args, **kwargs):
         raise FileNotFoundError("git")

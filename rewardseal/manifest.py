@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 from datetime import UTC, datetime
@@ -86,6 +87,23 @@ def totals(root: Path) -> dict[str, Any]:
     return result
 
 
+def _head_blobs(root: Path) -> dict[str, str]:
+    """Covered paths in HEAD with their blob ids. ls-tree takes literal paths, not globs: list folders, then filter."""
+    folders = sorted({str(PurePosixPath(p).parent) if "*" in p else p for p in PATTERNS})
+    listed = subprocess.run(
+        ["git", "-C", str(root), "ls-tree", "-r", "-z", "HEAD", "--", *folders],
+        capture_output=True,
+        check=True,
+        timeout=30,
+    ).stdout
+    blobs = {}
+    for record in listed.split(b"\0"):
+        meta, _, name = record.partition(b"\t")  # "<mode> <type> <id>", a tab, then the raw path
+        if name and _covered(os.fsdecode(name)):
+            blobs[os.fsdecode(name)] = meta.split()[2].decode()
+    return blobs
+
+
 def _repo_sha(root: Path) -> str | None:
     try:
         top = subprocess.run(
@@ -106,26 +124,26 @@ def _repo_sha(root: Path) -> str | None:
         ).stdout.strip()
         if not re.fullmatch(r"[0-9a-f]{40,64}", sha):
             return None
-        # HEAD only names the bytes when no covered file differs from it (modified, staged, untracked or ignored).
-        # --untracked-files=all keeps the answer independent of status.showUntrackedFiles. Ignored files are listed one
-        # by one: status --ignored names a whole ignored folder (results/ultra/traces/) that holds no covered file.
-        # The pathspec keeps ignored local folders (.venv, runs/, results/traces) from counting.
-        paths = [f":(glob){p}" for p in PATTERNS]
-        for query in (
-            ["status", "--porcelain", "--untracked-files=all"],
-            ["ls-files", "--others", "--ignored", "--exclude-standard"],
-        ):
-            listed = subprocess.run(
-                ["git", "-C", str(root), *query, "--", *paths],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,
-            ).stdout.strip()
-            if listed:
+        # HEAD only names the bytes when the covered files on disk are exactly the covered files in HEAD, blob for
+        # blob (modified, staged, deleted, untracked, ignored and nested files all differ). Compare against the HEAD
+        # tree, not the index or status: --assume-unchanged and --skip-worktree hide edits from status, and a
+        # submodule or nested repository hides its files from the parent. Ignore rules do not matter: only covered
+        # paths are compared, so .venv, runs/ and results/traces never count, and a tracked file stays equal to HEAD.
+        disk = [
+            path.relative_to(root).as_posix() for path in evidence_files(root, root / "results/manifest.json")
+        ]
+        head = _head_blobs(root)
+        if set(disk) != set(head):
+            return None
+        # Hash the raw bytes the manifest records, like hash-object --no-filters: a clean filter or eol attribute
+        # could map other bytes onto the HEAD blob, and the blob is what a fetch at this sha returns.
+        algorithm = "sha256" if len(sha) == 64 else "sha1"  # the repository's object format
+        for name, blob in head.items():
+            data = (root / name).read_bytes()
+            if hashlib.new(algorithm, b"blob %d\0" % len(data) + data).hexdigest() != blob:
                 return None
         return sha
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError):
         return None
 
 
