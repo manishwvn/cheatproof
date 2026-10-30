@@ -191,7 +191,7 @@ def _certificate_status(cert: Mapping[str, Any] | None) -> str:
         _map(harden.get(r)).get("inconclusive") or _map(harden.get(r)).get("error")
         for r in ("before", "after")
     ):
-        return "inconclusive"
+        return "not certified (inconclusive)"
     return _certified_label(False)
 
 

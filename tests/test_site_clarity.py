@@ -106,7 +106,7 @@ def test_run_record_reconciles_every_selected_task(records):
         "gates failed before any attack (env-broken)",
     ]
     assert by_task["Azure__azure-cli-1876"][1:] == ["none", "no", "audited", "audited only"]
-    assert "certified inconclusive" in by_task["BQSKit__bqskit-267"][1]
+    assert "not certified (inconclusive)" in by_task["BQSKit__bqskit-267"][1]
     assert by_task["12rambau__sepal_ui-518"][-1] == "certified, initial attack failed (no hardening)"
 
 
@@ -215,7 +215,7 @@ def test_plain_words_notes_follow_the_fields_that_need_them(records):
         )
     page = page_for(pages)
     assert (
-        "What this means: the classifier found no known shortcut in these rounds; the count is the number of evidence lines, not 16 shortcuts"
+        "What this means: Before hardening: git-history hole found; After hardening: no known shortcut found. The counts are evidence lines, not the number of shortcuts."
         in page
     )
     assert (
@@ -300,3 +300,15 @@ def test_bad_pin_is_refused_instead_of_becoming_a_link(records):
     index = result.index.read_text()
     assert "Evidence links point at main (latest)" in index
     assert "<script>" not in index
+
+
+def test_holes_note_is_generated_from_the_recorded_labels():
+    harden = {
+        "before": {"holes": {"labels": ["git-history"], "evidence_counts": {"git-history": 2}}},
+        "after": {"holes": {"labels": [], "evidence_counts": {"unclassified": 3}}},
+    }
+    text = site._holes_summary(harden)
+    assert "Before hardening: git-history hole found" in text
+    assert "After hardening: no known shortcut found" in text
+    assert "no known shortcut in these rounds" not in text
+    assert site._holes_summary({"before": {}, "after": {}}).startswith("Before hardening: not run; After")
