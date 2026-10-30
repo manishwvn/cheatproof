@@ -1,6 +1,6 @@
 # RewardSeal demo video: script
 
-Target: under 3 minutes (YouTube requirement). Planned cut: **2:39** (159 s), under 2:45 (165 s). Narration: **2:34** at 2.5 words/s (385 conservatively counted spoken words).
+Target: under 3 minutes (YouTube requirement). Planned cut: **2:39** (159 s), under 2:45 (165 s). Narration: **2:34** at 2.5 words/s (386 conservatively counted spoken words).
 The owner assembles the cut from the beat table below; keep it under 165 s.
 
 **Evidence used (docs/results.md and results/certificates/, n = 14 certificate files):** the headline is the deterministic
